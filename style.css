@@ -174,9 +174,16 @@ button.icon { padding: 7px 11px; font-size: 14px; }
   max-width: 520px;
   width: 100%;
   box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  display: flex;
+  flex-direction: column;
 }
-#modalBox h1 { margin: 0 0 12px; font-size: 22px; }
-#modalBody { color: var(--dim); font-size: 14px; line-height: 1.6; }
+/* Intro screens (welcome + how to play): cap the box at 70% of the page height and scroll the body */
+#modalBox.tall {
+  height: 70vh;
+  max-height: calc(100% - 40px);
+}
+#modalBox h1 { margin: 0 0 12px; font-size: 22px; flex-shrink: 0; }
+#modalBody { color: var(--dim); font-size: 14px; line-height: 1.6; flex: 1; overflow-y: auto; overflow-x: hidden; }
 #modalBody strong { color: var(--ink); }
 #modalBody .big { font-size: 17px; color: var(--ink); }
 #modalBody table { width: 100%; margin: 10px 0; border-collapse: collapse; }
@@ -186,6 +193,7 @@ button.icon { padding: 7px 11px; font-size: 14px; }
 #modalBody .neg { color: var(--bad); }
 
 #modalBtn {
+  flex-shrink: 0;
   margin-top: 18px;
   width: 100%;
   padding: 11px;
