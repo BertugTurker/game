@@ -1,10 +1,11 @@
 "use strict";
 
 /* =====================================================================
-   LAYOVER LANE — Bus Rest-Stop Tycoon
+   LAYOVER LANE — Bus Rest-Stop Simulator
    Tour buses run Hilltown (A) → Seaside (B) and pull into your layover.
-   You run the diner and the toilets. Serve guests, build reputation,
-   attract more buses, and become the region's most famous rest stop.
+   You run the diner and the toilets. Serve guests, keep the toilets
+   spotless, and watch your reputation bring bigger and busier stops.
+   No economy, no upgrades — just the layover.
    ===================================================================== */
 
 /* ----------------------------- Config ------------------------------ */
@@ -17,30 +18,14 @@ const GRASS = { top: 280, bot: 352 };
 const SVC   = { top: 352, bot: 376 };
 const ROAD  = { top: 376, bot: 500 };
 
-const STALLS_R = [1, 2, 2, 3, 3];     // diner seats per level 1..5
-const STALLS_T = [2, 3, 3, 4, 4];     // toilet stalls per level 1..5
-
-const COST = {
-  restaurant: [0, 0, 200, 500, 1200, 2500],  // index = level to reach
-  toilet:     [0, 0, 150, 400, 1000, 2200],
-  marketing:  [0, 150, 450, 900],            // index = level to reach (starts 0)
-  ambiance:   [0, 100, 300, 700],
-};
-const MAXL = { restaurant: 5, toilet: 5, marketing: 3, ambiance: 3 };
-
-const PRICE_MEAL  = L => 3 + 2 * L;         // diner level -> $
-const PRICE_DRINK = L => 2 + 1.5 * L;
-const PRICE_WC    = L => 1 + L;
-const COGS_MEAL   = L => 1.5 + 0.6 * L;
-const COGS_DRINK  = L => 0.8 + 0.35 * L;
-const COGS_WC     = L => 0.5 + 0.25 * L;
-const SVC_TIME_R  = L => Math.max(3, 9 - 1.2 * L);   // real seconds per served guest
-const SVC_TIME_T  = L => Math.max(2.5, 6.5 - 0.8 * L);
-const CLEAN_COST  = 8;
-const FAME_GOAL   = 10000;
+const DINER_SEATS = 3;                     // fixed — no upgrades in this game
+const WC_STALLS   = 4;
+const SVC_TIME_R  = 5.4;                   // real seconds per diner guest served
+const SVC_TIME_T  = 4.1;                   // real seconds per toilet visit
+const SAT_BASE    = 60;                    // baseline satisfaction per service
 
 const DEST_A = "Hilltown", DEST_B = "Seaside";
-const SAVE_KEY = "layover-lane-v1";
+const SAVE_KEY = "layover-lane-v2";
 
 /* ---------------------------- Small utils --------------------------- */
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -48,7 +33,6 @@ const rand  = (a, b) => a + Math.random() * (b - a);
 const randInt = (a, b) => Math.floor(rand(a, b + 1));
 const pick  = arr => arr[Math.floor(Math.random() * arr.length)];
 const lerp  = (a, b, t) => a + (b - a) * t;
-const fmt$  = n => "$" + Math.round(n).toLocaleString("en-US");
 
 // Deadlines (stopEnd, boardAt, nextBusAt...) may sit on the other side of
 // the midnight 24->0 clock wrap. Cyclic-safe: true if target is now/past.
@@ -73,30 +57,25 @@ function rr(ctx, x, y, w, h, r) {
 let S = freshState();
 let buses = [];
 let cars = [];           // ambient traffic in the far lane
-let confetti = [];
 let facilities = { R: { spots: [], queue: [] }, T: { spots: [], queue: [] } };
 let paused = false;
 let speed = 1;
-let moneyShown = S.money;   // animated display value
 
 function freshState() {
   return {
-    money: 200,
     day: 1,
     time: 8,                 // hours, 0..24
     rep: 50,                 // 0..100
-    levels: { restaurant: 1, toilet: 1, marketing: 0, ambiance: 0 },
     cleanliness: 100,        // toilets 0..100
     nextBusAt: 9.5,
     nextBusId: 1,
-    fame: false,
     lastSave: 0,
     stats: freshDayStats(50),
   };
 }
 function freshDayStats(rep) {
   return {
-    earned: 0, spent: 0, buses: 0, served: 0, satSum: 0, satN: 0,
+    buses: 0, served: 0, satSum: 0, satN: 0,
     repStart: rep == null ? S.rep : rep,
   };
 }
@@ -104,7 +83,7 @@ function freshDayStats(rep) {
 /* --------------------------- Save & load ---------------------------- */
 function save() {
   try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 1, S, buses }));
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 2, S, buses }));
   } catch (e) { /* private mode etc. */ }
 }
 function load() {
@@ -112,9 +91,8 @@ function load() {
     const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return false;
     const data = JSON.parse(raw);
-    if (data.v !== 1) return false;
+    if (data.v !== 2) return false;
     S = Object.assign(freshState(), data.S);
-    S.levels = Object.assign({ restaurant: 1, toilet: 1, marketing: 0, ambiance: 0 }, data.S.levels);
     S.stats = Object.assign(freshDayStats(), data.S.stats);
     buses = data.buses || [];
     rebuildFacilities();
@@ -125,9 +103,9 @@ function rebuildFacilities() {
   facilities = { R: { spots: [], queue: [] }, T: { spots: [], queue: [] } };
   for (const b of buses) for (const p of b.pax) {
     if (p.state === "waitR") facilities.R.queue.push(p);
-    else if (p.state === "serveR") facilities.R.spots.push({ pax: p, t: SVC_TIME_R(S.levels.restaurant) * 0.5 });
+    else if (p.state === "serveR") facilities.R.spots.push({ pax: p, t: SVC_TIME_R * 0.5 });
     else if (p.state === "waitT") facilities.T.queue.push(p);
-    else if (p.state === "serveT") facilities.T.spots.push({ pax: p, t: SVC_TIME_T(S.levels.toilet) * 0.5 });
+    else if (p.state === "serveT") facilities.T.spots.push({ pax: p, t: SVC_TIME_T * 0.5 });
   }
 }
 
@@ -139,15 +117,13 @@ const BUS_KINDS = {
 };
 
 function busInterval() {
-  const mkt = S.levels.marketing;
   const repFactor = 0.6 + S.rep / 100;   // 0.6 .. 1.6
-  return Math.max(1.2, (4.8 - 0.7 * mkt) / repFactor + rand(0, 1.5));
+  return Math.max(1.2, 4.8 / repFactor + rand(0, 1.5));
 }
 
 function spawnBus() {
-  const mkt = S.levels.marketing;
   const roll = Math.random();
-  const kind = roll < 0.68 - mkt * 0.1 ? "small" : roll < 0.9 - mkt * 0.08 ? "mid" : "big";
+  const kind = roll < 0.68 ? "small" : roll < 0.9 ? "mid" : "big";
   const def = BUS_KINDS[kind];
   const n = Math.max(4, Math.round(rand(def.pax[0], def.pax[1]) * (0.55 + S.rep / 130)));
   const hue = pick([8, 28, 145, 200, 260, 330]);
@@ -233,8 +209,8 @@ function tryJoin(fac, p, bus) {
   if (f.queue.includes(p)) return;
   f.queue.push(p);
   p.state = fac === "R" ? "waitR" : "waitT";
-  const stalls = fac === "R" ? STALLS_R[S.levels.restaurant - 1] : STALLS_T[S.levels.toilet - 1];
-  const svc = fac === "R" ? SVC_TIME_R(S.levels.restaurant) : SVC_TIME_T(S.levels.toilet);
+  const stalls = fac === "R" ? DINER_SEATS : WC_STALLS;
+  const svc = fac === "R" ? SVC_TIME_R : SVC_TIME_T;
   p.patience = (f.queue.length) * (svc / stalls) + 8;
   p.waitReal = 0;
 }
@@ -254,16 +230,15 @@ function goDoor(p, bus) {
 
 /* --------------------------- Facilities ----------------------------- */
 function updateFacilities(dt) {
-  const rL = S.levels.restaurant, tL = S.levels.toilet;
-  stepFac("R", dt, STALLS_R[rL - 1], SVC_TIME_R(rL));
-  stepFac("T", dt, STALLS_T[tL - 1], SVC_TIME_T(tL));
+  stepFac("R", dt, DINER_SEATS, SVC_TIME_R);
+  stepFac("T", dt, WC_STALLS, SVC_TIME_T);
   // toilet cleanliness recovers slowly
-  S.cleanliness = clamp(S.cleanliness + 6 * (dt / SECONDS_PER_HOUR) * (1 + tL * 0.4), 0, 100);
+  S.cleanliness = clamp(S.cleanliness + 6 * (dt / SECONDS_PER_HOUR), 0, 100);
 }
 
 function stepFac(name, dt, stalls, svcTime) {
   const f = facilities[name];
-  const drain = 1 * (1 - S.levels.ambiance * 0.12);
+  const drain = 1;   // patience drain per second in queue
   // queue patience
   for (let i = f.queue.length - 1; i >= 0; i--) {
     const p = f.queue[i];
@@ -301,34 +276,20 @@ function findBusOf(p) {
 }
 
 function completeService(name, p) {
-  const rL = S.levels.restaurant, tL = S.levels.toilet;
-  let sat, price, cogs;
+  let sat;
   if (name === "R") {
-    const food = p.hunger >= p.thirst;
-    if (food) { price = PRICE_MEAL(rL); cogs = COGS_MEAL(rL); p.hunger = 10; }
-    else      { price = PRICE_DRINK(rL); cogs = COGS_DRINK(rL); p.thirst = 10; }
-    sat = 52 + (rL - 1) * 6 + S.levels.ambiance * 4;
+    if (p.hunger >= p.thirst) p.hunger = 10;
+    else p.thirst = 10;
+    sat = SAT_BASE;
   } else {
-    price = PRICE_WC(tL); cogs = COGS_WC(tL);
     p.bladder = 10;
     S.cleanliness = clamp(S.cleanliness - rand(3, 6), 0, 100);
-    sat = 52 + (tL - 1) * 6 + S.levels.ambiance * 4;
+    sat = SAT_BASE;
     if (S.cleanliness < 40) sat -= (40 - S.cleanliness) * 0.5;
   }
   sat -= Math.max(0, p.waitReal - 8) * 0.5;
   sat = clamp(sat + rand(-8, 8), 0, 100);
 
-  const mult = 0.7 + (sat - 50) / 100 * 0.6;   // 0.7 .. 1.3
-  const net = price * mult - cogs;
-  S.money += net;
-  S.stats.earned += price * mult;
-  S.stats.spent += cogs;
-  if (sat > 85) {
-    const tip = Math.round(price * 0.4);
-    S.money += tip;
-    S.stats.earned += tip;
-    if (sat > 89) toast(`💵 Happy guest tips ${fmt$(tip)}`, "good");
-  }
   p.sat = sat;
   p.refuseR = p.refuseT = false;
   p.waitReal = 0;
@@ -350,15 +311,13 @@ function completeService(name, p) {
     p.state = "walk";
     if (bus) goDoor(p, bus); else wander(p);
   }
-  checkFame();
 }
 
 function cleanToilets() {
-  if (S.money < CLEAN_COST) { toast("Not enough cash to clean", "bad"); return; }
-  S.money -= CLEAN_COST;
-  S.stats.spent += CLEAN_COST;
+  if (S.cleanliness > 99) return;
   S.cleanliness = 100;
   toast("🧻 Toilets sparkling clean!", "good");
+  save();
 }
 
 /* ------------------------------ Update ------------------------------ */
@@ -394,12 +353,6 @@ function update(dt) {
 
   updateFacilities(dt);
   updateCars(dt);
-  updateConfetti(dt);
-
-  // animated money
-  moneyShown = lerp(moneyShown, S.money, Math.min(1, dt * 6));
-
-  checkFame();
 
   if (S.time - S.lastSave > 8) { S.lastSave = S.time; save(); }
 }
@@ -473,35 +426,6 @@ function updateCars(dt) {
   for (let i = cars.length - 1; i >= 0; i--) {
     cars[i].x += cars[i].v * dt;
     if (cars[i].x < -80) cars.splice(i, 1);
-  }
-}
-
-/* ----------------------------- Day / fame --------------------------- */
-function checkFame() {
-  if (!S.fame && S.money >= FAME_GOAL) {
-    S.fame = true;
-    toast(`🏆 ${fmt$(FAME_GOAL)}! Layover Lane is the region's star rest stop!`, "good");
-    burstConfetti();
-  }
-}
-
-function burstConfetti() {
-  for (let i = 0; i < 90; i++) {
-    confetti.push({
-      x: W / 2, y: 200,
-      vx: rand(-160, 160), vy: rand(-220, -40),
-      life: rand(1.5, 3),
-      hue: randInt(0, 359),
-    });
-  }
-}
-function updateConfetti(dt) {
-  for (let i = confetti.length - 1; i >= 0; i--) {
-    const c = confetti[i];
-    c.vy += 300 * dt;
-    c.x += c.vx * dt; c.y += c.vy * dt;
-    c.life -= dt;
-    if (c.life <= 0 || c.y > H) confetti.splice(i, 1);
   }
 }
 
@@ -631,10 +555,6 @@ function drawScene() {
     }
   }
 
-  for (const c of confetti) {
-    ctx.fillStyle = `hsla(${c.hue}, 80%, 60%, ${clamp(c.life, 0, 1)})`;
-    ctx.fillRect(c.x, c.y, 5, 5);
-  }
 }
 
 function drawSign() {
@@ -669,13 +589,11 @@ function drawRestStop() {
   ctx.fillStyle = mix("#d94f3d", "#3a2430", nf * 0.7);
   rr(ctx, 615, 292, 180, 60, 6); ctx.fill();
   // awning stripes
-  const rL = S.levels.restaurant;
   for (let i = 0; i < 10; i++) {
     ctx.fillStyle = i % 2 ? "#f4ede0" : mix("#d94f3d", "#3a2430", nf * 0.7);
     ctx.fillRect(615 + i * 18, 306, 18, 12);
   }
-  // level: extra awning tiers + color richness
-  if (rL >= 3) { ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.fillRect(615, 318, 180, 3); }
+  ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.fillRect(615, 318, 180, 3);
   // windows
   ctx.fillStyle = mix("#ffe9b8", "#5a4a30", nf * 0.5);
   ctx.fillRect(630, 322, 26, 22); ctx.fillRect(700, 322, 26, 22); ctx.fillRect(750, 322, 26, 22);
@@ -688,11 +606,10 @@ function drawRestStop() {
   ctx.fillStyle = "#ffd36b";
   ctx.font = "bold 12px system-ui";
   ctx.textAlign = "center";
-  ctx.fillText(`DINER ${"•".repeat(rL)}`, 705, 287);
+  ctx.fillText("DINER", 705, 287);
   ctx.textAlign = "left";
 
   // --- toilets ---
-  const tL = S.levels.toilet;
   ctx.fillStyle = mix("#8d99ae", "#2c3547", nf * 0.7);
   rr(ctx, 812, 300, 78, 52, 6); ctx.fill();
   ctx.fillStyle = mix("#ffe9b8", "#5a4a30", nf * 0.5);
@@ -704,7 +621,7 @@ function drawRestStop() {
   ctx.fillStyle = "#9fe8ff";
   ctx.font = "bold 12px system-ui";
   ctx.textAlign = "center";
-  ctx.fillText(`WC ${"•".repeat(tL)}`, 851, 296);
+  ctx.fillText("WC", 851, 296);
   ctx.textAlign = "left";
   // cleanliness bar
   const cw = 66;
@@ -860,106 +777,10 @@ function toast(msg, cls) {
   setTimeout(() => { el.classList.add("fading"); setTimeout(() => el.remove(), 500); }, 3200);
 }
 
-function buildShop() {
-  const shop = $("shop");
-  shop.innerHTML = "";
-  const defs = [
-    {
-      key: "restaurant", icon: "🍔", name: "Restaurant",
-      desc: () => { const L = S.levels.restaurant;
-        return `Meals ${fmt$(PRICE_MEAL(L))} · drinks ${fmt$(PRICE_DRINK(L))}<br>${STALLS_R[L - 1]} seat${STALLS_R[L - 1] > 1 ? "s" : ""} · faster service per level`; },
-    },
-    {
-      key: "toilet", icon: "🚻", name: "Toilets",
-      desc: () => { const L = S.levels.toilet;
-        return `Admission ${fmt$(PRICE_WC(L))}<br>${STALLS_T[L - 1]} stall${STALLS_T[L - 1] > 1 ? "s" : ""} · cleanliness decays with use`; },
-      extra: "clean",
-    },
-    {
-      key: "marketing", icon: "📣", name: "Marketing",
-      desc: () => `Buses stop more often and run bigger coaches.<br>Current mix favours ${S.levels.marketing ? "bigger" : "smaller"} buses.`,
-    },
-    {
-      key: "ambiance", icon: "🪑", name: "Ambiance",
-      desc: () => "Seating & décor: guests wait more patiently<br>and rate every visit higher.",
-    },
-  ];
-  for (const d of defs) {
-    const card = document.createElement("div");
-    card.className = "card";
-    card.id = "card-" + d.key;
-    card.innerHTML = `
-      <h3><span>${d.icon} ${d.name}</span><span class="pips" id="pips-${d.key}"></span></h3>
-      <div class="desc" id="desc-${d.key}"></div>
-      <div id="btnwrap-${d.key}"></div>`;
-    shop.appendChild(card);
-  }
-  refreshShop();
-}
-
-function refreshShop() {
-  for (const key of ["restaurant", "toilet", "marketing", "ambiance"]) {
-    const L = S.levels[key];
-    const max = MAXL[key];
-    const pips = $("pips-" + key);
-    pips.innerHTML = "";
-    for (let i = 0; i < max; i++) {
-      const s = document.createElement("span");
-      s.className = "pip" + (i < L ? " on" : "");
-      pips.appendChild(s);
-    }
-    $("desc-" + key).innerHTML = descFns[key]();
-    const wrap = $("btnwrap-" + key);
-    wrap.innerHTML = "";
-    if (L >= max) {
-      const m = document.createElement("div");
-      m.className = "extra"; m.textContent = "★ MAX LEVEL";
-      wrap.appendChild(m);
-    } else {
-      const cost = COST[key][L + 1];
-      const btn = document.createElement("button");
-      btn.className = "buy" + (S.money >= cost ? " afford" : "");
-      btn.disabled = S.money < cost;
-      btn.textContent = `Upgrade — ${fmt$(cost)}`;
-      btn.onclick = () => buy(key);
-      wrap.appendChild(btn);
-      if (key === "toilet") {
-        const c = document.createElement("button");
-        c.className = "extra";
-        c.textContent = `🧽 Deep clean — ${fmt$(CLEAN_COST)}`;
-        c.disabled = S.money < CLEAN_COST || S.cleanliness > 99;
-        c.onclick = cleanToilets;
-        wrap.appendChild(c);
-      }
-    }
-  }
-}
-const descFns = {
-  restaurant: () => { const L = S.levels.restaurant;
-    return `Meals ${fmt$(PRICE_MEAL(L))} · drinks ${fmt$(PRICE_DRINK(L))}<br>${STALLS_R[L - 1]} seat${STALLS_R[L - 1] > 1 ? "s" : ""} · faster service per level`; },
-  toilet: () => { const L = S.levels.toilet;
-    return `Admission ${fmt$(PRICE_WC(L))}<br>${STALLS_T[L - 1]} stall${STALLS_T[L - 1] > 1 ? "s" : ""} · cleanliness decays with use`; },
-  marketing: () => `Buses stop more often and run bigger coaches.`,
-  ambiance: () => `Seating & décor: guests wait more patiently<br>and rate every visit higher.`,
-};
-
-function buy(key) {
-  const L = S.levels[key];
-  if (L >= MAXL[key]) return;
-  const cost = COST[key][L + 1];
-  if (S.money < cost) { toast("Not enough cash", "bad"); return; }
-  S.money -= cost;
-  S.stats.spent += cost;
-  S.levels[key]++;
-  rebuildFacilities(); // keep spot counts consistent after level change
-  toast(`⬆ ${key[0].toUpperCase() + key.slice(1)} upgraded to level ${S.levels[key]}!`, "good");
-  refreshShop();
-  save();
-}
-
 /* --------------------------- HUD & modals --------------------------- */
 function updateHUD() {
-  $("statMoney").textContent = "💰 " + fmt$(moneyShown);
+  $("statServed").textContent = "👥 " + S.stats.served;
+  $("btnClean").disabled = S.cleanliness > 99;
   const hh = Math.floor(S.time), mm = Math.floor((S.time % 1) * 60);
   $("statClock").textContent = `Day ${S.day} · ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
   $("repFill").style.width = S.rep + "%";
@@ -971,24 +792,19 @@ function updateHUD() {
 function showDaySummary() {
   paused = true;
   const st = S.stats;
-  const wages = 10 + 8 * S.levels.restaurant + 6 * S.levels.toilet + 4 * S.levels.ambiance;
-  const rent = 5 + 2 * (S.levels.restaurant + S.levels.toilet);
-  const net = wages + rent;
-  S.money -= net;
   const repDelta = S.rep - st.repStart;
   const avgSat = st.satN ? Math.round(st.satSum / st.satN) : 0;
   $("modalTitle").textContent = `Day ${S.day - 1} complete`;
   $("modalBody").innerHTML = `
     <table>
-      <tr><td>Revenue (incl. tips)</td><td class="pos">${fmt$(st.earned)}</td></tr>
-      <tr><td>Staff wages</td><td class="neg">−${fmt$(wages)}</td></tr>
-      <tr><td>Rent</td><td class="neg">−${fmt$(rent)}</td></tr>
       <tr><td>Buses served</td><td>${st.buses}</td></tr>
       <tr><td>Guests served</td><td>${st.served}</td></tr>
       <tr><td>Avg satisfaction</td><td>${st.satN ? avgSat + " / 100" : "—"}</td></tr>
       <tr><td>Reputation</td><td class="${repDelta >= 0 ? "pos" : "neg"}">${Math.round(st.repStart)} → ${Math.round(S.rep)} (${repDelta >= 0 ? "+" : ""}${repDelta.toFixed(1)})</td></tr>
     </table>
-    <div class="big">Cash on hand: ${fmt$(S.money)}</div>`;
+    <div class="big">${repDelta >= 3 ? "Word is spreading — expect bigger buses tomorrow."
+      : repDelta <= -3 ? "Tough day. Keep those toilets clean."
+      : "A steady day on Layover Lane."}</div>`;
   $("modalBtn").textContent = `Start day ${S.day} →`;
   $("modalBtn").onclick = () => {
     S.stats = freshDayStats();
@@ -1006,11 +822,10 @@ function showIntro(first) {
   $("modalBody").innerHTML = `
     <div class="big">You run the layover every tour bus between <strong>${DEST_A}</strong> and <strong>${DEST_B}</strong> relies on.</div>
     <p>🚌 Buses pull into your bay for rest breaks. Passengers get hungry, thirsty, and desperate for the <strong>toilet</strong>.</p>
-    <p>🍔 <strong>Upgrade your diner</strong> — more seats, better food, higher prices.</p>
-    <p>🚻 <strong>Keep the toilets clean</strong> (deep clean button) and add stalls.</p>
+    <p>🍔 Guests eat and drink at your diner. 🚻 They use your toilets.</p>
+    <p>🧻 Toilets get dirty with every use — hit the <strong>deep clean</strong> button to keep satisfaction up.</p>
     <p>★ Satisfied guests raise your <strong>reputation</strong> → more &amp; bigger buses stop.</p>
-    <p>⏰ Each day ends at midnight: wages and rent come out automatically.</p>
-    <p>🏆 Goal: ${fmt$(FAME_GOAL)} on hand. Space pauses · 1/2 changes speed.</p>`;
+    <p>No money, no upgrades — just keep the place <strong>spotless</strong> and watch the traffic grow. Space pauses · 1/2 changes speed.</p>`;
   $("modalBtn").textContent = first ? "Open for business!" : "Back to work";
   $("modalBtn").onclick = () => hideModal();
   showModal();
@@ -1033,11 +848,9 @@ function frame(now) {
 /* ------------------------------- Init ------------------------------- */
 function init() {
   const hadSave = load();
-  moneyShown = S.money;
   rebuildFacilities();
-  buildShop();
-  setInterval(refreshShop, 400);
 
+  $("btnClean").onclick = () => cleanToilets();
   $("btnPause").onclick = () => { paused = !paused; };
   $("btnSpeed").onclick = () => { speed = speed === 1 ? 2 : 1; };
   $("btnHelp").onclick = () => { paused = true; showIntro(false); };
@@ -1056,7 +869,6 @@ function init() {
   document.addEventListener("visibilitychange", () => { if (document.hidden) save(); });
 
   if (!hadSave) { paused = true; showIntro(true); }
-  else if (S.fame) toast("🏆 You reached fame! Keep the business running.", "good");
 
   requestAnimationFrame(frame);
 }

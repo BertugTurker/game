@@ -74,7 +74,7 @@ html, body {
   white-space: nowrap;
 }
 
-.stat#statMoney { color: var(--accent); font-weight: 700; }
+.stat#statServed { color: var(--accent); font-weight: 700; }
 
 .stat .bar {
   width: 90px;
@@ -152,64 +152,6 @@ button.icon { padding: 7px 11px; font-size: 14px; }
   to   { transform: none; opacity: 1; }
 }
 
-/* ---------- Shop ---------- */
-#shop {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-  margin-top: 14px;
-}
-
-@media (max-width: 800px) { #shop { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 460px) { #shop { grid-template-columns: 1fr; } }
-
-.card {
-  background: var(--panel);
-  border: 1px solid #2a3450;
-  border-radius: 14px;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.card h3 {
-  margin: 0;
-  font-size: 14px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.pips { display: flex; gap: 4px; }
-.pip {
-  width: 9px; height: 9px;
-  border-radius: 50%;
-  background: #2c3856;
-}
-.pip.on { background: var(--accent); }
-
-.card .desc {
-  color: var(--dim);
-  font-size: 12px;
-  line-height: 1.45;
-  min-height: 33px;
-}
-
-.card .buy {
-  background: #24304e;
-  font-weight: 700;
-  border-color: #33406a;
-}
-.card .buy.afford {
-  background: linear-gradient(180deg, #b8722a, #9a5c1e);
-  border-color: #c9822f;
-}
-.card .extra {
-  font-size: 12px;
-  color: var(--dim);
-}
-
 /* ---------- Modal ---------- */
 #modal {
   position: fixed;
@@ -251,11 +193,4 @@ button.icon { padding: 7px 11px; font-size: 14px; }
   font-weight: 700;
   background: linear-gradient(180deg, #b8722a, #9a5c1e);
   border-color: #c9822f;
-}
-
-footer {
-  text-align: center;
-  color: #55617d;
-  font-size: 12px;
-  margin-top: 18px;
 }

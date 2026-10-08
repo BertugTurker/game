@@ -3,21 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Layover Lane — Bus Rest-Stop Tycoon</title>
-<meta name="description" content="Run the layover every tour bus trusts: sell meals, keep the toilets clean, and build your reputation.">
+<title>Layover Lane — Bus Rest-Stop Simulator</title>
+<meta name="description" content="Run the layover every tour bus trusts: serve hungry guests, keep the toilets spotless, and grow your reputation."
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚌</text></svg>">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div id="app">
   <header id="topbar">
-    <div class="brand">🚌 LAYOVER LANE <span class="sub">bus rest-stop tycoon</span></div>
+    <div class="brand">🚌 LAYOVER LANE <span class="sub">bus rest-stop simulator</span></div>
     <div class="hud">
-      <div class="stat" id="statMoney" title="Cash">💰 $200</div>
+      <div class="stat" id="statServed" title="Guests served today">👥 0</div>
       <div class="stat" id="statClock" title="Day &amp; time">Day 1 · 08:00</div>
       <div class="stat rep" title="Reputation — higher rep means more buses stop">
         ★ <div class="bar"><div id="repFill"></div></div><span id="repNum">50</span>
       </div>
+      <button id="btnClean" class="icon" title="Deep clean the toilets (free)">🧽</button>
       <button id="btnPause" class="icon" title="Pause (Space)">⏸</button>
       <button id="btnSpeed" class="icon" title="Game speed (1/2)">1×</button>
       <button id="btnHelp" class="icon" title="How to play">?</button>
@@ -29,8 +30,6 @@
     <canvas id="game" width="960" height="540"></canvas>
     <div id="toasts"></div>
   </div>
-
-  <section id="shop" aria-label="Upgrades"></section>
 </div>
 
 <div id="modal" class="hidden">
