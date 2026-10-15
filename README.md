@@ -38,7 +38,7 @@ Neglect the toilets and reputation will show it — guests rate dirty visits bad
 | `?` (top bar) | How to play |
 | `↺` (top bar) | Reset the game |
 
-The game **autosaves** to your browser (`localStorage`) — close the tab and pick up where you left off.
+The game **autosaves** to your browser (`localStorage`) — close the tab and pick up where you left off. Every keyboard action has a top-bar button twin, so it is fully playable by touch on a phone or tablet — see [On your phone](#on-your-phone).
 
 ## Run it locally
 
@@ -61,6 +61,14 @@ Vanilla HTML, CSS, and JavaScript — one `<canvas>` scene, one DOM UI layer, ze
 - `index.html` — page shell (HUD, canvas, modal)
 - `style.css` — dark theme
 - `game.js` — simulation, rendering, UI
+
+## On your phone
+
+No app, no build step — open the page (GitHub Pages works great) in your phone's browser. The game wants **landscape**: a portrait phone shows a rotate prompt, and the scene auto-fits landscape screens of any size (short screens letterbox inside the frame instead of scrolling).
+
+- **Tap** everywhere the desktop clicks — and the 🚻 / ⏸ / 1× / ? / ↺ buttons in the top bar cover every keyboard shortcut.
+- The cleaning hose and the car-wash tools are **hold-and-drag** gestures, exactly like on the desktop; hit targets quietly grow on touch screens, and the “how to play” copy switches to touch wording.
+- The game autosaves, so putting the phone down is safe — when you come back, the clock has kept moving.
 
 ## Publish on GitHub Pages
 

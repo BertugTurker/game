@@ -18,12 +18,16 @@ html, body {
   color: var(--ink);
   font-family: ui-rounded, "SF Pro Rounded", "Segoe UI", system-ui, -apple-system, sans-serif;
   min-height: 100vh;
+  touch-action: manipulation;  /* no double-tap zoom; pinch zoom stays (a11y) */
+  overscroll-behavior: none;   /* no pull-to-refresh / rubber-banding over the game */
 }
 
 #app {
   max-width: 1280px;
   margin: 0 auto;
   padding: 14px 14px 40px;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* ---------- Top bar ---------- */
@@ -129,10 +133,22 @@ button.icon { padding: 7px 11px; font-size: 14px; }
   background: #000;
   line-height: 0;
 }
+/* A replaced element with an intrinsic 16:9 ratio: fit inside the stage
+   (max-width) AND inside the viewport height (max-height). On short, wide
+   phone screens the height constraint wins, so the scene letterboxes inside
+   the frame instead of scrolling off — width/height:auto keeps the ratio exact. */
 #game {
-  width: 100%;
+  width: auto;
   height: auto;
+  max-width: 100%;
+  max-height: calc(100vh - 112px);
+  max-height: calc(100dvh - 112px);
+  margin: 0 auto;
   display: block;
+  touch-action: none;             /* the canvas owns the gesture: no scroll/zoom */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;    /* no long-press magnifier mid-spray */
 }
 
 #toasts {
@@ -153,7 +169,7 @@ button.icon { padding: 7px 11px; font-size: 14px; }
   font-size: 12.5px;
   line-height: 1.35;
   animation: toastIn 0.25s ease-out;
-  max-width: 320px;
+  max-width: min(320px, 72vw);
 }
 .toast.good { border-left-color: var(--good); }
 .toast.bad { border-left-color: var(--bad); }
@@ -212,4 +228,62 @@ button.icon { padding: 7px 11px; font-size: 14px; }
   font-weight: 700;
   background: linear-gradient(180deg, #b8722a, #9a5c1e);
   border-color: #c9822f;
+}
+
+/* ---------- Small screens (phones, narrow windows) ---------- */
+@media (max-width: 900px) {
+  #app { padding: 8px 8px 16px; }
+  #topbar { padding: 6px 8px; gap: 6px; }
+  .brand { font-size: 14px; letter-spacing: 0.5px; }
+  .brand .sub { display: none; } /* the version badge stays — always visible */
+  .hud { gap: 5px; }
+  .stat { padding: 5px 8px; font-size: 12px; border-radius: 8px; }
+  .stat .bar { width: 60px; height: 6px; }
+  #repNum { font-size: 11px; }
+  button.icon { padding: 8px 9px; font-size: 13px; }
+}
+/* …and a little bigger again where the input is a fat finger */
+@media (max-width: 900px) and (pointer: coarse) {
+  button.icon { padding: 10px 11px; font-size: 14px; }
+  .stat { padding: 6px 9px; }
+}
+@media (max-width: 600px) {
+  #modal { padding: 12px; }
+  #modalBox { padding: 18px 16px; border-radius: 14px; }
+  #modalBox h1 { font-size: 19px; }
+  #modalBody { font-size: 13px; }
+}
+
+/* ---------- Rotate prompt (small portrait screens only) ---------- */
+#rotateHint {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 24px;
+  text-align: center;
+  background: radial-gradient(1200px 600px at 50% -10%, #1c2438, var(--bg));
+}
+#rotateHint .rhIcon {
+  font-size: 68px;
+  animation: rhSpin 2.4s ease-in-out infinite;
+}
+#rotateHint .rhText {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 17px;
+  font-weight: 700;
+}
+#rotateHint .rhText span { color: var(--dim); font-size: 13px; font-weight: 500; }
+@keyframes rhSpin {
+  0%, 25%   { transform: rotate(0deg); }
+  60%, 100% { transform: rotate(90deg); }
+}
+@media (orientation: portrait) and (max-width: 700px) {
+  #rotateHint { display: flex; }
 }

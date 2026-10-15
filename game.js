@@ -105,6 +105,9 @@ const pick  = arr => arr[Math.floor(Math.random() * arr.length)];
 const lerp  = (a, b, t) => a + (b - a) * t;
 const easeInOut = t => t * t * (3 - 2 * t);
 const frac = v => v - Math.floor(v);
+// Touch devices (phones, tablets): hit-target padding, tap/drag thresholds and
+// the help copy all adapt. Mouse/keyboard desktops keep the original feel.
+const coarseQ = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
 
 // Deadlines (stopEnd, boardAt, nextBusAt...) are stored as plain S.time + x,
 // so they can sit on the other side of the midnight 24->0 wrap (e.g. 24.4).
@@ -157,7 +160,8 @@ let lastEvadeToast = 0;      // throttle for the "trying to escape" toasts
 // "scrubC") restarts the sequence on load.
 let scrub = null;
 let scrubDoneAt = 0;         // performance.now when the last sequence finished (the "all clean" flash)
-let downPos = null;          // where the current press started — a moved press is a drag, not a click
+let downClient = null;       // where the press started (CSS px) — the tap-vs-drag threshold
+let activePointer = null;    // the pointerId driving a press (pointer capture) — one at a time
 
 function freshState() {
   return {
@@ -884,7 +888,8 @@ function openWash(b) {
 }
 
 // Apply the active tool to every cell its pad / spray fan touches. Driven by
-// mousedown + mousemove while the button is held — a scrub or a spray, not a click.
+// pointerdown + pointermove while the button/finger is held — a scrub or a
+// spray, not a click/tap.
 function washApply(x, y) {
   if (S.view !== "wash") return;
   const b = buses.find(z => z.id === S.washBus);
@@ -1949,10 +1954,18 @@ const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
 function resize() {
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width <= 0) return;
   const dpr = Math.min(2, window.devicePixelRatio || 1);
-  canvas.width = W * dpr;
-  canvas.height = H * dpr;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  // Back the buffer with the *displayed* size (device px) instead of a fixed
+  // 960×540×dpr: a phone gets a sharp, window-sized buffer instead of a full
+  // 1920×1080 that a small screen would only downsample. 2× the logical scene
+  // is the ceiling (height is derived from the rounded width, so the 16:9 ratio
+  // stays exact after rounding).
+  const s = Math.min(2, (rect.width * dpr) / W);
+  canvas.width = Math.max(1, Math.round(W * s));
+  canvas.height = Math.max(1, Math.round(canvas.width * H / W));
+  ctx.setTransform(s, 0, 0, s, 0, 0);
 }
 window.addEventListener("resize", resize);
 resize();
@@ -2849,7 +2862,7 @@ function drawWcPrompt() {
   // pulsing hint pointing at the building (the click target)
   ctx.fillStyle = `rgba(255, 179, 71, ${pulse})`;
   ctx.font = "bold 9px system-ui, sans-serif";
-  ctx.fillText("click to enter ↓", 851, 84);
+  ctx.fillText((coarseQ ? "tap" : "click") + " to enter ↓", 851, 84);
   // restore text state for the rest of the scene
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
@@ -3171,7 +3184,6 @@ function updateHUD() {
   $("statClock").textContent = `Day ${S.day} · ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
   $("repFill").style.width = S.rep + "%";
   $("repNum").textContent = Math.round(S.rep);
-  $("statCologne").textContent = "🧴 " + Math.round(S.bottle) + " ml";
   $("btnWc").textContent = S.view === "out" ? "🚻" : "🚪";
   $("btnWc").title = S.view === "wc" ? "Go back outside" : S.view === "wash" ? "Back outside" : "Step inside the WC counter";
   $("btnPause").textContent = paused ? "▶" : "⏸";
@@ -3211,6 +3223,8 @@ function showModal() { $("modal").classList.remove("hidden"); modalOpen = true; 
 function hideModal() { $("modal").classList.add("hidden"); $("modalBox").classList.remove("tall"); modalOpen = false; paused = false; save(); }
 
 function showIntro(first) {
+  const touch = coarseQ; // phones & tablets — say "tap" where the desktop says "click"
+  const act = touch ? "Tap" : "Click";
   $("modalTitle").textContent = first ? "👋 Welcome to Layover Lane" : "How to play";
   $("modalBox").classList.add("tall"); // both intro screens are scrollable
   $("modalBody").innerHTML = `
@@ -3219,16 +3233,16 @@ function showIntro(first) {
     <p>🍔 Diner food and drinks are <strong>free</strong> — guests eat, drink, and wander around while the bus waits.</p>
     <p>⏱ Buses lay over for about <strong>30 minutes</strong> — a full hour in the terminal is the hard outside limit. When it's time to roll, guests still in the <strong>WC payment line</strong> get <strong>5–10 minutes</strong> to finish paying; if the line is still there, they <strong>abandon it without paying</strong> and board, and the bus leaves.</p>
     <p>🕐 Time is <strong>compressed</strong> — one game hour takes 6 real minutes at 1×, so a game day takes about 2.4 real hours. Buses, meals and queues all keep their in-world pacing.</p>
-    <p>🚻 Toilets cost <strong>₺20</strong>, paid at the counter <em>after</em> the visit — and <strong>you</strong> are the counter. <strong>Click the WC building to step inside</strong>: each stall's <strong>door closes while someone's in it</strong> (a visit lasts 1–10 in-game minutes), and <strong>each stall has its own cleanliness</strong> — a dirty one gets the visit rated down, and guests always take the <strong>cleanest free stall</strong> (none will use one that's too filthy).</p>
-    <p>💳 Inside, each guest who finishes joins the line at the counter and hands you a bill. <strong>Click the trays in the open cash drawer</strong> (₺10 / ₺20 / ₺50) to give the right change — and <strong>guests count the bills</strong>: the same total in fewer bills rates better (₺30 as 10+20 is crisp, 10+10+10 is a fistful; ₺80 as 10+20+50 beats 10×8). Guests with an <strong>exact ₺20 bill</strong> don't need you: they stand in their <strong>own second line</strong>, pay on their own, and start for the EXIT door — no change, no cologne, no clicks. Short or missing change makes the other guests unhappy.</p>
-    <p>💨 A 500 ml bottle of <strong>Turkish cologne</strong> sits on the counter. <strong>Click it</strong> to drop some onto the hands of the front guest — while they pay. They start for the EXIT door the moment the change is back in their hands (the exact-₺20 line pays on its own — cologne is for the main line's front guest), so splash early. The bottle refills at midnight.</p>
-    <p>🍵 Your <strong>tea</strong> sits on the counter and is gone in about 30 game minutes. <strong>Click the intercom</strong> at the right end of the counter to call for a fresh glass — it arrives within 2 game minutes.</p>
-    <p>🚪 Click the <strong>EXIT door</strong> — or press <strong>E</strong> — to step back outside. The 🚻 / 🚪 button in the top bar does the same.</p>
-    <p>🧻 <strong>Each stall gets dirtier with every use</strong> (watch the bar atop each stall). The old instant deep clean is gone: <strong>grab the hose</strong> next to the stalls and <strong>hold the mouse, dragging it over a stall</strong> to spray it clean — but a stall with a <strong>closed door</strong> (someone inside) can't be sprayed.</p>
-    <p>🚿 Buses roll in dusty. <strong>Click a parked bus</strong> to step up to its front: <strong>pick up the long-handled brush and drag it across the windshield</strong> to soap it up, then <strong>grab the fresh-water hose and rinse the soap off</strong>. Click a tool again to <strong>put it down</strong>. A sparkling windshield wins the driver's gratitude.</p>
+    <p>🚻 Toilets cost <strong>₺20</strong>, paid at the counter <em>after</em> the visit — and <strong>you</strong> are the counter. <strong>${act} the WC building to step inside</strong>: each stall's <strong>door closes while someone's in it</strong> (a visit lasts 1–10 in-game minutes), and <strong>each stall has its own cleanliness</strong> — a dirty one gets the visit rated down, and guests always take the <strong>cleanest free stall</strong> (none will use one that's too filthy).</p>
+    <p>💳 Inside, each guest who finishes joins the line at the counter and hands you a bill. <strong>${act} the trays in the open cash drawer</strong> (₺10 / ₺20 / ₺50) to give the right change — and <strong>guests count the bills</strong>: the same total in fewer bills rates better (₺30 as 10+20 is crisp, 10+10+10 is a fistful; ₺80 as 10+20+50 beats 10×8). Guests with an <strong>exact ₺20 bill</strong> don't need you: they stand in their <strong>own second line</strong>, pay on their own, and start for the EXIT door — no change, no cologne, no clicks. Short or missing change makes the other guests unhappy.</p>
+    <p>💨 A 500 ml bottle of <strong>Turkish cologne</strong> sits on the counter. <strong>${act} it</strong> to drop some onto the hands of the front guest — while they pay. They start for the EXIT door the moment the change is back in their hands (the exact-₺20 line pays on its own — cologne is for the main line's front guest), so splash early. The bottle refills at midnight.</p>
+    <p>🍵 Your <strong>tea</strong> sits on the counter and is gone in about 30 game minutes. <strong>${act} the intercom</strong> at the right end of the counter to call for a fresh glass — it arrives within 2 game minutes.</p>
+    <p>🚪 ${act} the <strong>EXIT door</strong>${touch ? "" : " — or press <strong>E</strong>"} to step back outside. The 🚻 / 🚪 button in the top bar does the same.</p>
+    <p>🧻 <strong>Each stall gets dirtier with every use</strong> (watch the bar atop each stall). The old instant deep clean is gone: <strong>grab the hose</strong> next to the stalls and <strong>hold ${touch ? "your finger" : "the mouse"}, dragging it over a stall</strong> to spray it clean — but a stall with a <strong>closed door</strong> (someone inside) can't be sprayed.</p>
+    <p>🚿 Buses roll in dusty. <strong>${act} a parked bus</strong> to step up to its front: <strong>pick up the long-handled brush and drag it across the windshield</strong> to soap it up, then <strong>grab the fresh-water hose and rinse the soap off</strong>. ${act} a tool again to <strong>put it down</strong>. A sparkling windshield wins the driver's gratitude.</p>
     <p>💢 Ignored guests <strong>storm out</strong> without paying, and ★ satisfied guests raise your <strong>reputation</strong> → buses stop much more often &amp; arrive bigger. A busy high-rep terminal runs several buses at once — and a freed stall is refilled within 30 minutes, never left standing empty.</p>
-    <p>🚨 Not every guest pays the <strong>₺20</strong>. Guests who <strong>leave the payment queue</strong> (out of patience, or their bus is leaving) just get a <strong>toast</strong> — they are never clickable. But a few guests (about 3 in 100) <strong>finish in the stall and run for the EXIT without paying</strong>, marked with a <strong>red badge</strong>. <strong>Click them before they reach the EXIT door</strong> to catch them: they grab a mop and <strong>scrub every toilet</strong> for 3 seconds — and every stall ends up <strong>sparkling clean</strong>. Once a runaway is out the door, they're gone.</p>
-    <p><b style="color:var(--good)">No profit, no upgrades</b> — the money is just part of the ritual. Space pauses · keys 1–4 pick the speed tier (1×, 10×, 100×, 200×).</p>`;
+    <p>🚨 Not every guest pays the <strong>₺20</strong>. Guests who <strong>leave the payment queue</strong> (out of patience, or their bus is leaving) just get a <strong>toast</strong> — they are never clickable. But a few guests (about 3 in 100) <strong>finish in the stall and run for the EXIT without paying</strong>, marked with a <strong>red badge</strong>. <strong>${act} them before they reach the EXIT door</strong> to catch them: they grab a mop and <strong>scrub every toilet</strong> for 3 seconds — and every stall ends up <strong>sparkling clean</strong>. Once a runaway is out the door, they're gone.</p>
+    <p><b style="color:var(--good)">No profit, no upgrades</b> — the money is just part of the ritual. ${touch ? "The ⏸ button pauses · the 1× button cycles the speed tier (1×, 10×, 100×, 200×)." : "Space pauses · keys 1–4 pick the speed tier (1×, 10×, 100×, 200×)."}</p>`;
   $("modalBody").scrollTop = 0;
   $("modalBtn").textContent = first ? "Open for business!" : "Back to work";
   $("modalBtn").onclick = () => hideModal();
@@ -3285,79 +3299,45 @@ function init() {
       location.reload();
     }
   };
-  // ---- canvas clicks: routed per view ----
-  canvas.addEventListener("click", (e) => {
-    if (paused || modalOpen) return;
+  // ---- canvas input: pointer events (one code path for mouse + touch) ----
+  // toGame maps a pointer event into the 960×540 logical scene; the canvas is
+  // CSS-scaled, so the same math works on a 1280px desktop and a phone.
+  const toGame = (e) => {
     const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) * (W / rect.width);
-    const y = (e.clientY - rect.top) * (H / rect.height);
-    const hit = (r, pad = 2) => x >= r.x - pad && x <= r.x + r.w + pad && y >= r.y - pad && y <= r.y + r.h + pad;
-    // a press that moved this far was a drag (a hose spray, a scrub) — not a click
-    const dragged = downPos ? Math.hypot(x - downPos.x, y - downPos.y) > 12 : false;
-    downPos = null;
-    if (S.view === "out") {
-      // outdoor scene: walk into the WC building, or step up to a parked bus
-      if (hit(WC_BUILDING)) { setView("wc"); return; }
-      const b = buses.find(z => z.state === "stop" && !z.washDone
-        && x >= z.cx - 36 - 2 && x <= z.cx + 36 + 2 && y >= LOT_NOSE - 2 && y <= z.cy + z.len / 2 + 2);
-      if (b) openWash(b);
-      return;
-    }
-    if (S.view === "wash") {
-      // at the bus front: the only click targets are the two tool stations
-      // and the exit — the windshield is worked by holding and dragging
-      // (mousedown/mousemove → washApply), so a plain click there does nothing.
-      if (hit(WASH.exit)) { setView("out"); return; }
-      const b = bus();
-      if (!b) return;
-      // click picks a tool up; clicking the one already in hand puts it down
-      const w = ensureWash(b);
-      if (hit(WASH.brush)) { w.tool = w.tool === "brush" ? "none" : "brush"; return; }
-      if (hit(WASH.hose)) { w.tool = w.tool === "hose" ? "none" : "hose"; return; }
-      return;
-    }
-    // inside the counter room: the hose station, till chips, cologne bottle, tea intercom, EXIT door
-    if (hit(COUNTER_IN.hose)) { hoseInHand = !hoseInHand; return; } // click picks up / puts down the hose
-    const chip = COUNTER_IN.chips.find(c => hit(chipHit(c)));
-    if (chip) { giveChange(chip.d); save(); return; }
-    if (hit(COUNTER_IN.bottle)) { offerCologne(); save(); return; }
-    if (hit(COUNTER_IN.intercom)) { orderTea(); save(); return; }
-    if (!dragged) {
-      const p = runawayAt(x, y, 2);
-      if (p && catchRunaway(p)) return; // a runaway bound for the EXIT — catch them
-    }
-    if (hit(COUNTER_IN.exit)) { setView("out"); }
-  });
-  canvas.addEventListener("mousedown", (e) => {
+    return {
+      x: (e.clientX - rect.left) * (W / rect.width),
+      y: (e.clientY - rect.top) * (H / rect.height),
+    };
+  };
+  const releasePointer = () => { pointerDown = false; activePointer = null; };
+
+  canvas.addEventListener("pointerdown", (e) => {
     if (paused || modalOpen) return;
-    if (e.button === 0) {
-      const rect = canvas.getBoundingClientRect();
-      downPos = { x: (e.clientX - rect.left) * (W / rect.width), y: (e.clientY - rect.top) * (H / rect.height) };
-    }
-    if (S.view === "wash" && e.button === 0) {
-      pointerDown = true;
-      const rect = canvas.getBoundingClientRect();
-      washApply((e.clientX - rect.left) * (W / rect.width), (e.clientY - rect.top) * (H / rect.height));
-    }
-    // holding the mouse with the cleaning hose sprays the stall under the pointer
-    if (S.view === "wc" && e.button === 0 && hoseInHand) {
-      pointerDown = true;
-      const rect = canvas.getBoundingClientRect();
-      hoseApply((e.clientX - rect.left) * (W / rect.width), (e.clientY - rect.top) * (H / rect.height));
-    }
+    if (activePointer !== null) return; // one pointer at a time — no two-finger gestures
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    if (e.pointerType !== "mouse") e.preventDefault(); // suppress the synthetic click/mouse events
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* pointer released mid-press */ }
+    activePointer = e.pointerId;
+    const { x, y } = toGame(e);
+    downClient = { x: e.clientX, y: e.clientY };
+    // a press in the wash view starts a scrub/spray; holding the cleaning hose
+    // sprays the stall under the pointer (per-cell cooldowns throttle the work)
+    if (S.view === "wash") { pointerDown = true; washApply(x, y); }
+    if (S.view === "wc" && hoseInHand) { pointerDown = true; hoseApply(x, y); }
   });
-  const releasePointer = () => { pointerDown = false; };
-  window.addEventListener("mouseup", releasePointer);
-  window.addEventListener("blur", releasePointer);
-  canvas.addEventListener("mousemove", (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) * (W / rect.width);
-    const y = (e.clientY - rect.top) * (H / rect.height);
-    const hit = (r, pad = 2) => x >= r.x - pad && x <= r.x + r.w + pad && y >= r.y - pad && y <= r.y + r.h + pad;
+
+  canvas.addEventListener("pointermove", (e) => {
+    // a touch only tracks while its finger is down; the mouse always hovers
+    if (e.pointerType !== "mouse" && activePointer !== e.pointerId) return;
+    const { x, y } = toGame(e);
     pointer.x = x; pointer.y = y;
-    // a held scrub/spray — the per-cell cooldown inside washApply throttles it
-    if (S.view === "wash" && pointerDown) washApply(x, y);
-    if (S.view === "wc" && pointerDown && hoseInHand) hoseApply(x, y);
+    if (activePointer === e.pointerId) {
+      // a held scrub/spray — the per-cell cooldown inside washApply throttles it
+      if (S.view === "wash" && pointerDown) washApply(x, y);
+      if (S.view === "wc" && pointerDown && hoseInHand) hoseApply(x, y);
+    }
+    if (e.pointerType !== "mouse") return; // no hover cursor for touch
+    const hit = (r, pad = 2) => x >= r.x - pad && x <= r.x + r.w + pad && y >= r.y - pad && y <= r.y + r.h + pad;
     let hot;
     if (S.view === "out") {
       hot = hit(WC_BUILDING) || buses.some(z => z.state === "stop" && !z.washDone
@@ -3372,6 +3352,66 @@ function init() {
     }
     canvas.style.cursor = hot ? "pointer" : (S.view === "wc" && hoseInHand && stallAt(x, y) >= 0 ? "crosshair" : "default");
   });
+
+  canvas.addEventListener("pointerup", (e) => {
+    const wasActive = activePointer === e.pointerId;
+    releasePointer();
+    if (!wasActive || paused || modalOpen) return;
+    const { x, y } = toGame(e);
+    // a press that moved this far was a drag (a hose spray, a scrub) — not a
+    // tap. The threshold is in CSS px: a finger jitters more than a mouse, so
+    // touch gets a wider tap band (wider still in the "out" view, where there
+    // is no drag gesture to protect).
+    const moved = downClient ? Math.hypot(e.clientX - downClient.x, e.clientY - downClient.y) : 0;
+    const isMouse = e.pointerType === "mouse";
+    downClient = null;
+    if (moved > (isMouse ? 10 : S.view === "out" ? 24 : 12)) return;
+    routePress(x, y, isMouse);
+  });
+  canvas.addEventListener("pointercancel", releasePointer);
+  window.addEventListener("blur", releasePointer);
+
+  // One settled press: routed per view (the former click handler). Fingers are
+  // imprecise, so on touch the hit padding grows with the render scale until
+  // every target is at least ~10 CSS px per side.
+  function routePress(x, y, isMouse) {
+    const scale = canvas.getBoundingClientRect().width / W; // CSS px per logical px
+    const padMin = isMouse ? 0 : clamp(10 / scale, 4, 16);
+    const hit = (r, pad = 2) => {
+      const p = Math.max(pad, padMin);
+      return x >= r.x - p && x <= r.x + r.w + p && y >= r.y - p && y <= r.y + r.h + p;
+    };
+    if (S.view === "out") {
+      // outdoor scene: walk into the WC building, or step up to a parked bus
+      if (hit(WC_BUILDING)) { setView("wc"); return; }
+      const b = buses.find(z => z.state === "stop" && !z.washDone
+        && x >= z.cx - 36 - 2 - padMin && x <= z.cx + 36 + 2 + padMin && y >= LOT_NOSE - 2 - padMin && y <= z.cy + z.len / 2 + 2 + padMin);
+      if (b) openWash(b);
+      return;
+    }
+    if (S.view === "wash") {
+      // at the bus front: the only tap targets are the two tool stations and
+      // the exit — the windshield is worked by holding and dragging
+      // (pointerdown/pointermove → washApply), so a plain tap there does nothing.
+      if (hit(WASH.exit)) { setView("out"); return; }
+      const b = bus();
+      if (!b) return;
+      // a tap picks a tool up; tapping the one already in hand puts it down
+      const w = ensureWash(b);
+      if (hit(WASH.brush)) { w.tool = w.tool === "brush" ? "none" : "brush"; return; }
+      if (hit(WASH.hose)) { w.tool = w.tool === "hose" ? "none" : "hose"; return; }
+      return;
+    }
+    // inside the counter room: the hose station, till chips, cologne bottle, tea intercom, EXIT door
+    if (hit(COUNTER_IN.hose)) { hoseInHand = !hoseInHand; return; } // tap picks up / puts down the hose
+    const chip = COUNTER_IN.chips.find(c => hit(chipHit(c)));
+    if (chip) { giveChange(chip.d); save(); return; }
+    if (hit(COUNTER_IN.bottle)) { offerCologne(); save(); return; }
+    if (hit(COUNTER_IN.intercom)) { orderTea(); save(); return; }
+    const p = runawayAt(x, y, isMouse ? 2 : 8);
+    if (p && catchRunaway(p)) return; // a runaway bound for the EXIT — catch them
+    if (hit(COUNTER_IN.exit)) { setView("out"); }
+  }
   // test/automation hook (used by the node harness; safe to ignore)
   window.__Layover = {
     front: () => facilities.C.queue[0] || null,
@@ -3400,7 +3440,7 @@ function init() {
     }
   });
   window.addEventListener("beforeunload", save);
-  document.addEventListener("visibilitychange", () => { if (document.hidden) save(); });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) { releasePointer(); save(); } });
 
   if (!hadSave) { paused = true; showIntro(true); }
 

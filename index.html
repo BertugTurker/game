@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#10141f">
 <title>Layover Lane — Bus Rest-Stop Simulator</title>
 <meta name="description" content="Run the layover every tour bus trusts: feed hungry guests, work the ₺20 toilet counter — cologne, change, clean the stalls with the hose. Click the WC building to step inside the counter room and take the money. No profit, no upgrades.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚌</text></svg>">
@@ -18,7 +19,6 @@
       <div class="stat rep" title="Reputation — higher rep means more buses stop">
         ★ <div class="bar"><div id="repFill"></div></div><span id="repNum">50</span>
       </div>
-      <div class="stat" id="statCologne" title="Cologne left in the counter bottle (refills at midnight)">🧴 500 ml</div>
       <button id="btnWc" class="icon" title="Step inside the WC counter (E)">🚻</button>
       <button id="btnPause" class="icon" title="Pause (Space)">⏸</button>
       <button id="btnSpeed" class="icon" title="Game speed (1/10/100/200)">1×</button>
@@ -30,6 +30,15 @@
   <div id="stage">
     <canvas id="game" width="960" height="540"></canvas>
     <div id="toasts"></div>
+  </div>
+</div>
+
+<!-- Small portrait screens only (see style.css): the 16:9 scene wants landscape -->
+<div id="rotateHint" aria-hidden="true">
+  <div class="rhIcon">📱</div>
+  <div class="rhText">
+    <strong>Rotate to landscape</strong>
+    <span>Layover Lane is built for the wide view</span>
   </div>
 </div>
 
