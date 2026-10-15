@@ -26,6 +26,13 @@
 
 /* ----------------------------- Config ------------------------------ */
 const W = 960, H = 540;
+// Widescreen: the logical canvas may extend beyond the 960×540 gameplay core.
+// Background layers (sky, ground, road, walls) fill the extra space; all
+// interactive content stays in the core, centered via offX/offY.
+let Wdyn = W, Hdyn = H;
+let offX = 0, offY = 0;
+let scaleK = 1;
+let lastWdyn = 0, lastHdyn = 0;
 const SECONDS_PER_HOUR = 360;         // real seconds per in-game hour (at 1x) — 1 game hour = 6 real minutes
 const LANE_Y = 520;                   // main road lane (feet line)
 const LOT_NOSE = 182;                 // lot stalls: where a parked bus's nose points (building side)
@@ -383,7 +390,7 @@ function spawnBus(reserved = null) {
     id: S.nextBusId++,
     kind, len: def.len, hue,
     from: DEST_A, to: DEST_B,
-    cx: -def.len / 2 - rand(20, 160),
+    cx: -offX - def.len / 2 - rand(20, 160), // off the canvas edge, not the core edge
     cy: LANE_Y - 45,
     ang: 0,
     state: "drive",
@@ -1031,7 +1038,7 @@ function drawWashView() {
   const sky = ctx.createLinearGradient(0, 0, 0, B.y + 40);
   sky.addColorStop(0, top); sky.addColorStop(1, bot);
   ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, W, H);
+  ctx.fillRect(-offX, -offY, Wdyn, Hdyn + offY);
   if (nf > 0.3) {
     ctx.fillStyle = "rgba(255,255,255,0.8)";
     for (const s of stars) {
@@ -1043,9 +1050,9 @@ function drawWashView() {
 
   // --- concrete wash pad
   ctx.fillStyle = mix("#565e6d", "#232833", nf * 0.7);
-  ctx.fillRect(0, B.y + 40, W, H - B.y - 40);
+  ctx.fillRect(-offX, B.y + 40, Wdyn, H + 2 * offY - B.y - 40);
   ctx.fillStyle = `rgba(20, 24, 34, ${0.25 + nf * 0.2})`;
-  ctx.fillRect(0, B.y + 40, W, 4);
+  ctx.fillRect(-offX, B.y + 40, Wdyn, 4);
 
   // --- the bus front
   ctx.fillStyle = `rgba(0, 0, 0, ${0.35 + nf * 0.15})`;
@@ -1695,7 +1702,7 @@ function update(dt, timeDt = dt) {
       // every bay threshold AND the removal line in the same step — the
       // beginEnter above already switched its state, so without this guard the
       // just-parked bus would be spliced off the scene.
-      if (b.state === "drive" && b.cx - b.len / 2 > W + 60) buses.splice(i, 1);
+      if (b.state === "drive" && b.cx - b.len / 2 > Wdyn - offX + 60) buses.splice(i, 1);
     } else if (b.state === "stop") {
       // The bus holds its spot past stopEnd until every passenger has actually
       // made it aboard, then lingers a little (boardGrace) before pulling out.
@@ -1941,17 +1948,27 @@ function updateCars(dt) {
   carTimer -= dt;
   if (carTimer <= 0) {
     carTimer = rand(4, 9);
-    cars.push({ x: W + 40, y: 462, hue: randInt(0, 359), v: -rand(120, 190) });
+    cars.push({ x: Wdyn - offX + 40, y: 462, hue: randInt(0, 359), v: -rand(120, 190) });
   }
   for (let i = cars.length - 1; i >= 0; i--) {
     cars[i].x += cars[i].v * dt;
-    if (cars[i].x < -80) cars.splice(i, 1);
+    if (cars[i].x < -offX - 80) cars.splice(i, 1);
   }
 }
 
 /* ------------------------------ Rendering --------------------------- */
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
+
+const stars = [];
+// Stars spread across the current logical width (denser the wider the view
+// is); t/tw drive the wash view's twinkle.
+function seedStars() {
+  stars.length = 0;
+  const n = Math.round(60 * Wdyn / W);
+  for (let i = 0; i < n; i++)
+    stars.push({ x: -offX + Math.random() * Wdyn, y: Math.random() * 80, s: Math.random() * 1.6 + 0.4, t: Math.random() * 7, tw: Math.random() * 2 + 0.5 });
+}
 
 function resize() {
   // Size the backing buffer from the *stage* box, not the canvas box: the
@@ -1962,14 +1979,31 @@ function resize() {
   const box = (canvas.parentElement || canvas).getBoundingClientRect();
   if (box.width <= 0 || box.height <= 0) return;
   const dpr = Math.min(2, window.devicePixelRatio || 1);
-  // Sharp, window-sized buffer (device px) instead of a fixed 960×540×dpr:
-  // a phone gets exactly what it draws; 2× the logical scene is the ceiling
-  // (height derives from the rounded width, so the 16:9 ratio stays exact).
-  const fit = Math.min(box.width, (box.height * W) / H);
-  const s = Math.min(2, (fit * dpr) / W);
-  canvas.width = Math.max(1, Math.round(W * s));
-  canvas.height = Math.max(1, Math.round(canvas.width * H / W));
-  ctx.setTransform(s, 0, 0, s, 0, 0);
+  // The logical canvas takes the stage's aspect ratio, at least as big as the
+  // 960×540 core: wide windows get extra logical width (more sky/lot/road),
+  // tall windows extra height (more sky/grass). The core stays centered, so
+  // the scene fills the stage instead of letterboxing.
+  const a = box.width / box.height;
+  if (a > W / H)      { Wdyn = H * a; Hdyn = H; }
+  else if (a < W / H) { Wdyn = W; Hdyn = W / a; }
+  else                { Wdyn = W; Hdyn = H; }
+  offX = (Wdyn - W) / 2;
+  offY = (Hdyn - H) / 2;
+  if (Math.abs(Wdyn - lastWdyn) + Math.abs(Hdyn - lastHdyn) > 2) {
+    seedStars();
+    lastWdyn = Wdyn; lastHdyn = Hdyn;
+  }
+  // Sharp, window-sized buffer (device px): 1:1 with the stage, capped at
+  // 2× the logical size so huge displays don't blow the memory budget.
+  scaleK = Math.min(2, (box.width * dpr) / Wdyn);
+  canvas.width = Math.max(1, Math.round(Wdyn * scaleK));
+  canvas.height = Math.max(1, Math.round(Hdyn * scaleK));
+  // Explicit CSS size: fills the stage when possible; centered (stage grid)
+  // with the black frame around it when the cap bites.
+  canvas.style.width = (Wdyn * scaleK / dpr) + "px";
+  canvas.style.height = (Hdyn * scaleK / dpr) + "px";
+  // Draw the core centered inside the logical canvas.
+  ctx.setTransform(scaleK, 0, 0, scaleK, offX * scaleK, offY * scaleK);
 }
 window.addEventListener("resize", resize);
 // iOS reports stale metrics mid-rotation; re-measure once the turn settles.
@@ -2006,7 +2040,6 @@ function nightFactor() {
   return (t - 19) / 2;
 }
 
-const stars = Array.from({ length: 60 }, () => ({ x: Math.random() * W, y: Math.random() * 80, s: Math.random() * 1.6 + 0.4 }));
 const trees = [ { x: 60, s: 1.1 }, { x: 150, s: 0.8 }, { x: 250, s: 1.2 }, { x: 930, s: 0.9 } ];
 
 function drawScene() {
@@ -2015,7 +2048,7 @@ function drawScene() {
   else drawOutdoor();
   if (viewFade > 0.001) {
     ctx.fillStyle = `rgba(6, 9, 18, ${viewFade})`;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(-offX, -offY, Wdyn, Hdyn + offY);
   }
 }
 
@@ -2025,7 +2058,7 @@ function drawOutdoor() {
   const g = ctx.createLinearGradient(0, 0, 0, GRASS.top);
   g.addColorStop(0, top); g.addColorStop(1, bot);
   ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, GRASS.top);
+  ctx.fillRect(-offX, -offY, Wdyn, GRASS.top + offY);
 
   const nf = nightFactor();
   if (nf > 0.3) {
@@ -2038,12 +2071,12 @@ function drawOutdoor() {
   const dayT = (S.time - 6) / 12;           // sun arc 6..18
   if (S.time >= 5 && S.time <= 19) {
     const f = clamp(dayT, 0, 1);
-    const sx = lerp(60, W - 60, f), sy = 70 - Math.sin(f * Math.PI) * 45;
+    const sx = lerp(offX + 60, Wdyn - offX - 60, f), sy = 70 - Math.sin(f * Math.PI) * 45;
     ctx.fillStyle = "#ffd75e";
     ctx.beginPath(); ctx.arc(sx, sy, 22, 0, 7); ctx.fill();
   } else {
     const f = clamp(((S.time + 24 - 19) % 24) / 11, 0, 1);
-    const mx = lerp(60, W - 60, f), my = 66 - Math.sin(f * Math.PI) * 40;
+    const mx = lerp(offX + 60, Wdyn - offX - 60, f), my = 66 - Math.sin(f * Math.PI) * 40;
     ctx.fillStyle = "#e8ecf5";
     ctx.beginPath(); ctx.arc(mx, my, 16, 0, 7); ctx.fill();
     ctx.fillStyle = skyColors(S.time)[0];
@@ -2051,16 +2084,19 @@ function drawOutdoor() {
   }
 
   // mountains
+  // The ridge stretches with the view (a smooth silhouette — the extra width
+  // is invisible in a hill), so the range always meets the horizon edges.
+  const ms = Wdyn / W, M = (x) => -offX + x * ms;
   ctx.fillStyle = mix("#3c6e58", "#141d33", nf * 0.8);
   ctx.beginPath();
-  ctx.moveTo(0, GRASS.top);
-  ctx.lineTo(0, 60); ctx.lineTo(140, 28); ctx.lineTo(300, 64); ctx.lineTo(430, 36);
-  ctx.lineTo(590, 56); ctx.lineTo(740, 32); ctx.lineTo(900, 64); ctx.lineTo(W, 48); ctx.lineTo(W, GRASS.top);
+  ctx.moveTo(M(0), GRASS.top);
+  ctx.lineTo(M(0), 60); ctx.lineTo(M(140), 28); ctx.lineTo(M(300), 64); ctx.lineTo(M(430), 36);
+  ctx.lineTo(M(590), 56); ctx.lineTo(M(740), 32); ctx.lineTo(M(900), 64); ctx.lineTo(M(W), 48); ctx.lineTo(M(W), GRASS.top);
   ctx.closePath(); ctx.fill();
 
   // grass
   ctx.fillStyle = mix("#58b368", "#1c3a2a", nf * 0.85);
-  ctx.fillRect(0, GRASS.top, W, GRASS.bot - GRASS.top);
+  ctx.fillRect(-offX, GRASS.top, Wdyn, GRASS.bot - GRASS.top);
 
   // trees
   for (const tr of trees) {
@@ -2086,7 +2122,7 @@ function drawOutdoor() {
   // night overlay + lights
   if (nf > 0.05) {
     ctx.fillStyle = `rgba(8, 12, 34, ${0.34 * nf})`;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(-offX, -offY, Wdyn, Hdyn + offY);
     if (nf > 0.4) {
       // warm window glow
       ctx.fillStyle = `rgba(255, 190, 90, ${0.5 * nf})`;
@@ -2103,7 +2139,7 @@ function drawLot() {
   const nf = nightFactor();
   // asphalt band
   ctx.fillStyle = mix("#4a5261", "#1d232e", nf * 0.7);
-  ctx.fillRect(0, LOT.top, W, LOT.bot - LOT.top);
+  ctx.fillRect(-offX, LOT.top, Wdyn, LOT.bot - LOT.top);
   // dashed outline per stall
   ctx.strokeStyle = "rgba(255,205,80,0.55)";
   ctx.lineWidth = 2.5;
@@ -2666,24 +2702,24 @@ function drawScrub() {
 }
 
 function drawWCInterior() {
-  // warm back wall
+  // warm back wall — spans the full view (a wider room in wide windows)
   ctx.fillStyle = "#5d584c";
-  ctx.fillRect(0, 0, W, 120);
+  ctx.fillRect(-offX, -offY, Wdyn, 120 + offY);
   ctx.fillStyle = "#494438";
-  ctx.fillRect(0, 114, W, 6); // baseboard
+  ctx.fillRect(-offX, 114, Wdyn, 6); // baseboard
   ctx.strokeStyle = "rgba(255,255,255,0.05)";
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(0, 60); ctx.lineTo(W, 60);
+  ctx.moveTo(-offX, 60); ctx.lineTo(Wdyn, 60);
   ctx.stroke();
   // floor
   ctx.fillStyle = "#262b36";
-  ctx.fillRect(0, 120, W, H - 120);
+  ctx.fillRect(-offX, 120, Wdyn, H + 2 * offY - 120);
   ctx.strokeStyle = "rgba(255,255,255,0.05)";
   ctx.lineWidth = 1;
   ctx.beginPath();
-  for (let x = 0; x <= W; x += 48) { ctx.moveTo(x, 120); ctx.lineTo(x, H); }
-  for (let y = 120; y <= H; y += 48) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+  for (let x = -offX; x <= Wdyn; x += 48) { ctx.moveTo(x, 120); ctx.lineTo(x, H + 2 * offY); }
+  for (let y = 120; y <= H + 2 * offY; y += 48) { ctx.moveTo(-offX, y); ctx.lineTo(Wdyn, y); }
   ctx.stroke();
   // the two stall rows — five bays on the left, five mirrored on the right
   ctx.fillStyle = "#3d465e";
@@ -2901,26 +2937,26 @@ function drawWashHint() {
 function drawRoads() {
   const nf = nightFactor();
   ctx.fillStyle = mix("#3a4150", "#181d27", nf * 0.7);
-  ctx.fillRect(0, ROAD.top, W, ROAD.bot - ROAD.top);        // main road
+  ctx.fillRect(-offX, ROAD.top, Wdyn, ROAD.bot - ROAD.top);        // main road
   ctx.fillStyle = mix("#58b368", "#1c3a2a", nf * 0.85);
-  ctx.fillRect(0, ROAD.bot, W, H - ROAD.bot);              // grass strip below
+  ctx.fillRect(-offX, ROAD.bot, Wdyn, H + 2 * offY - ROAD.bot);    // grass strip below
   ctx.strokeStyle = `rgba(240, 230, 180, ${0.8 - nf * 0.3})`;
   ctx.lineWidth = 3;
   ctx.setLineDash([26, 22]);
-  ctx.beginPath(); ctx.moveTo(0, 486); ctx.lineTo(W, 486); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-offX, 486); ctx.lineTo(Wdyn, 486); ctx.stroke();
   ctx.setLineDash([]);
   ctx.strokeStyle = "rgba(255,255,255,0.5)";
   ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(0, ROAD.top + 3); ctx.lineTo(560, ROAD.top + 3); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-offX, ROAD.top + 3); ctx.lineTo(560, ROAD.top + 3); ctx.stroke();
   ctx.setLineDash([18, 14]);   // dashed = where buses turn onto the lot
-  ctx.beginPath(); ctx.moveTo(560, ROAD.top + 3); ctx.lineTo(W, ROAD.top + 3); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(560, ROAD.top + 3); ctx.lineTo(Wdyn, ROAD.top + 3); ctx.stroke();
   ctx.setLineDash([]);
-  ctx.beginPath(); ctx.moveTo(0, ROAD.bot - 3); ctx.lineTo(W, ROAD.bot - 3); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-offX, ROAD.bot - 3); ctx.lineTo(Wdyn, ROAD.bot - 3); ctx.stroke();
   ctx.fillStyle = "rgba(255,255,255,0.65)";
   ctx.font = "11px system-ui";
-  ctx.fillText(`${DEST_A} →`, 8, ROAD.top + 16);
+  ctx.fillText(`${DEST_A} →`, -offX + 8, ROAD.top + 16);
   const tw = ctx.measureText(`${DEST_B} →`).width;
-  ctx.fillText(`${DEST_B} →`, W - tw - 8, ROAD.top + 16);
+  ctx.fillText(`${DEST_B} →`, Wdyn - offX - tw - 8, ROAD.top + 16);
 }
 
 function drawBus(b) {
@@ -3314,13 +3350,15 @@ function init() {
     }
   };
   // ---- canvas input: pointer events (one code path for mouse + touch) ----
-  // toGame maps a pointer event into the 960×540 logical scene; the canvas is
-  // CSS-scaled, so the same math works on a 1280px desktop and a phone.
+  // toGame maps a pointer event into logical scene coordinates: the 960×540
+  // core plus any widescreen extension, minus the centering offset. The
+  // canvas is CSS-scaled, so the same math works on a 1280px desktop and a
+  // phone.
   const toGame = (e) => {
     const rect = canvas.getBoundingClientRect();
     return {
-      x: (e.clientX - rect.left) * (W / rect.width),
-      y: (e.clientY - rect.top) * (H / rect.height),
+      x: (e.clientX - rect.left) * (Wdyn / rect.width) - offX,
+      y: (e.clientY - rect.top) * (Hdyn / rect.height) - offY,
     };
   };
   const releasePointer = () => { pointerDown = false; activePointer = null; };
@@ -3389,7 +3427,7 @@ function init() {
   // imprecise, so on touch the hit padding grows with the render scale until
   // every target is at least ~10 CSS px per side.
   function routePress(x, y, isMouse) {
-    const scale = canvas.getBoundingClientRect().width / W; // CSS px per logical px
+    const scale = canvas.getBoundingClientRect().width / Wdyn; // CSS px per logical px
     const padMin = isMouse ? 0 : clamp(10 / scale, 4, 16);
     const hit = (r, pad = 2) => {
       const p = Math.max(pad, padMin);

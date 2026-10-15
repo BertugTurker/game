@@ -64,7 +64,9 @@ Vanilla HTML, CSS, and JavaScript — one `<canvas>` scene, one DOM UI layer, ze
 
 ## On your phone
 
-No app, no build step — open the page (GitHub Pages works great) in your phone's browser. The game wants **landscape**: a portrait phone shows a rotate prompt, and the scene auto-fits landscape screens of any size (short screens letterbox inside the frame instead of scrolling).
+No app, no build step — open the page (GitHub Pages works great) in your phone's browser. The game wants **landscape**: a portrait phone shows a rotate prompt, and the scene auto-fits landscape screens of any size.
+
+The scene is **widescreen-aware**: the sky, parking lot and road stretch to fill whatever the screen (or desktop window) is, while the terminal itself — sign, diner, WC, bays — stays centered. No black bars on wide screens.
 
 - **Tap** everywhere the desktop clicks — and the 🚻 / ⏸ / 1× / ? / ↺ buttons in the top bar cover every keyboard shortcut.
 - The cleaning hose and the car-wash tools are **hold-and-drag** gestures, exactly like on the desktop; hit targets quietly grow on touch screens, and the “how to play” copy switches to touch wording.
