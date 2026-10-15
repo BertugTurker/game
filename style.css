@@ -28,6 +28,13 @@ html, body {
   padding: 14px 14px 40px;
   user-select: none;
   -webkit-user-select: none;
+  /* Top bar takes what it needs; the stage gets exactly the rest of the
+     viewport (dvh tracks the phone's URL bar), so the scene can be as large
+     as the screen allows. */
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100vh;
+  height: 100dvh;
 }
 
 /* ---------- Top bar ---------- */
@@ -132,23 +139,47 @@ button.icon { padding: 7px 11px; font-size: 14px; }
   overflow: hidden;
   background: #000;
   line-height: 0;
+  min-height: 0;            /* let the grid row shrink instead of forcing a page scroll */
+  display: grid;
+  place-items: center;      /* center the 16:9 scene in whatever space is left */
+  /* Query container for the canvas below. Its size comes from the grid row
+     (never from the canvas), so the canvas can reference it without any
+     sizing feedback loop. */
+  container-type: size;
 }
-/* A replaced element with an intrinsic 16:9 ratio: fit inside the stage
-   (max-width) AND inside the viewport height (max-height). On short, wide
-   phone screens the height constraint wins, so the scene letterboxes inside
-   the frame instead of scrolling off — width/height:auto keeps the ratio exact. */
+/* Display size as a pure function of the *stage box*, never of the backing
+   buffer (game.js sizes the buffer from the display size for sharpness — with
+   width/height:auto that fed back into layout and shrank the scene on phones).
+
+   Fallback (browsers without container-query units): the classic intrinsic-fit
+   with a viewport-height budget. Small, but the ratio stays exact.
+   Modern: min() of the stage's width/height budgets in container units fits the
+   scene exactly — the stage is the query container, sized by the grid above. */
 #game {
+  display: block;
   width: auto;
   height: auto;
   max-width: 100%;
   max-height: calc(100vh - 112px);
   max-height: calc(100dvh - 112px);
+  min-width: 0;                   /* buffer pixels must not force the track wider/taller */
+  min-height: 0;
   margin: 0 auto;
-  display: block;
   touch-action: none;             /* the canvas owns the gesture: no scroll/zoom */
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;    /* no long-press magnifier mid-spray */
+}
+@supports (width: min(1cqw, 1vw)) {
+  /* 177.7778cqh = stage height × 16/9: whichever budget is tighter wins,
+     and height follows the ratio, so the scene is never distorted. */
+  #game {
+    width: min(100cqw, 177.7778cqh);
+    height: auto;
+    aspect-ratio: 16 / 9;
+    max-width: none;
+    max-height: none;
+  }
 }
 
 #toasts {
@@ -232,7 +263,7 @@ button.icon { padding: 7px 11px; font-size: 14px; }
 
 /* ---------- Small screens (phones, narrow windows) ---------- */
 @media (max-width: 900px) {
-  #app { padding: 8px 8px 16px; }
+  #app { padding: 8px 8px 8px; }
   #topbar { padding: 6px 8px; gap: 6px; }
   .brand { font-size: 14px; letter-spacing: 0.5px; }
   .brand .sub { display: none; } /* the version badge stays — always visible */

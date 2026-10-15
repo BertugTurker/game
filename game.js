@@ -1954,20 +1954,34 @@ const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
 function resize() {
-  const rect = canvas.getBoundingClientRect();
-  if (rect.width <= 0) return;
+  // Size the backing buffer from the *stage* box, not the canvas box: the
+  // stage is sized by the grid (style.css) and never by the canvas, so this
+  // can't feed back into layout — that feedback loop used to shrink the scene
+  // on phones. It also applies the same 16:9 fit the CSS does, so the buffer
+  // matches the display box exactly.
+  const box = (canvas.parentElement || canvas).getBoundingClientRect();
+  if (box.width <= 0 || box.height <= 0) return;
   const dpr = Math.min(2, window.devicePixelRatio || 1);
-  // Back the buffer with the *displayed* size (device px) instead of a fixed
-  // 960×540×dpr: a phone gets a sharp, window-sized buffer instead of a full
-  // 1920×1080 that a small screen would only downsample. 2× the logical scene
-  // is the ceiling (height is derived from the rounded width, so the 16:9 ratio
-  // stays exact after rounding).
-  const s = Math.min(2, (rect.width * dpr) / W);
+  // Sharp, window-sized buffer (device px) instead of a fixed 960×540×dpr:
+  // a phone gets exactly what it draws; 2× the logical scene is the ceiling
+  // (height derives from the rounded width, so the 16:9 ratio stays exact).
+  const fit = Math.min(box.width, (box.height * W) / H);
+  const s = Math.min(2, (fit * dpr) / W);
   canvas.width = Math.max(1, Math.round(W * s));
   canvas.height = Math.max(1, Math.round(canvas.width * H / W));
   ctx.setTransform(s, 0, 0, s, 0, 0);
 }
 window.addEventListener("resize", resize);
+// iOS reports stale metrics mid-rotation; re-measure once the turn settles.
+window.addEventListener("orientationchange", () => setTimeout(resize, 150));
+// The display box can also change without a window event (CSS container-query
+// sizing settles after load, dynamic-viewport URL-bar changes); keep the
+// buffer matched to whatever the canvas actually renders at.
+if ("ResizeObserver" in window) {
+  const ro = new ResizeObserver(() => resize());
+  ro.observe(canvas);
+  ro.observe(canvas.parentElement); // #stage: its size drives the buffer fit
+}
 resize();
 
 function skyColors(t) {
