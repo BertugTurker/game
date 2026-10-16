@@ -98,7 +98,7 @@ const WASH = {
   wind:  { x: 354, y: 138, w: 252, h: 186, cols: 30, rows: 20 }, // glass + frame ≈ 2/3 of the face, painted nose ≈ 1/3; 600 cells of 8.4×9.3
   brush: { x: 96,  y: 280, w: 150, h: 130 },                    // soap bucket + brush on the floor (left)
   hose:  { x: 714, y: 280, w: 150, h: 130 },                    // floor tap + coiled hose (right)
-  exit:  { x: 18,  y: 18,  w: 96,  h: 44 },                     // back to the lot (top-left)
+  exit:  { x: 123, y: 18,  w: 96,  h: 44 },                     // back to the lot (top-left, centred over the brush station)
 };
 
 const DEST_A = "İstanbul", DEST_B = "Trabzon";
@@ -1517,7 +1517,7 @@ function drawWashView() {
   ctx.strokeStyle = "rgba(255, 245, 225, 0.16)";
   ctx.lineWidth = 1.2;
   ctx.beginPath(); ctx.ellipse(swx, swy - 1.2, srx, sry, 0, Math.PI + 0.45, Math.PI * 2 - 0.45); ctx.stroke();
-  // dashboard, overhead monitor
+  // dashboard; the rearview mirror seen from behind (housing only, its glass faces the driver)
   const dash = ctx.createLinearGradient(0, Wd.y + Wd.h - 30, 0, Wd.y + Wd.h);
   dash.addColorStop(0, "#2b2d31"); dash.addColorStop(1, "#121316");
   ctx.fillStyle = dash;
@@ -1527,15 +1527,13 @@ function drawWashView() {
   ctx.fillStyle = "#141518";
   rr(ctx, Wd.x + Wd.w / 2 - 2, Wd.y, 4, 14, 2); ctx.fill();
   rr(ctx, Wd.x + Wd.w / 2 - 24, Wd.y + 12, 48, 13, 3); ctx.fill();
-  ctx.fillStyle = mix("#2c4f78", "#3f6fb0", nf);
-  rr(ctx, Wd.x + Wd.w / 2 - 21, Wd.y + 14, 42, 9, 2); ctx.fill();
   // the glass itself tints what's behind it — more so by day, when it reflects the sky
   ctx.globalAlpha = 0.08 + 0.12 * (1 - nf);
   ctx.fillStyle = glass;
   ctx.fillRect(Wd.x, Wd.y, Wd.w, Wd.h);
   ctx.globalAlpha = 1;
   // red LED destination sign on the dash, bottom-left behind the glass (grime covers it too)
-  const led = { x: Wd.x + 8, y: Wd.y + Wd.h - 17, w: 72, h: 14 };
+  const led = { x: Wd.x + 8, y: Wd.y + Wd.h - 25, w: 72, h: 21 };
   ctx.fillStyle = "#0b0907";
   rr(ctx, led.x, led.y, led.w, led.h, 3); ctx.fill();
   ctx.save();
@@ -1545,7 +1543,7 @@ function drawWashView() {
   ctx.shadowColor = "rgba(255, 50, 35, 0.9)";
   ctx.shadowBlur = 5 + 5 * nf;
   ctx.fillStyle = "#ff3b2f";
-  ctx.font = "bold 9px ui-monospace, Menlo, monospace";
+  ctx.font = "bold 14px ui-monospace, Menlo, monospace";
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   const msg = `${DEST_A.toUpperCase()} → ${DEST_B.toUpperCase()}     `;
@@ -1749,18 +1747,6 @@ function drawWashView() {
     ctx.stroke();
     ctx.lineWidth = 1;
   }
-  ctx.strokeStyle = "rgba(255,255,255,0.05)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  for (let c = 1; c < Wd.cols; c++) {
-    const gx = Wd.x + c * cw;
-    ctx.moveTo(gx, Wd.y); ctx.lineTo(gx, Wd.y + Wd.h);
-  }
-  for (let r = 1; r < Wd.rows; r++) {
-    const gy2 = Wd.y + r * chh;
-    ctx.moveTo(Wd.x, gy2); ctx.lineTo(Wd.x + Wd.w, gy2);
-  }
-  ctx.stroke();
   // glass reflections over everything on the windshield
   ctx.save();
   rr(ctx, Wd.x, Wd.y, Wd.w, Wd.h, 4); ctx.clip();
@@ -1952,7 +1938,7 @@ function drawWashView() {
   const n = w.g.length;
   const gAvg = w.g.reduce((a, v) => a + v, 0) / n;
   const fAvg = w.f.reduce((a, v) => a + v, 0) / n;
-  const P = { x: 330, y: 18, w: 300, h: 84 }; // top center — where the old sign used to sit
+  const P = { x: 679, y: 18, w: 220, h: 84 }; // top right, centred over the hose station
   ctx.save();
   ctx.shadowColor = "rgba(0,0,0,0.35)";
   ctx.shadowBlur = 12;
@@ -1970,7 +1956,7 @@ function drawWashView() {
   ctx.fillStyle = "rgba(226,235,248,0.8)";
   ctx.fillText(`KİR ${Math.round(gAvg * 100)}%`, P.x + 16, P.y + 24);
   ctx.fillStyle = `rgba(143, 227, 242, ${fAvg < 0.05 ? 0.35 : 1})`;
-  ctx.fillText(`KÖPÜK ${Math.round(fAvg * 100)}%`, P.x + 128, P.y + 24);
+  ctx.fillText(`KÖPÜK ${Math.round(fAvg * 100)}%`, P.x + 112, P.y + 24);
   const bar = { x: P.x + 16, y: P.y + 34, w: P.w - 32, h: 10 };
   ctx.fillStyle = "rgba(0,0,0,0.35)";
   rr(ctx, bar.x, bar.y, bar.w, bar.h, 5); ctx.fill();
@@ -1992,7 +1978,7 @@ function drawWashView() {
     w.done ? "✨ Pırıl pırıl — şoför bunu fark edecek"
       : fAvg < 0.5 ? "1 · ön camı köpükle (fırça)"
       : "2 · köpüğü durula (hortum)",
-    P.x + 16, P.y + 66);
+    P.x + 16, P.y + 66, P.w - 32);
 
   // sparkles over a finished windshield
   if (w.done) {
