@@ -203,7 +203,7 @@ button.icon { width: 30px; height: 30px; padding: 0 6px; font-size: 14px; }
   font-size: 12.5px;
   line-height: 1.35;
   animation: toastIn 0.25s ease-out;
-  max-width: 10vw;
+  max-width: 20vw;
   overflow-wrap: anywhere;
 }
 .toast.good { border-left-color: var(--good); }
