@@ -2,7 +2,7 @@
 
 /* =====================================================================
    LAYOVER LANE — Bus Rest-Stop Simulator
-   Tour buses run Hilltown (A) → Seaside (B) and pull into your layover.
+   Tour buses run İstanbul (A) → Trabzon (B) and pull into your layover.
    You run the diner and the toilets — and you are the WC counter.
    Click the WC building to step behind the counter: each stall's door
    closes while it's in use, and every stall carries its own dirt — take
@@ -71,15 +71,15 @@ const COUNTER_IN = {
   // the open cash drawer — three bill trays; the change click targets are the
   // FULL drawn body of each tray (chipHit below), not just the inner rect
   chips: [
-    { d: 10, x: 448, y: 384, w: 58, h: 64, color: BILL_COLORS[10], label: "₺10" },
-    { d: 20, x: 511, y: 384, w: 58, h: 64, color: BILL_COLORS[20], label: "₺20" },
-    { d: 50, x: 574, y: 384, w: 58, h: 64, color: BILL_COLORS[50], label: "₺50" },
+    { d: 10, x: 388, y: 384, w: 58, h: 64, color: BILL_COLORS[10], label: "₺10" },
+    { d: 20, x: 451, y: 384, w: 58, h: 64, color: BILL_COLORS[20], label: "₺20" },
+    { d: 50, x: 514, y: 384, w: 58, h: 64, color: BILL_COLORS[50], label: "₺50" },
   ],
-  bottle: { x: 386, y: 416, w: 30, h: 68 },   // Turkish cologne on the counter
+  bottle: { x: 318, y: 310, w: 26, h: 52 },   // Turkish cologne on the counter
   desk:   { x: 0, y: 352, w: 960, h: 188 },   // the full-width wooden counter
-  exit:   { x: 446, y: 24, w: 68, h: 72 },    // EXIT door, top center of the far wall (click to go outside)
+  exit:   { x: 446, y: 0, w: 68, h: 72 },     // EXIT door, top center of the far wall (click to go outside)
   intercom: { x: 884, y: 394, w: 44, h: 62 }, // tea intercom at the right end of the counter (click to order a fresh tea)
-  hose:   { x: 4, y: 209, w: 60, h: 84 },     // wall faucet + coiled cleaning hose, next to the stall row on the left (click to grab)
+  hose:   { x: 4, y: 150, w: 60, h: 96 },    // wall faucet + coiled cleaning hose, next to the stall row on the left (click to grab)
 };
 // The whole VISIBLE body of a bill tray is the click target: the dark tray
 // pocket (x-4, y-4, w+8, h+8) plus the bill note, which overhangs the pocket
@@ -89,19 +89,19 @@ const COUNTER_IN = {
 const chipHit = c => ({ x: c.x - 4, y: c.y - 4, w: c.w + 8, h: c.h + 22 });
 const PAY_SPOT = { x: 560, y: 357 };           // where the front guest stands
 const PAY_SPOT2 = { x: 462, y: 357 };          // the exact-₺20 line's own spot, left of the main one
-const DOOR_IN  = { x: 480, y: 106 };           // just inside the EXIT door (top center) — guests enter & leave here
+const DOOR_IN  = { x: 480, y: 64 };            // just inside the EXIT door (top center) — guests enter & leave here
 const WC_BUILDING = { x: 808, y: 92, w: 86, h: 80 }; // outdoor hit rect: click to enter
 // Car wash view geometry — a close-up of the parked bus's front. The
 // windshield is a cols×rows cell grid; each cell tracks its own dirt and soap.
 const WASH = {
   body:  { x: 330, y: 110, w: 300, h: 350 },                    // the bus front slab (tall — a big glass front)
-  wind:  { x: 354, y: 138, w: 252, h: 250, cols: 30, rows: 20 }, // 60% of the face is glass; 600 cells of 8.4×12.5
-  brush: { x: 96,  y: 150, w: 150, h: 310 },                    // soap station panel (left)
-  hose:  { x: 714, y: 150, w: 150, h: 310 },                    // fresh-water station panel (right)
+  wind:  { x: 354, y: 138, w: 252, h: 186, cols: 30, rows: 20 }, // glass + frame ≈ 2/3 of the face, painted nose ≈ 1/3; 600 cells of 8.4×9.3
+  brush: { x: 96,  y: 280, w: 150, h: 130 },                    // soap bucket + brush on the floor (left)
+  hose:  { x: 714, y: 280, w: 150, h: 130 },                    // floor tap + coiled hose (right)
   exit:  { x: 18,  y: 18,  w: 96,  h: 44 },                     // back to the lot (top-left)
 };
 
-const DEST_A = "Hilltown", DEST_B = "Seaside";
+const DEST_A = "İstanbul", DEST_B = "Trabzon";
 const SAVE_KEY = "layover-lane-v6";
 
 /* ---------------------------- Small utils --------------------------- */
@@ -150,7 +150,7 @@ let paused = false;
 const SPEEDS = [1, 10, 100, 200];
 let speed = 1;
 let viewFade = 0;              // dark overlay for the view transition
-let pointer = { x: W / 2, y: 200 }; // the mouse, in canvas coords (the wash tools follow it)
+let pointer = { x: W / 2, y: 200 }; // last pointer position in canvas coords — mouse hover, or a touch's press (the wash tools + the WC hose follow it)
 let pointerDown = false;
 // The WC cleaning hose: in-hand flag plus per-stall spray pacing. Session aid,
 // never saved — picking it up again costs the player, not their save file.
@@ -297,6 +297,13 @@ function load() {
 function migrateBus(b) {
   if (b.cx == null) { b.cx = b.x + b.len / 2; b.cy = b.baseY - 45; b.ang = 0; }
   delete b.x; delete b.baseY;
+  b.from = DEST_A; b.to = DEST_B;
+  if (b.animFrom) { // saved mid-turn under the old tweened turn: restart the move on the new paths
+    if (b.state === "enter") { if (!BAY_SLOTS[b.slot]) b.slot = 0; b.mv = { s: 0 }; Object.assign(b, enterPose(enterGeom(b, b.slot), 0)); }
+    if (b.state === "exit") { b.mv = { s: 0, sx: b.animFrom.cx, sy: b.animFrom.cy }; Object.assign(b, exitPose(exitGeom(b), 0)); }
+    b.v = 0;
+    delete b.animFrom; delete b.animTo; delete b.animT;
+  }
   if (b.state === "stop") {
     const s = BAY_SLOTS[b.slot] || BAY_SLOTS[0];
     b.cx = s.cx; b.cy = LOT_NOSE + b.len / 2; b.ang = -Math.PI / 2;
@@ -405,7 +412,7 @@ function spawnBus(reserved = null) {
     pax,
   };
   buses.push(b);
-  toast(`🚌 Tour bus from ${DEST_A} inbound — ${n} passengers`, "");
+  toast(`🚌 ${DEST_A} çıkışlı tur otobüsü geliyor — ${n} yolcu`, "");
 }
 
 function makePax() {
@@ -450,7 +457,47 @@ function allAbroad(b) {
 }
 
 /* ---------------------------- Passengers ---------------------------- */
-// Turn off the road into the stall: 1.4 s eased anim (cx/cy/ang).
+// Bus driving: px/s and px/s². Turns follow true circular arcs; the heading
+// is always the path tangent, so the body never slides sideways.
+const BUS_V = 185, BUS_TURN_V = 62, BUS_ACC = 55, BUS_BRAKE = 85, BUS_REV_V = 38;
+const LANE_CY = LANE_Y - 45;
+
+// Pull-in: a left quarter-circle off the lane, then a short straight into the stall.
+function enterGeom(b, slot) {
+  const tx = BAY_SLOTS[slot].cx, ty = LOT_NOSE + b.len / 2, D = 28;
+  const R = LANE_CY - ty - D;
+  return { x0: tx - R, R, D, tx, ty, L: R * Math.PI / 2 + D };
+}
+function enterPose(g, s) {
+  const arc = g.R * Math.PI / 2;
+  if (s <= arc) {
+    const th = s / g.R;
+    return { cx: g.x0 + g.R * Math.sin(th), cy: LANE_CY - g.R + g.R * Math.cos(th), ang: -th };
+  }
+  return { cx: g.tx, cy: g.ty + g.D - (s - arc), ang: -Math.PI / 2 };
+}
+// Back-out: reverse straight a little, then reverse through a quarter-circle
+// (tail swinging west) so the bus ends on the lane facing east.
+function exitGeom(b) {
+  const d = 24, R = LANE_CY - b.mv.sy - d;
+  return { sx: b.mv.sx, sy: b.mv.sy, d, R, L: d + R * Math.PI / 2 };
+}
+function exitPose(g, s) {
+  if (s <= g.d) return { cx: g.sx, cy: g.sy + s, ang: -Math.PI / 2 };
+  const ph = (s - g.d) / g.R;
+  return { cx: g.sx - g.R + g.R * Math.cos(ph), cy: g.sy + g.d + g.R * Math.sin(ph), ang: -Math.PI / 2 + ph };
+}
+// Advance b.mv.s along a path of length L, braking to a stop exactly at the end.
+function moveAlong(b, dt, L, vmax, acc, brake) {
+  const rem = Math.max(0, L - b.mv.s);
+  const target = Math.min(vmax, Math.sqrt(2 * brake * rem));
+  b.brake = b.v > target + 0.2;
+  b.v = b.v < target ? Math.min(target, b.v + acc * dt) : Math.max(target, b.v - 2 * brake * dt);
+  b.v = Math.max(b.v, 4); // creep the last pixels instead of stalling asymptotically
+  b.mv.s = Math.min(L, b.mv.s + b.v * dt);
+  return b.mv.s >= L - 0.01;
+}
+
 function beginEnter(b, slot) {
   b.slot = slot;
   b.forcedSlot = null; // the reservation is spent
@@ -458,13 +505,15 @@ function beginEnter(b, slot) {
   b.stoppedOnce = true;
   b.state = "enter";
   b.stopElapsed = 0; // terminal-dwell clock starts as the bus rolls in
-  b.animT = 0;
-  b.animFrom = { cx: b.cx, cy: b.cy, ang: b.ang };
-  b.animTo = { cx: BAY_SLOTS[slot].cx, cy: LOT_NOSE + b.len / 2, ang: -Math.PI / 2 };
+  b.mv = { s: 0 };
+  b.blink = true;
+  Object.assign(b, enterPose(enterGeom(b, slot), 0)); // snaps the few px a coarse step may have overshot
 }
 
 function finishEnter(b) {
-  b.cx = b.animTo.cx; b.cy = b.animTo.cy; b.ang = b.animTo.ang;
+  const g = enterGeom(b, b.slot);
+  b.cx = g.tx; b.cy = g.ty; b.ang = -Math.PI / 2;
+  b.v = 0; b.brake = false; b.blink = false; b.mv = null;
   b.state = "stop";
   b.stopStart = S.time;
   if (S.slotVacantSince) S.slotVacantSince[b.slot] = null; // stall filled
@@ -540,9 +589,8 @@ function endStop(b) {
   if (b.slot != null && S.slotVacantSince) S.slotVacantSince[b.slot] = S.time; // stall vacant — backstop clock starts
   b.slot = null;
   b.state = "exit";
-  b.animT = 0;
-  b.animFrom = { cx: b.cx, cy: b.cy, ang: b.ang };
-  b.animTo = { cx: b.cx + 260, cy: LANE_Y - 45, ang: 0 };
+  b.mv = { s: 0, sx: b.cx, sy: b.cy };
+  b.v = 0; b.rev = true;
   for (const p of b.pax) {
     if (p.state === "serveR" || p.state === "serveT" || p.state === "scrubC") continue; // let them finish, they'll board after
     if (p.state === "queueC" || p.state === "payC" || p.state === "doneC" || p.state === "dripC" ||
@@ -565,30 +613,56 @@ function endStop(b) {
   S.rep = clamp(S.rep + delta, 0, 100);
   S.stats.buses++;
   const stars = avg > 80 ? "★★★★★" : avg > 65 ? "★★★★☆" : avg > 45 ? "★★★☆☆" : avg > 25 ? "★★☆☆☆" : "★☆☆☆☆";
-  toast(`🚌 Bus to ${DEST_B} departed · ${stars} (${Math.round(avg)} avg) · rep ${delta >= 0 ? "+" : ""}${delta.toFixed(1)}`, delta >= 0 ? "good" : "bad");
+  toast(`🚌 ${DEST_B} otobüsü yola çıktı · ${stars} (ort. ${Math.round(avg)}) · itibar ${delta >= 0 ? "+" : ""}${delta.toFixed(1)}`, delta >= 0 ? "good" : "bad");
 }
 
 function finishExit(b) {
-  b.cx = b.animTo.cx; b.cy = b.animTo.cy; b.ang = b.animTo.ang;
+  b.cy = LANE_CY; b.ang = 0;
+  b.mv = null; b.rev = false;
   b.state = "drive";
+  b.v = 0;
+  b.holdT = 0.7; // brake held, shift from reverse into drive, then pull away
 }
 
-// First bay (in fill order) the bus has reached that no other parked bus holds.
-// A bus reserved for a particular bay (forcedSlot — the vacancy backstop
-// promised it the stall that went quiet longest) drives past earlier free
-// bays to the one it was promised; if that bay fills first, it falls back to
-// normal first-fit.
-function baySlotFor(b) {
+// The bay this bus is heading for: the first free one (in fill order) whose
+// turn-in point it hasn't already driven past. A bus reserved for a
+// particular bay (forcedSlot — the vacancy backstop promised it the stall
+// that went quiet longest) drives past earlier free bays to the one it was
+// promised; if that bay fills first, it falls back to normal first-fit.
+// `slack` is how far past a turn-in point still counts (a coarse step at a
+// high speed tier can jump far past it in one go).
+function baySlotFor(b, slack) {
   const free = i => !buses.some(o => o !== b && (o.state === "stop" || o.state === "enter") && o.slot === i);
-  for (let i = 0; i < BAY_SLOTS.length; i++) {
-    if (b.forcedSlot != null && free(b.forcedSlot)) { // != null: plain schedule buses carry null, and null >= 0 is true in JS
-      if (i === b.forcedSlot && b.cx >= BAY_SLOTS[i].cx - 60) return i; // reservation held, bay reached
-      continue; // reservation held: skip every other bay
-    }
-    if (b.cx < BAY_SLOTS[i].cx - 60) continue;
-    if (free(i)) return i;
-  }
+  const ok = i => free(i) && b.cx <= enterGeom(b, i).x0 + slack;
+  if (b.forcedSlot != null && ok(b.forcedSlot)) return b.forcedSlot; // != null: plain schedule buses carry null, and null >= 0 is true in JS
+  for (let i = 0; i < BAY_SLOTS.length; i++) if (ok(i)) return i;
   return -1;
+}
+
+// Cruise speed for a bus on the lane: slow for the upcoming turn-in, and
+// keep a gap behind whatever is ahead (including a bus backing out of a stall).
+function driveTarget(b) {
+  let vT = BUS_V;
+  b.blink = false;
+  if (!b.stoppedOnce) {
+    const si = baySlotFor(b, 0);
+    if (si >= 0) {
+      const dist = enterGeom(b, si).x0 - b.cx;
+      vT = Math.min(vT, Math.sqrt(BUS_TURN_V * BUS_TURN_V + 2 * BUS_BRAKE * Math.max(0, dist)));
+      b.blink = dist < 260;
+    }
+  }
+  const front = b.cx + b.len / 2;
+  for (const o of buses) {
+    if (o === b || o.state === "stop") continue;
+    const c = Math.cos(o.ang), s = Math.sin(o.ang);
+    const ry = o.cy - s * o.len / 2;          // tail end of the other bus
+    if (ry < ROAD.top + 4) continue;          // still entirely up in the lot
+    const rearX = Math.min(o.cx, o.cx - c * o.len / 2) - 33 * Math.abs(s);
+    if (rearX <= b.cx) continue;              // beside or behind us
+    vT = Math.min(vT, Math.max(0, (rearX - front - 24) * 1.4));
+  }
+  return vT;
 }
 
 // The cleanest stall in the whole row, occupied or not — the bar that
@@ -616,7 +690,7 @@ function evaluate(p, bus) {
       p.want = null;
       if (performance.now() - lastDirtyToast > 2500) {
         lastDirtyToast = performance.now();
-        toast("😖 A guest sees the filthy toilets and decides against them", "bad");
+        toast("😖 Bir misafir pis tuvaletleri görünce vazgeçti", "bad");
       }
       wander(p);
       return;
@@ -657,10 +731,9 @@ function goDoor(p, bus) {
 function updateFacilities(dt, timeDt = dt) {
   stepFac("R", timeDt, DINER_SEATS, SVC_TIME_R);
   stepFac("T", timeDt, WC_STALLS, SVC_TIME_T);
-  // each toilet recovers slowly on its own; S.cleanliness stays the derived
-  // average (outdoor HUD, legacy code paths)
-  for (let i = 0; i < WC_STALLS; i++)
-    S.stallClean[i] = clamp(S.stallClean[i] + 6 * (timeDt / SECONDS_PER_HOUR), 0, 100);
+  // toilets do NOT recover on their own — grime only leaves via the hose (or a
+  // caught runaway's scrub); S.cleanliness stays the derived average
+  // (outdoor HUD, legacy code paths)
   S.cleanliness = S.stallClean.reduce((a, v) => a + v, 0) / WC_STALLS;
 }
 
@@ -789,7 +862,7 @@ function fleeCounter(p) {
   const now = performance.now();
   if (now - lastEvadeToast > 2000) {
     lastEvadeToast = now;
-    toast("🏃 A guest is trying to escape without paying!", "bad");
+    toast("🏃 Bir misafir ödemeden kaçmaya çalışıyor!", "bad");
   }
   const rating = p.useSat;
   finishVisit(p, clamp((p.useSat != null ? p.useSat : SAT_BASE) - 15, 10, 100), true);
@@ -805,7 +878,7 @@ function fleeCounter(p) {
 // The ten stall bays, in the interior view's coords (drawWCInterior): five
 // in the left row (x = 76 + i*64) and five mirrored in the right row
 // (x = 576 + (i-5)*64) — matching the two stall containers drawWCInterior paints.
-const stallBay = i => ({ x: i < WC_STALLS / 2 ? 76 + i * 64 : 576 + (i - WC_STALLS / 2) * 64, y: 182, w: 52, h: 138 });
+const stallBay = i => ({ x: i < WC_STALLS / 2 ? 76 + i * 64 : 576 + (i - WC_STALLS / 2) * 64, y: 108, w: 52, h: 138 });
 
 // Which stall's bay does a point fall in? (the ~18 px reach of the spray fan)
 function stallAt(x, y, R = 18) {
@@ -844,7 +917,7 @@ function hoseApply(x, y) {
     S.stallClean[i] = Math.min(100, before + 5);
     if (before < 100 && S.stallClean[i] >= 100) {
       hoseGleam[i] = now; // sparkle burst on hitting 100
-      if (now - lastHoseToast > 1500) { lastHoseToast = now; toast("🚿 A stall is sparkling clean!", "good"); }
+      if (now - lastHoseToast > 1500) { lastHoseToast = now; toast("🚿 Bir kabin pırıl pırıl oldu!", "good"); }
     }
   }
   if (touched) S.cleanliness = S.stallClean.reduce((a, v) => a + v, 0) / WC_STALLS;
@@ -941,7 +1014,7 @@ function finishWash(b) {
   b.washDone = true;
   S.stats.washes++;
   S.rep = clamp(S.rep + 2, 0, 100);
-  toast("✨ Windshield sparkling clean — the driver will notice!", "good");
+  toast("✨ Ön cam pırıl pırıl — şoför bunu fark edecek!", "good");
   save();
 }
 
@@ -956,7 +1029,7 @@ function catchRunaway(p) {
   p.runaway = false; // caught once — never catchable again this visit
   p.state = "scrubC";
   if (S.stats) S.stats.caught = (S.stats.caught || 0) + 1;
-  toast("🧽 Caught! You're cleaning every toilet!", "good");
+  toast("🧽 Yakalandın! Bütün tuvaletleri sen temizliyorsun!", "good");
   startScrub(p);
   return true;
 }
@@ -966,7 +1039,7 @@ function catchRunaway(p) {
 // distance), the rest scrubbing — an equal dwell at every stall.
 function startScrub(p) {
   const pts = [];
-  for (let i = 0; i < WC_STALLS; i++) pts.push({ x: stallBay(i).x + 26, y: 304 });
+  for (let i = 0; i < WC_STALLS; i++) pts.push({ x: stallBay(i).x + 26, y: 230 });
   let prev = { x: p.x, y: p.y }, total = 0;
   const dist = pts.map(q => { const d = Math.hypot(q.x - prev.x, q.y - prev.y); prev = q; total += d; return d; });
   const travel = SCRUB_TIME * 0.4, dwell = SCRUB_TIME * 0.6 / WC_STALLS;
@@ -1014,7 +1087,7 @@ function finishScrub() {
   for (let i = 0; i < WC_STALLS; i++) { S.stallClean[i] = 100; hoseGleam[i] = now; }
   S.cleanliness = 100;
   scrubDoneAt = now;
-  toast("✨ Every toilet is sparkling clean again!", "good");
+  toast("✨ Bütün tuvaletler yine pırıl pırıl!", "good");
   // their work is done — they walk out (no longer a runaway, no rush)
   p.state = "leaveC";
   p.tx = DOOR_IN.x; p.ty = DOOR_IN.y;
@@ -1030,85 +1103,561 @@ function drawWashView() {
   if (!b) { setView("out"); return; }
   const w = ensureWash(b);
   const nf = nightFactor();
-  const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 200);
+  const now = performance.now();
+  const pulse = 0.55 + 0.45 * Math.sin(now / 200);
   const { body: B, wind: Wd, brush: Br, hose: Hs, exit: Ex } = WASH;
+  const hz = B.y + 40;               // horizon: where the wash pad meets the sky
+  const floorB = H + offY;           // bottom of the visible canvas
+  const hue = b.hue;
+  const hsl = (s, l, a = 1) => `hsla(${hue}, ${s}%, ${Math.max(4, l)}%, ${a})`;
+  const hsh = n => frac(Math.sin(n * 127.1 + 11.3) * 43758.5453); // stable per-index noise
 
   // --- sky (the same palette as the layover — the view change feels like a dolly)
   const [top, bot] = skyColors(S.time);
-  const sky = ctx.createLinearGradient(0, 0, 0, B.y + 40);
+  const sky = ctx.createLinearGradient(0, 0, 0, hz);
   sky.addColorStop(0, top); sky.addColorStop(1, bot);
   ctx.fillStyle = sky;
   ctx.fillRect(-offX, -offY, Wdyn, Hdyn + offY);
   if (nf > 0.3) {
     ctx.fillStyle = "rgba(255,255,255,0.8)";
     for (const s of stars) {
-      ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(s.t + s.tw * performance.now() / 1000));
+      ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(s.t + s.tw * now / 1000));
       ctx.fillRect(s.x, s.y * 0.35, s.s, s.s);
     }
     ctx.globalAlpha = 1;
   }
 
-  // --- concrete wash pad
-  ctx.fillStyle = mix("#565e6d", "#232833", nf * 0.7);
-  ctx.fillRect(-offX, B.y + 40, Wdyn, H + 2 * offY - B.y - 40);
+  // --- the countryside on the horizon: snow-capped mountains, green hills,
+  // a tree line, and now and then a lone farmhouse
+  const sx0 = Math.floor(-offX / 8) * 8, sx1 = -offX + Wdyn + 8;
+  const ridge = (x, base, amp, s) => hz - base - amp * (0.5 + 0.3 * Math.sin(x / 97 + s) + 0.15 * Math.sin(x / 41 + s * 2.3) + 0.05 * Math.sin(x / 17 + s * 5.1));
+  const range = (base, amp, s) => {
+    ctx.beginPath();
+    ctx.moveTo(sx0, hz);
+    for (let x = sx0; x <= sx1; x += 8) ctx.lineTo(x, ridge(x, base, amp, s));
+    ctx.lineTo(sx1, hz);
+    ctx.closePath();
+  };
+  range(22, 92, 1.7);
+  const mtn = ctx.createLinearGradient(0, hz - 115, 0, hz);
+  mtn.addColorStop(0, mix("#8ea5c0", "#1b2339", nf));
+  mtn.addColorStop(1, mix("#b4c6d8", "#232c44", nf));
+  ctx.fillStyle = mtn;
+  ctx.fill();
+  ctx.save();
+  ctx.clip();
+  ctx.fillStyle = `rgba(250, 252, 255, ${0.9 - nf * 0.6})`;
+  ctx.beginPath();
+  ctx.moveTo(sx0, 0);
+  for (let x = sx0; x <= sx1; x += 8) ctx.lineTo(x, hz - 84 + 5 * Math.sin(x / 9) + 4 * Math.sin(x / 23));
+  ctx.lineTo(sx1, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+  range(6, 44, 4.2);
+  const hill = ctx.createLinearGradient(0, hz - 50, 0, hz);
+  hill.addColorStop(0, mix("#7aa77f", "#1a2c22", nf));
+  hill.addColorStop(1, mix("#5c8a62", "#132119", nf));
+  ctx.fillStyle = hill;
+  ctx.fill();
+  // two rows of pines: a paler, smaller one up the hill, a dark one at its foot
+  const pines = (step, y0, hMin, hVar, col, seed) => {
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    for (let x = Math.floor(-offX / step) * step; x < sx1; x += step) {
+      if (hsh(x * 0.71 + seed) < 0.22) continue;
+      const tx = x + hsh(x * 1.3 + seed) * step * 0.6;
+      const th = hMin + hVar * hsh(x * 2.9 + seed), tw = th * 0.36;
+      const ty = y0 + 3 * hsh(x * 4.1 + seed);
+      ctx.moveTo(tx, ty - th); ctx.lineTo(tx + tw, ty); ctx.lineTo(tx - tw, ty); ctx.closePath();
+      ctx.moveTo(tx, ty - th * 1.18); ctx.lineTo(tx + tw * 0.7, ty - th * 0.45); ctx.lineTo(tx - tw * 0.7, ty - th * 0.45); ctx.closePath();
+    }
+    ctx.fill();
+  };
+  pines(10, hz - 16, 8, 10, mix("#4f7d58", "#14231b", nf), 3.3);
+  pines(13, hz + 2, 14, 20, mix("#2d5838", "#0d1812", nf), 7.9);
+  if (b.id % 3 === 0) {
+    const hx = b.id % 2 ? 182 : 782, hb = hz + 1;
+    ctx.fillStyle = mix("#7a4a3a", "#2a1a16", nf);
+    ctx.fillRect(hx + 7, hb - 30, 5, 10);                    // chimney
+    ctx.fillStyle = mix("#ece0c8", "#3b3730", nf);
+    ctx.fillRect(hx - 16, hb - 17, 32, 17);                  // walls
+    ctx.fillStyle = mix("#b4513a", "#3a1f1a", nf);
+    ctx.beginPath(); ctx.moveTo(hx - 20, hb - 16); ctx.lineTo(hx, hb - 30); ctx.lineTo(hx + 20, hb - 16); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = mix("#6b4a2e", "#221811", nf);
+    ctx.fillRect(hx - 3, hb - 10, 6, 10);                    // door
+    ctx.fillStyle = nf > 0.4 ? "#ffd27a" : "#5d7488";
+    ctx.fillRect(hx - 13, hb - 13, 6, 5); ctx.fillRect(hx + 7, hb - 13, 6, 5);
+    for (let k = 0; k < 3; k++) {                            // a wisp of chimney smoke
+      const t = (now / 3000 + k / 3) % 1;
+      ctx.fillStyle = `rgba(235, 238, 242, ${(0.45 * (1 - t) * (1 - nf * 0.6)).toFixed(2)})`;
+      ctx.beginPath(); ctx.arc(hx + 9.5 + t * 10 + Math.sin(t * 6 + k) * 2, hb - 33 - t * 22, 2.5 + t * 4, 0, 7); ctx.fill();
+    }
+  }
+
+  // --- concrete wash pad: wet, tiled, darker toward the viewer
+  const fg = ctx.createLinearGradient(0, hz, 0, floorB);
+  fg.addColorStop(0, mix("#6f7887", "#2a303c", nf * 0.7));
+  fg.addColorStop(1, mix("#454c59", "#171b23", nf * 0.7));
+  ctx.fillStyle = fg;
+  ctx.fillRect(-offX, hz, Wdyn, H + 2 * offY - hz);
   ctx.fillStyle = `rgba(20, 24, 34, ${0.25 + nf * 0.2})`;
-  ctx.fillRect(-offX, B.y + 40, Wdyn, 4);
+  ctx.fillRect(-offX, hz, Wdyn, 4);
+  // tile seams converging on a far vanishing point
+  const vpx = W / 2, vpy = hz - 260;
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.13)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let k = -16; k <= 16; k++) {
+    const xb = vpx + k * 110;
+    const xt = vpx + (xb - vpx) * (hz - vpy) / (floorB - vpy);
+    ctx.moveTo(xt, hz + 4); ctx.lineTo(xb, floorB);
+  }
+  for (let i = 1; i <= 9; i++) {
+    const y = hz + 4 + (floorB - hz) * Math.pow(i / 9, 1.9);
+    ctx.moveTo(-offX, y); ctx.lineTo(-offX + Wdyn, y);
+  }
+  ctx.stroke();
+  // floor drain in front of the bumper
+  const dgx = B.x + B.w / 2, dgy = B.y + B.h + 44;
+  ctx.fillStyle = "rgba(10, 12, 18, 0.55)";
+  rr(ctx, dgx - 70, dgy - 7, 140, 14, 4); ctx.fill();
+  ctx.fillStyle = mix("#7d8696", "#3a414d", nf);
+  for (let k = 0; k < 12; k++) { rr(ctx, dgx - 64 + k * 11, dgy - 4, 6, 8, 2); ctx.fill(); }
+  // puddles — they catch the sky
+  const shimmer = 0.5 + 0.5 * Math.sin(now / 900);
+  for (const [px0, py0, rx, ry] of [[170, 505, 74, 10], [790, 498, 62, 9], [dgx + 120, dgy + 22, 46, 7], [dgx - 150, dgy + 14, 38, 6]]) {
+    ctx.fillStyle = mix("#8fb3d6", "#2b3a58", nf * 0.8);
+    ctx.globalAlpha = 0.35;
+    ctx.beginPath(); ctx.ellipse(px0, py0, rx, ry, 0, 0, 7); ctx.fill();
+    ctx.globalAlpha = 0.25 + 0.25 * shimmer;
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.ellipse(px0 - rx * 0.15, py0 - ry * 0.25, rx * 0.55, ry * 0.4, 0, Math.PI * 1.1, Math.PI * 1.7); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
 
   // --- the bus front
+  const L = 56 - nf * 15; // body lightness
+  // wet reflection of the bus on the pad
+  const refl = ctx.createLinearGradient(0, B.y + B.h, 0, B.y + B.h + 70);
+  refl.addColorStop(0, hsl(55, L - 10, 0.2));
+  refl.addColorStop(1, hsl(55, L - 10, 0));
+  ctx.fillStyle = refl;
+  ctx.beginPath();
+  ctx.moveTo(B.x + 14, B.y + B.h); ctx.lineTo(B.x + B.w - 14, B.y + B.h);
+  ctx.lineTo(B.x + B.w - 50, B.y + B.h + 70); ctx.lineTo(B.x + 50, B.y + B.h + 70);
+  ctx.closePath(); ctx.fill();
   ctx.fillStyle = `rgba(0, 0, 0, ${0.35 + nf * 0.15})`;
   ctx.beginPath(); ctx.ellipse(B.x + B.w / 2, B.y + B.h + 10, B.w * 0.62, 16, 0, 0, 7); ctx.fill();
-  ctx.fillStyle = `hsl(${b.hue}, 55%, ${56 - nf * 15}%)`;
-  rr(ctx, B.x, B.y, B.w, B.h, 18); ctx.fill();
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = `hsl(${b.hue}, 55%, ${Math.max(10, 30 - nf * 12)}%)`;
-  rr(ctx, B.x, B.y, B.w, B.h, 18); ctx.stroke();
-  // route number on the roof (set explicitly — the removed sign used to set this)
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillStyle = mix("#fff8e7", "#ffd98a", nf);
-  ctx.font = "bold 15px system-ui, sans-serif";
-  ctx.fillText(`${DEST_A} → ${DEST_B}`, B.x + B.w / 2, B.y + 11);
-  // windshield frame + base glass
-  ctx.fillStyle = `hsl(${b.hue}, 55%, ${Math.max(10, 24 - nf * 10)}%)`;
-  rr(ctx, Wd.x - 8, Wd.y - 8, Wd.w + 16, Wd.h + 16, 10); ctx.fill();
-  ctx.fillStyle = mix("#5a7ea6", "#22304a", nf * 0.7);
-  rr(ctx, Wd.x, Wd.y, Wd.w, Wd.h, 4); ctx.fill();
-  // dashboard + steering wheel under the glass
-  ctx.fillStyle = `hsl(${b.hue}, 40%, ${18 - nf * 6}%)`;
-  rr(ctx, Wd.x - 10, Wd.y + Wd.h + 12, Wd.w + 20, 22, 6); ctx.fill();
-  ctx.fillStyle = `hsl(${b.hue}, 45%, ${34 - nf * 10}%)`;
-  rr(ctx, Wd.x + Wd.w / 2 - 22, Wd.y + Wd.h + 18, 44, 14, 7); ctx.fill();
-  // headlights (they glow at night)
-  const ly = Wd.y + Wd.h + 40;
-  for (const hx of [Wd.x + 10, Wd.x + Wd.w - 10]) {
-    ctx.save();
-    ctx.shadowColor = `rgba(255, 225, 140, ${0.8 * nf})`;
-    ctx.shadowBlur = 14;
-    ctx.fillStyle = nf > 0.5 ? "#ffefc0" : mix("#e8ecf2", "#39404d", nf);
-    ctx.beginPath(); ctx.ellipse(hx, ly, 16, 9, 0, 0, 7); ctx.fill();
-    ctx.restore();
+  // headlight pools on the wet floor after dark
+  if (nf > 0.05) {
+    for (const hx of [B.x + 40, B.x + B.w - 40]) {
+      const pg = ctx.createRadialGradient(hx, B.y + B.h + 34, 4, hx, B.y + B.h + 34, 110);
+      pg.addColorStop(0, `rgba(255, 228, 150, ${0.3 * nf})`);
+      pg.addColorStop(1, "rgba(255, 228, 150, 0)");
+      ctx.fillStyle = pg;
+      ctx.beginPath(); ctx.ellipse(hx, B.y + B.h + 34, 110, 34, 0, 0, 7); ctx.fill();
+    }
   }
-  // bumper + grille (the grille is inset into the full-width bumper)
-  ctx.fillStyle = mix("#7b8494", "#333a46", nf);
-  rr(ctx, B.x + 24, B.y + B.h - 16, B.w - 48, 16, 8); ctx.fill();
-  const gy = B.y + B.h - 13; // pinned into the bumper — the face shrank its lower gap
-  ctx.fillStyle = `hsl(${b.hue}, 45%, ${26 - nf * 8}%)`;
-  rr(ctx, Wd.x + 60, gy, Wd.w - 120, 12, 4); ctx.fill();
-  ctx.strokeStyle = "rgba(0,0,0,0.25)";
-  ctx.lineWidth = 1.5;
-  for (let k = 1; k < 4; k++) {
+  // tyres peeking out under the skirt
+  for (const tx of [B.x + 22, B.x + B.w - 72]) {
+    ctx.fillStyle = "#15171b";
+    rr(ctx, tx, B.y + B.h - 24, 50, 40, 9); ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.07)";
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(Wd.x + 66, gy + k * 3);
-    ctx.lineTo(Wd.x + Wd.w - 66, gy + k * 3);
+    for (let k = 0; k < 4; k++) { ctx.moveTo(tx + 8 + k * 11, B.y + B.h); ctx.lineTo(tx + 8 + k * 11, B.y + B.h + 13); }
     ctx.stroke();
   }
+  // the coach silhouette: arched roof, softly rounded shoulders, near-vertical flanks
+  const bodyPath = () => {
+    ctx.beginPath();
+    ctx.moveTo(B.x + 40, B.y);
+    ctx.quadraticCurveTo(B.x + B.w / 2, B.y - 7, B.x + B.w - 40, B.y);
+    ctx.quadraticCurveTo(B.x + B.w - 5, B.y + 3, B.x + B.w - 3, B.y + 42);
+    ctx.lineTo(B.x + B.w, B.y + B.h - 18);
+    ctx.quadraticCurveTo(B.x + B.w, B.y + B.h, B.x + B.w - 18, B.y + B.h);
+    ctx.lineTo(B.x + 18, B.y + B.h);
+    ctx.quadraticCurveTo(B.x, B.y + B.h, B.x, B.y + B.h - 18);
+    ctx.lineTo(B.x + 3, B.y + 42);
+    ctx.quadraticCurveTo(B.x + 5, B.y + 3, B.x + 40, B.y);
+    ctx.closePath();
+  };
+  // rabbit-ear mirrors: dark arms off the roof corners, body-coloured heads
+  for (const s of [-1, 1]) {
+    ctx.save();
+    ctx.translate(B.x + B.w / 2, 0);
+    ctx.scale(s, 1);
+    const ex = -B.w / 2;
+    ctx.strokeStyle = mix("#1d2027", "#0e1014", nf);
+    ctx.lineWidth = 5;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(ex + 16, B.y + 8);
+    ctx.quadraticCurveTo(ex - 20, B.y - 2, ex - 30, B.y + 26);
+    ctx.stroke();
+    ctx.lineCap = "butt";
+    const mh = ctx.createLinearGradient(ex - 48, 0, ex - 22, 0);
+    mh.addColorStop(0, hsl(55, L - 18));
+    mh.addColorStop(0.45, hsl(60, L + 6));
+    mh.addColorStop(1, hsl(55, L - 8));
+    ctx.fillStyle = mh;
+    rr(ctx, ex - 48, B.y + 24, 26, 70, 11); ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,0.35)";
+    ctx.lineWidth = 1.5;
+    rr(ctx, ex - 48, B.y + 24, 26, 70, 11); ctx.stroke();
+    ctx.fillStyle = "rgba(255,255,255,0.25)";
+    rr(ctx, ex - 44, B.y + 30, 5, 50, 2.5); ctx.fill();
+    ctx.restore();
+  }
+  // glossy body: side-to-side shading, a bright roof edge, darker skirt
+  const bodyG = ctx.createLinearGradient(B.x, 0, B.x + B.w, 0);
+  bodyG.addColorStop(0, hsl(60, L - 16));
+  bodyG.addColorStop(0.08, hsl(62, L + 2));
+  bodyG.addColorStop(0.5, hsl(60, L + 4));
+  bodyG.addColorStop(0.92, hsl(60, L - 2));
+  bodyG.addColorStop(1, hsl(60, L - 18));
+  ctx.fillStyle = bodyG;
+  bodyPath(); ctx.fill();
+  ctx.save();
+  bodyPath(); ctx.clip();
+  const sheen = ctx.createLinearGradient(0, B.y, 0, B.y + B.h);
+  sheen.addColorStop(0, "rgba(255,255,255,0.28)");
+  sheen.addColorStop(0.06, "rgba(255,255,255,0.05)");
+  sheen.addColorStop(0.75, "rgba(255,255,255,0.08)");
+  sheen.addColorStop(0.86, "rgba(0,0,0,0)");
+  sheen.addColorStop(1, "rgba(0,0,0,0.3)");
+  ctx.fillStyle = sheen;
+  ctx.fillRect(B.x, B.y - 8, B.w, B.h + 8);
+  ctx.fillStyle = "rgba(0,0,0,0.18)";            // the lower bumper lip
+  ctx.fillRect(B.x, B.y + B.h - 9, B.w, 9);
+  ctx.restore();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = hsl(55, Math.max(10, 28 - nf * 12));
+  bodyPath(); ctx.stroke();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  // roof antenna + two small marker lights
+  ctx.strokeStyle = "#1a1d22";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(B.x + B.w / 2, B.y - 4); ctx.lineTo(B.x + B.w / 2, B.y - 14); ctx.stroke();
+  ctx.save();
+  ctx.shadowColor = "rgba(255, 170, 60, 0.9)";
+  ctx.shadowBlur = 4 + 6 * nf;
+  ctx.fillStyle = "#ffb13b";
+  for (const mx of [B.x + 30, B.x + B.w - 30]) { ctx.beginPath(); ctx.ellipse(mx, B.y + 6, 4, 2.5, 0, 0, 7); ctx.fill(); }
+  ctx.restore();
+  // windshield: a black frame that follows the roofline, with a deep black
+  // band under the glass where the wipers park
+  ctx.fillStyle = "#0c0d10";
+  ctx.beginPath();
+  ctx.moveTo(Wd.x - 9, Wd.y + 18);
+  ctx.quadraticCurveTo(Wd.x - 8, Wd.y - 11, Wd.x + 26, Wd.y - 12);
+  ctx.quadraticCurveTo(Wd.x + Wd.w / 2, Wd.y - 17, Wd.x + Wd.w - 26, Wd.y - 12);
+  ctx.quadraticCurveTo(Wd.x + Wd.w + 8, Wd.y - 11, Wd.x + Wd.w + 9, Wd.y + 18);
+  ctx.lineTo(Wd.x + Wd.w + 10, Wd.y + Wd.h + 18);
+  ctx.quadraticCurveTo(Wd.x + Wd.w + 10, Wd.y + Wd.h + 24, Wd.x + Wd.w + 2, Wd.y + Wd.h + 24);
+  ctx.lineTo(Wd.x - 2, Wd.y + Wd.h + 24);
+  ctx.quadraticCurveTo(Wd.x - 10, Wd.y + Wd.h + 24, Wd.x - 10, Wd.y + Wd.h + 18);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.12)";
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  const glass = ctx.createLinearGradient(0, Wd.y, 0, Wd.y + Wd.h);
+  glass.addColorStop(0, mix("#8fbbe3", "#2b3b5a", nf * 0.75));
+  glass.addColorStop(0.55, mix("#5a7ea6", "#1f2b44", nf * 0.75));
+  glass.addColorStop(1, mix("#3f6187", "#151d30", nf * 0.75));
+  ctx.fillStyle = glass;
+  rr(ctx, Wd.x, Wd.y, Wd.w, Wd.h, 4); ctx.fill();
+  // the coach interior seen through the glass: a bright cream cabin in
+  // one-point perspective — twin LED strips down the ceiling, dark luggage
+  // racks with teal accents, rows of leather seats, the driver's seat, dash
+  ctx.save();
+  rr(ctx, Wd.x, Wd.y, Wd.w, Wd.h, 4); ctx.clip();
+  const BK = { x0: Wd.x + Wd.w / 2 - 28, x1: Wd.x + Wd.w / 2 + 28, y0: Wd.y + Wd.h * 0.37, y1: Wd.y + Wd.h * 0.59 }; // the back wall
+  const IX = (u, z) => lerp(lerp(BK.x0, BK.x1, u), lerp(Wd.x, Wd.x + Wd.w, u), z);
+  // the passenger deck sits high, level with the dash top; the driver sits lower, in front of it
+  const IY = (v, z) => lerp(lerp(BK.y0, BK.y1, v), lerp(Wd.y - 6, Wd.y + Wd.h - 26, v), z);
+  const poly = pts => {
+    ctx.beginPath();
+    pts.forEach(([u, v, z], k) => k ? ctx.lineTo(IX(u, z), IY(v, z)) : ctx.moveTo(IX(u, z), IY(v, z)));
+    ctx.closePath();
+  };
+  const lit = (d, n2) => mix(d, n2, nf);
+  ctx.fillStyle = lit("#b9b0a0", "#d2c7b4");
+  ctx.fillRect(Wd.x, Wd.y, Wd.w, Wd.h);
+  // ceiling: pale panels, a recessed centre channel between the two LED strips
+  const ceil = ctx.createLinearGradient(0, Wd.y, 0, BK.y0);
+  ceil.addColorStop(0, lit("#c9c2b5", "#ddd4c3"));
+  ceil.addColorStop(1, lit("#b6ad9d", "#cfc4b0"));
+  ctx.fillStyle = ceil;
+  poly([[0, 0, 1], [1, 0, 1], [1, 0, 0], [0, 0, 0]]); ctx.fill();
+  ctx.fillStyle = lit("#aea596", "#c2b8a5");
+  poly([[0.4, 0, 1], [0.6, 0, 1], [0.6, 0, 0], [0.4, 0, 0]]); ctx.fill();
+  // floor: pale aisle between darker carpet
+  ctx.fillStyle = lit("#6f6a62", "#857e72");
+  poly([[0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0]]); ctx.fill();
+  ctx.fillStyle = lit("#cfc6b6", "#e2d8c6");
+  poly([[0.42, 1, 1], [0.58, 1, 1], [0.58, 1, 0], [0.42, 1, 0]]); ctx.fill();
+  for (const side of [0, 1]) {
+    const U = u => side ? 1 - u : u;
+    // side wall
+    ctx.fillStyle = lit("#a89f90", "#c3b8a5");
+    poly([[U(0), 0, 1], [U(0), 0, 0], [U(0), 1, 0], [U(0), 1, 1]]); ctx.fill();
+    // tinted side windows with teal curtains at each pillar
+    ctx.fillStyle = mix("#557a94", "#0c1522", nf);
+    poly([[U(0), 0.18, 1], [U(0), 0.18, 0.03], [U(0), 0.62, 0.03], [U(0), 0.62, 1]]); ctx.fill();
+    ctx.fillStyle = lit("#1f7f8c", "#2aa3b3");
+    for (let k = 1; k < 8; k++) {
+      const z0 = 1 / (1 + k * 0.5), z1 = 1 / (1 + (k + 0.18) * 0.5);
+      poly([[U(0), 0.18, z0], [U(0), 0.18, z1], [U(0), 0.62, z1], [U(0), 0.62, z0]]); ctx.fill();
+    }
+    // charcoal luggage rack, its lip trimmed in teal
+    ctx.fillStyle = lit("#2b2f35", "#363b42");
+    poly([[U(0), 0.03, 1], [U(0), 0.03, 0], [U(0.17), 0.13, 0], [U(0.17), 0.13, 1]]); ctx.fill();
+    ctx.fillStyle = lit("#1c1f24", "#24282e");
+    poly([[U(0.17), 0.13, 1], [U(0.17), 0.13, 0], [U(0.17), 0.16, 0], [U(0.17), 0.16, 1]]); ctx.fill();
+    ctx.fillStyle = lit("#2a9fb0", "#45d0e0");
+    poly([[U(0.17), 0.157, 1], [U(0.17), 0.157, 0], [U(0.17), 0.165, 0], [U(0.17), 0.165, 1]]); ctx.fill();
+  }
+  // back wall: cream, a dark rear door
+  ctx.fillStyle = lit("#c8bfae", "#ddd2be");
+  ctx.fillRect(BK.x0, BK.y0, BK.x1 - BK.x0, BK.y1 - BK.y0);
+  ctx.fillStyle = lit("#3a3e44", "#2a2e34");
+  ctx.fillRect(BK.x0 + 18, BK.y0 + 8, BK.x1 - BK.x0 - 36, BK.y1 - BK.y0 - 8);
+  // twin LED light strips running the length of the ceiling
+  ctx.save();
+  ctx.shadowColor = `rgba(255, 250, 235, ${0.7 + 0.3 * nf})`;
+  ctx.shadowBlur = 10 + 8 * nf;
+  ctx.fillStyle = "#fffdf6";
+  poly([[0.355, 0, 1], [0.4, 0, 1], [0.4, 0, 0.02], [0.355, 0, 0.02]]); ctx.fill();
+  poly([[0.6, 0, 1], [0.645, 0, 1], [0.645, 0, 0.02], [0.6, 0, 0.02]]); ctx.fill();
+  // reading lights under the racks
+  ctx.shadowBlur = 4;
+  ctx.beginPath();
+  for (let k = 0; k < 8; k++) {
+    const z = 1 / (1 + k * 0.45);
+    for (const u of [0.12, 0.88]) { ctx.moveTo(IX(u, z) + 1.5 * z, IY(0.135, z)); ctx.arc(IX(u, z), IY(0.135, z), 1.5 * z, 0, 7); }
+  }
+  ctx.fill();
+  ctx.restore();
+  // rows of tall cream leather seats on pedestal legs, back to front (each
+  // row overlaps the one behind); headrests reach up into the window band
+  const seat = (u0, u1, z, top, tone, fv = 1) => {
+    const x0 = IX(u0, z), x1 = IX(u1, z), yT = IY(top, z), yF = IY(fv, z), sw = x1 - x0, th = yF - yT;
+    const yC = yT + th * 0.66, yE = yT + th * 0.8;   // cushion top / front edge
+    ctx.fillStyle = "rgba(0,0,0,0.25)";                // shadow on the floor
+    ctx.beginPath(); ctx.ellipse(x0 + sw / 2, yF, sw * 0.45, Math.max(1, th * 0.03), 0, 0, 7); ctx.fill();
+    ctx.fillStyle = "#26282c";                         // pedestal leg
+    ctx.fillRect(x0 + sw * 0.42, yE, sw * 0.16, yF - yE);
+    ctx.fillRect(x0 + sw * 0.3, yF - th * 0.03, sw * 0.4, th * 0.03);
+    const sg = ctx.createLinearGradient(x0, yT, x1, yC);
+    sg.addColorStop(0, lit(tone[0], tone[1]));
+    sg.addColorStop(1, lit(tone[2], tone[3]));
+    ctx.fillStyle = sg;                                // backrest
+    rr(ctx, x0 + sw * 0.04, yT + th * 0.08, sw * 0.92, yC - yT - th * 0.06, 7 * z); ctx.fill();
+    ctx.fillStyle = lit(tone[0], tone[1]);             // headrest
+    rr(ctx, x0 + sw * 0.16, yT, sw * 0.68, th * 0.15, 5 * z); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.25)";
+    rr(ctx, x0 + sw * 0.22, yT + th * 0.02, sw * 0.56, th * 0.05, 3 * z); ctx.fill();
+    ctx.fillStyle = lit(tone[2], tone[3]);             // seat cushion, jutting forward
+    rr(ctx, x0, yC - th * 0.02, sw, yE - yC + th * 0.02, 5 * z); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.18)";
+    ctx.fillRect(x0 + sw * 0.06, yC, sw * 0.88, Math.max(0.8, th * 0.025));
+    ctx.strokeStyle = "rgba(90, 76, 58, 0.35)";        // stitched panels
+    ctx.lineWidth = Math.max(0.6, 1.2 * z);
+    ctx.beginPath();
+    ctx.moveTo(x0 + sw * 0.14, yT + th * 0.3); ctx.lineTo(x1 - sw * 0.14, yT + th * 0.3);
+    ctx.moveTo(x0 + sw * 0.5, yT + th * 0.3); ctx.lineTo(x0 + sw * 0.5, yC - th * 0.03);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(0,0,0,0.12)";                // shaded outer edge
+    rr(ctx, x0 + sw * 0.04, yT + th * 0.08, sw * 0.12, yC - yT - th * 0.06, 7 * z); ctx.fill();
+  };
+  const CREAM = ["#efe7d8", "#fbf3e2", "#bfb19a", "#d2c3a8"];
+  for (let k = 8; k >= 1; k--) {
+    const z = 0.78 / (1 + k * 0.45);
+    for (const [u0, u1] of [[0.05, 0.2], [0.215, 0.365], [0.635, 0.785], [0.8, 0.95]]) seat(u0, u1, z, 0.3, CREAM);
+  }
+  seat(0.05, 0.2, 0.78, 0.3, CREAM);   // front passenger row (left)
+  seat(0.215, 0.365, 0.78, 0.3, CREAM);
+  seat(0.62, 0.92, 0.95, 0.42, ["#d8d0c2", "#e8dfcf", "#8f8573", "#a39885"], 1.12); // the driver's seat, down in its well (right)
+  // the cabin glows after dark
+  ctx.globalCompositeOperation = "lighter";
+  const glow = ctx.createRadialGradient(Wd.x + Wd.w / 2, Wd.y + 50, 10, Wd.x + Wd.w / 2, Wd.y + 50, 200);
+  glow.addColorStop(0, `rgba(255, 244, 222, ${0.06 + 0.16 * nf})`);
+  glow.addColorStop(1, "rgba(255, 244, 222, 0)");
+  ctx.fillStyle = glow;
+  ctx.fillRect(Wd.x, Wd.y, Wd.w, Wd.h);
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = `rgba(8, 10, 16, ${0.45 - 0.03 * nf})`; // tinted glass: the cabin reads dim from outside
+  ctx.fillRect(Wd.x, Wd.y, Wd.w, Wd.h);
+  // steering wheel on its column, tipped back toward the driver; the dash top hides its lower rim
+  const swx = Wd.x + Wd.w - 62, swy = Wd.y + Wd.h - 36, srx = 29, sry = 12;
+  ctx.fillStyle = "#1b1c20";
+  ctx.beginPath();
+  ctx.moveTo(swx - 5, swy); ctx.lineTo(swx + 5, swy);
+  ctx.lineTo(swx + 8, Wd.y + Wd.h); ctx.lineTo(swx - 8, Wd.y + Wd.h);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = "#202226";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(swx, swy); ctx.lineTo(swx - srx + 2, swy + 1);
+  ctx.moveTo(swx, swy); ctx.lineTo(swx + srx - 2, swy + 1);
+  ctx.moveTo(swx, swy); ctx.lineTo(swx, swy + sry - 1);
+  ctx.stroke();
+  ctx.fillStyle = "#26282d";
+  ctx.beginPath(); ctx.ellipse(swx, swy, 7, 3.5, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = "rgba(220, 225, 235, 0.35)";
+  ctx.beginPath(); ctx.ellipse(swx, swy - 0.5, 2.2, 1.1, 0, 0, 7); ctx.fill();
+  ctx.strokeStyle = "#141518";
+  ctx.lineWidth = 4.5;
+  ctx.beginPath(); ctx.ellipse(swx, swy, srx, sry, 0, 0, 7); ctx.stroke();
+  ctx.strokeStyle = "rgba(255, 245, 225, 0.16)";
+  ctx.lineWidth = 1.2;
+  ctx.beginPath(); ctx.ellipse(swx, swy - 1.2, srx, sry, 0, Math.PI + 0.45, Math.PI * 2 - 0.45); ctx.stroke();
+  // dashboard, overhead monitor
+  const dash = ctx.createLinearGradient(0, Wd.y + Wd.h - 30, 0, Wd.y + Wd.h);
+  dash.addColorStop(0, "#2b2d31"); dash.addColorStop(1, "#121316");
+  ctx.fillStyle = dash;
+  ctx.fillRect(Wd.x, Wd.y + Wd.h - 28, Wd.w, 28);
+  ctx.fillStyle = "rgba(255, 245, 225, 0.22)";
+  ctx.fillRect(Wd.x, Wd.y + Wd.h - 28, Wd.w, 1.5);
+  ctx.fillStyle = "#141518";
+  rr(ctx, Wd.x + Wd.w / 2 - 2, Wd.y, 4, 14, 2); ctx.fill();
+  rr(ctx, Wd.x + Wd.w / 2 - 24, Wd.y + 12, 48, 13, 3); ctx.fill();
+  ctx.fillStyle = mix("#2c4f78", "#3f6fb0", nf);
+  rr(ctx, Wd.x + Wd.w / 2 - 21, Wd.y + 14, 42, 9, 2); ctx.fill();
+  // the glass itself tints what's behind it — more so by day, when it reflects the sky
+  ctx.globalAlpha = 0.08 + 0.12 * (1 - nf);
+  ctx.fillStyle = glass;
+  ctx.fillRect(Wd.x, Wd.y, Wd.w, Wd.h);
+  ctx.globalAlpha = 1;
+  // red LED destination sign on the dash, bottom-left behind the glass (grime covers it too)
+  const led = { x: Wd.x + 8, y: Wd.y + Wd.h - 17, w: 72, h: 14 };
+  ctx.fillStyle = "#0b0907";
+  rr(ctx, led.x, led.y, led.w, led.h, 3); ctx.fill();
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(led.x + 2, led.y, led.w - 4, led.h);
+  ctx.clip();
+  ctx.shadowColor = "rgba(255, 50, 35, 0.9)";
+  ctx.shadowBlur = 5 + 5 * nf;
+  ctx.fillStyle = "#ff3b2f";
+  ctx.font = "bold 9px ui-monospace, Menlo, monospace";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  const msg = `${DEST_A.toUpperCase()} → ${DEST_B.toUpperCase()}     `;
+  const span = ctx.measureText(msg).width;
+  const off = ((now / 1000) * 22) % span; // 22 px/s marquee
+  for (let tx = led.x + 2 - off; tx < led.x + led.w; tx += span) ctx.fillText(msg, tx, led.y + led.h / 2 + 0.5);
+  ctx.restore();
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.4)";
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  for (let x = led.x + 2; x < led.x + led.w; x += 2) { ctx.moveTo(x, led.y + 2); ctx.lineTo(x, led.y + led.h - 2); }
+  ctx.stroke();
+  ctx.restore();
+
+  // --- the lower face: swept headlights, a wide chrome grille with a round
+  // emblem, the model badge, plate and fog lamps
+  const ny = Wd.y + Wd.h + 24; // top of the painted lower face: the brand band sits here
+  const fy = ny + 40;          // the headlight + grille row below it
+  const chromeV = (y0, y1) => {
+    const g2 = ctx.createLinearGradient(0, y0, 0, y1);
+    g2.addColorStop(0, mix("#f4f7fb", "#6a7280", nf));
+    g2.addColorStop(0.5, mix("#9aa3b1", "#3a414c", nf));
+    g2.addColorStop(1, mix("#dfe4eb", "#555d69", nf));
+    return g2;
+  };
+  for (const s of [-1, 1]) {
+    ctx.save();
+    ctx.translate(B.x + B.w / 2, 0);
+    ctx.scale(s, 1);
+    const ox = -B.w / 2; // outer edge of this side
+    // housing: a slim wedge sweeping up toward the outer corner
+    ctx.fillStyle = "#14161a";
+    ctx.beginPath();
+    ctx.moveTo(ox + 8, fy + 2);
+    ctx.lineTo(ox + 74, fy + 12);
+    ctx.quadraticCurveTo(ox + 80, fy + 14, ox + 76, fy + 22);
+    ctx.lineTo(ox + 20, fy + 26);
+    ctx.quadraticCurveTo(ox + 8, fy + 26, ox + 7, fy + 16);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = chromeV(fy, fy + 26);
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    // LED daytime running strip along the top edge
+    ctx.save();
+    ctx.shadowColor = `rgba(220, 240, 255, ${0.6 + 0.4 * nf})`;
+    ctx.shadowBlur = 6 + 8 * nf;
+    ctx.strokeStyle = "#f2f8ff";
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(ox + 12, fy + 5); ctx.lineTo(ox + 70, fy + 14); ctx.stroke();
+    ctx.lineCap = "butt";
+    // twin projector lenses (they glow at night)
+    ctx.shadowColor = `rgba(255, 236, 180, ${0.9 * nf})`;
+    ctx.shadowBlur = 16;
+    for (const [lx, lr] of [[ox + 28, 6.5], [ox + 48, 5.5]]) {
+      const lens = ctx.createRadialGradient(lx - 2, fy + 17, 0.5, lx, fy + 18, lr);
+      if (nf > 0.5) { lens.addColorStop(0, "#fffbe8"); lens.addColorStop(1, "#ffd97a"); }
+      else { lens.addColorStop(0, "#ffffff"); lens.addColorStop(1, mix("#9aa6b6", "#4a5260", nf)); }
+      ctx.fillStyle = lens;
+      ctx.beginPath(); ctx.arc(lx, fy + 18, lr, 0, 7); ctx.fill();
+    }
+    ctx.restore();
+    ctx.fillStyle = "#f5a524";                                  // indicator
+    rr(ctx, ox + 60, fy + 15, 10, 4, 2); ctx.fill();
+    // fog lamp low on the bumper corner
+    ctx.fillStyle = "#14161a";
+    ctx.beginPath(); ctx.arc(ox + 26, B.y + B.h - 14, 6, 0, 7); ctx.fill();
+    ctx.fillStyle = nf > 0.5 ? "#fff1c4" : mix("#d9dee6", "#4a5260", nf);
+    ctx.beginPath(); ctx.arc(ox + 26, B.y + B.h - 14, 3.8, 0, 7); ctx.fill();
+    ctx.restore();
+  }
+  // wide chrome grille: frame, dark mesh, three bright slats
+  const GR = { x: B.x + 88, y: fy + 4, w: B.w - 176, h: 28 };
+  ctx.fillStyle = chromeV(GR.y, GR.y + GR.h);
+  rr(ctx, GR.x - 3, GR.y - 3, GR.w + 6, GR.h + 6, 10); ctx.fill();
+  ctx.fillStyle = "#121418";
+  rr(ctx, GR.x, GR.y, GR.w, GR.h, 8); ctx.fill();
+  for (let k = 0; k < 3; k++) {
+    const sy = GR.y + 4 + k * 8;
+    ctx.fillStyle = chromeV(sy, sy + 4);
+    rr(ctx, GR.x + 4, sy, GR.w - 8, 4, 2); ctx.fill();
+  }
+  // round emblem: chrome ring on a dark disc with the line's monogram
+  const emX = B.x + B.w / 2, emY = GR.y + GR.h / 2;
+  ctx.fillStyle = "#121418";
+  ctx.beginPath(); ctx.arc(emX, emY, 13, 0, 7); ctx.fill();
+  ctx.strokeStyle = chromeV(emY - 12, emY + 12);
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(emX, emY, 11, 0, 7); ctx.stroke();
+  ctx.fillStyle = mix("#eef2f7", "#8a929e", nf);
+  ctx.font = "bold 9px system-ui, sans-serif";
+  ctx.fillText("MY", emX, emY + 0.5);
+  // licence plate under the grille
+  const plY = B.y + B.h - 17;
+  ctx.fillStyle = mix("#f4f6fa", "#8a909b", nf * 0.8);
+  rr(ctx, B.x + B.w / 2 - 30, plY, 60, 13, 2); ctx.fill();
+  ctx.fillStyle = mix("#2d6fd1", "#1d3a6a", nf);
+  rr(ctx, B.x + B.w / 2 - 30, plY, 7, 13, 2); ctx.fill();
+  ctx.strokeStyle = "rgba(0,0,0,0.45)";
+  ctx.lineWidth = 1;
+  rr(ctx, B.x + B.w / 2 - 30, plY, 60, 13, 2); ctx.stroke();
+  ctx.fillStyle = "#1b1e24";
+  ctx.font = "bold 8px ui-monospace, Menlo, monospace";
+  ctx.fillText(`34 MY ${String(b.id % 1000).padStart(3, "0")}`, B.x + B.w / 2 + 3, plY + 7);
   ctx.lineWidth = 1;
 
   // --- the windshield cells: dirt, suds, shine. 600 cells of 8.4×12.5 are
   // batched into one path per quantized shade, so the fine grid stays cheap
   const cw = Wd.w / Wd.cols, chh = Wd.h / Wd.rows;
   const q10 = v => Math.min(9, Math.max(0, Math.round(v * 10) - 1));
-  const gR = new Array(10), gS = new Array(10), sR = new Array(10),
+  const gV = new Array(10), gR = new Array(10), gS = new Array(10), sR = new Array(10),
         sB = new Array(30), shine = [];
   for (let r = 0; r < Wd.rows; r++) {
     for (let c = 0; c < Wd.cols; c++) {
@@ -1116,7 +1665,10 @@ function drawWashView() {
       const x0 = Wd.x + c * cw, y0 = Wd.y + r * chh;
       const g = w.g[i], f = w.f[i];
       if (g > 0.02) {
-        const a = Math.min(1, 0.75 * g);
+        const av = Math.min(1, 0.92 * g); // grime clouds the glass — the cabin fades out behind it
+        (gV[q10(av)] || (gV[q10(av)] = [])).push(x0, y0);
+        // mottled grime: each cell's own stable thickness, heavier toward the bottom edge
+        const a = Math.min(1, 0.75 * g * (0.72 + 0.4 * hsh(i) + 0.12 * r / Wd.rows));
         (gR[q10(a)] || (gR[q10(a)] = [])).push(x0, y0);
         const as = Math.min(1, 0.55 * g);
         const sp = (gS[q10(as)] || (gS[q10(as)] = [])); // stable speckles — no per-frame flicker
@@ -1137,10 +1689,19 @@ function drawWashView() {
           bub.push(x0 + (0.25 + 0.5 * u) * cw, y0 + (0.25 + 0.5 * v) * chh);
         }
       }
-      if (g < 0.1 && f < 0.1) // a clean shine streak on each sparkling cell
-        shine.push(x0 + cw * 0.7, y0 + chh * 0.25, x0 + cw * 0.2, y0 + chh * 0.75);
+      if (g < 0.1 && f < 0.1 && hsh(i * 3.7) > 0.985) // a scattered glint on sparkling glass
+        shine.push(x0 + cw * 0.85, y0 + chh * 0.1, x0 + cw * 0.1, y0 + chh * 0.9);
     }
   }
+  ctx.fillStyle = mix("#5a7ea6", "#1f2b44", nf * 0.75);
+  for (let s = 0; s < 10; s++) {
+    if (!gV[s]) continue;
+    ctx.globalAlpha = 0.1 * (s + 1);
+    ctx.beginPath();
+    for (let k = 0; k < gV[s].length; k += 2) ctx.rect(gV[s][k], gV[s][k + 1], cw, chh);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
   for (let s = 0; s < 10; s++) {
     if (gR[s]) {
       ctx.fillStyle = `rgba(112, 84, 44, ${(0.1 * (s + 1)).toFixed(2)})`;
@@ -1171,10 +1732,15 @@ function drawWashView() {
       ctx.arc(sB[s][k], sB[s][k + 1], rad, 0, 7);
     }
     ctx.fill();
+    if (s >= 15) { // the fuller bubbles get a soft rim, so suds read as foam, not paint
+      ctx.strokeStyle = `rgba(150, 190, 220, ${(0.04 * (Math.floor(s / 3) + 1)).toFixed(2)})`;
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+    }
   }
   if (shine.length) {
-    ctx.strokeStyle = "rgba(255,255,255,0.5)";
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(255,255,255,0.2)";
+    ctx.lineWidth = 1;
     ctx.beginPath();
     for (let k = 0; k < shine.length; k += 4) {
       ctx.moveTo(shine[k], shine[k + 1]);
@@ -1183,7 +1749,7 @@ function drawWashView() {
     ctx.stroke();
     ctx.lineWidth = 1;
   }
-  ctx.strokeStyle = "rgba(255,255,255,0.14)";
+  ctx.strokeStyle = "rgba(255,255,255,0.05)";
   ctx.lineWidth = 1;
   ctx.beginPath();
   for (let c = 1; c < Wd.cols; c++) {
@@ -1195,75 +1761,175 @@ function drawWashView() {
     ctx.moveTo(Wd.x, gy2); ctx.lineTo(Wd.x + Wd.w, gy2);
   }
   ctx.stroke();
+  // glass reflections over everything on the windshield
+  ctx.save();
+  rr(ctx, Wd.x, Wd.y, Wd.w, Wd.h, 4); ctx.clip();
+  ctx.fillStyle = "rgba(255,255,255,0.08)";
+  ctx.beginPath();
+  ctx.moveTo(Wd.x + 30, Wd.y); ctx.lineTo(Wd.x + 110, Wd.y);
+  ctx.lineTo(Wd.x + 10, Wd.y + Wd.h); ctx.lineTo(Wd.x - 70, Wd.y + Wd.h);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,0.05)";
+  ctx.beginPath();
+  ctx.moveTo(Wd.x + 130, Wd.y); ctx.lineTo(Wd.x + 152, Wd.y);
+  ctx.lineTo(Wd.x + 52, Wd.y + Wd.h); ctx.lineTo(Wd.x + 30, Wd.y + Wd.h);
+  ctx.closePath(); ctx.fill();
+  if (w.done) { // a glint sweeps across the finished glass
+    const t = (now % 2600) / 2600;
+    const gx = Wd.x - 120 + t * (Wd.w + 240);
+    const gl = ctx.createLinearGradient(gx - 40, 0, gx + 40, 0);
+    gl.addColorStop(0, "rgba(255,255,255,0)");
+    gl.addColorStop(0.5, "rgba(255,255,255,0.14)");
+    gl.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = gl;
+    ctx.beginPath();
+    ctx.moveTo(gx - 10, Wd.y); ctx.lineTo(gx + 50, Wd.y);
+    ctx.lineTo(gx - 10, Wd.y + Wd.h); ctx.lineTo(gx - 70, Wd.y + Wd.h);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+  // parked wipers resting along the bottom of the glass
+  for (const [wx0, len] of [[Wd.x + 34, 104], [Wd.x + Wd.w / 2 + 22, 104]]) {
+    const wy0 = Wd.y + Wd.h + 13;
+    ctx.strokeStyle = "#16181d";
+    ctx.lineWidth = 3;
+    ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(wx0, wy0); ctx.lineTo(wx0 + len, wy0 - 9); ctx.stroke();
+    ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(wx0 + 14, wy0 - 3); ctx.lineTo(wx0 + len + 4, wy0 - 11); ctx.stroke();
+    ctx.lineCap = "butt";
+    ctx.fillStyle = mix("#3a3f48", "#1b1e24", nf);
+    ctx.beginPath(); ctx.arc(wx0, wy0, 4, 0, 7); ctx.fill();
+  }
+  ctx.lineWidth = 1;
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
 
   // --- the two tool stations
-  const panel = (R, title, sel) => {
+  // no stand or box: the tools sit straight on the wet pad, a label below
+  // them, and a pulsing floor ring under the one in hand
+  const station = (R, title, sel) => {
+    if (sel) {
+      ctx.strokeStyle = `rgba(120, 225, 255, ${0.35 + 0.45 * pulse})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(R.x + R.w / 2, R.y + R.h - 12, R.w * 0.52, 14, 0, 0, 7); ctx.stroke();
+    }
     ctx.save();
-    if (sel) { ctx.shadowColor = "rgba(90, 200, 255, 0.9)"; ctx.shadowBlur = 18; }
-    ctx.fillStyle = sel ? mix("#1f2c3c", "#131c28", nf) : mix("#151c26", "#0e141d", nf);
-    rr(ctx, R.x, R.y, R.w, R.h, 12);
-    ctx.fill();
-    ctx.restore();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = sel ? `rgba(120, 225, 255, ${0.5 + 0.5 * pulse})` : "rgba(255,255,255,0.12)";
-    rr(ctx, R.x, R.y, R.w, R.h, 12);
-    ctx.stroke();
-    ctx.fillStyle = sel ? "rgba(160,230,255,0.95)" : "rgba(226,235,248,0.75)";
+    ctx.shadowColor = "rgba(0, 0, 0, 0.8)";
+    ctx.shadowBlur = 4;
+    ctx.fillStyle = sel ? "rgba(160,230,255,0.95)" : "rgba(236,242,250,0.85)";
     ctx.font = "bold 13px system-ui, sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText(title, R.x + R.w / 2, R.y + 20);
+    ctx.fillText(title, R.x + R.w / 2, R.y + R.h + 20);
     if (sel) {
       ctx.font = "bold 9px system-ui, sans-serif";
       ctx.fillStyle = `rgba(160, 230, 255, ${0.6 + 0.4 * pulse})`;
-      ctx.fillText("IN HAND — hold & drag", R.x + R.w / 2, R.y + 35);
+      ctx.fillText("ELİNDE — basılı tut & sürükle", R.x + R.w / 2, R.y + R.h + 34);
     }
-    ctx.textAlign = "left";
+    ctx.restore();
+  };
+  // a long-handled brush: wood handle, block, bristles, a crown of suds
+  const drawBrush = (hy0, hLen, headY, sudsN) => {
+    const hg = ctx.createLinearGradient(-5, 0, 5, 0);
+    hg.addColorStop(0, "#6e4520"); hg.addColorStop(0.5, "#a8743f"); hg.addColorStop(1, "#6e4520");
+    ctx.fillStyle = hg;
+    rr(ctx, -5, hy0, 10, hLen, 4); ctx.fill();
+    ctx.fillStyle = "#e9c25a";
+    rr(ctx, -25, headY - 6, 50, 9, 3); ctx.fill();
+    ctx.strokeStyle = "rgba(120, 84, 20, 0.55)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let k = -21; k <= 21; k += 4) { ctx.moveTo(k, headY - 5); ctx.lineTo(k, headY + 2); }
+    ctx.stroke();
+    const bg = ctx.createLinearGradient(0, headY + 2, 0, headY + 16);
+    bg.addColorStop(0, "#9a6533"); bg.addColorStop(1, "#6b421d");
+    ctx.fillStyle = bg;
+    rr(ctx, -27, headY + 2, 54, 14, 6); ctx.fill();
+    for (let k = 0; k < sudsN; k++) {
+      const r = 3 + (k % 3);
+      ctx.fillStyle = "rgba(255,255,255,0.92)";
+      ctx.beginPath(); ctx.arc(-20 + k * (40 / (sudsN - 1)), headY - 6 - (k % 2) * 2, r, 0, 7); ctx.fill();
+      ctx.fillStyle = "rgba(170, 215, 240, 0.5)";
+      ctx.beginPath(); ctx.arc(-20 + k * (40 / (sudsN - 1)) + r * 0.3, headY - 6 - (k % 2) * 2 + r * 0.35, r * 0.45, 0, 7); ctx.fill();
+    }
   };
 
   // soap bucket + the long-handled brush, leaning on it
-  panel(Br, "🧼 BRUSH — soap", w.tool === "brush");
-  const bcx = Br.x + 44, bcy = Br.y + 177;
-  ctx.fillStyle = "#2e5f8a";
+  station(Br, "🧼 FIRÇA — köpük", w.tool === "brush");
+  const bcx = Br.x + 52, bcy = Br.y + Br.h - 34;
+  ctx.fillStyle = "rgba(0,0,0,0.35)";
+  ctx.beginPath(); ctx.ellipse(bcx + 6, bcy + 18, 34, 6, 0, 0, 7); ctx.fill();
+  const bk = ctx.createLinearGradient(bcx - 24, 0, bcx + 24, 0);
+  bk.addColorStop(0, "#1f4669"); bk.addColorStop(0.35, "#3f7fb6"); bk.addColorStop(1, "#1b3d5c");
+  ctx.fillStyle = bk;
   ctx.beginPath();
   ctx.moveTo(bcx - 24, bcy - 12); ctx.lineTo(bcx + 24, bcy - 12);
   ctx.lineTo(bcx + 19, bcy + 16); ctx.lineTo(bcx - 19, bcy + 16);
   ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.14)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(bcx - 22, bcy - 2); ctx.lineTo(bcx + 22, bcy - 2);
+  ctx.moveTo(bcx - 20.5, bcy + 9); ctx.lineTo(bcx + 20.5, bcy + 9);
+  ctx.stroke();
+  ctx.strokeStyle = "#a9b2bf";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.ellipse(bcx, bcy - 10, 23, 16, 0, Math.PI * 1.05, Math.PI * 1.95); ctx.stroke();
+  ctx.fillStyle = "#5c93c6";
+  ctx.beginPath(); ctx.ellipse(bcx, bcy - 12, 25, 5.5, 0, 0, 7); ctx.fill();
   ctx.fillStyle = "#8fe3f2";
-  ctx.beginPath(); ctx.ellipse(bcx, bcy - 12, 24, 5, 0, 0, 7); ctx.fill();
-  ctx.fillStyle = "rgba(255,255,255,0.9)";
-  for (let k = 0; k < 4; k++) {
-    ctx.beginPath(); ctx.arc(bcx - 12 + k * 8, bcy - 14, 3 + (k % 2), 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(bcx, bcy - 12, 21, 4, 0, 0, 7); ctx.fill();
+  for (let k = 0; k < 6; k++) {
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    ctx.beginPath(); ctx.arc(bcx - 15 + k * 6, bcy - 14 - (k % 2) * 2, 2.5 + (k % 3), 0, 7); ctx.fill();
+  }
+  for (let k = 0; k < 3; k++) { // bubbles drifting up off the bucket
+    const t = (now / 1800 + k / 3) % 1;
+    ctx.strokeStyle = `rgba(220, 245, 255, ${0.7 * (1 - t)})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(bcx - 8 + k * 9 + Math.sin(now / 400 + k) * 3, bcy - 20 - t * 46, 2 + 2 * t, 0, 7); ctx.stroke();
   }
   ctx.save();
   ctx.translate(bcx + 40, bcy + 26);
   ctx.rotate(-0.55);
-  ctx.fillStyle = "#8a5a2b";
-  rr(ctx, -5, -88, 10, 88, 4); ctx.fill();       // the long handle
-  rr(ctx, -26, -104, 52, 18, 9); ctx.fill();     // the brush head
-  ctx.fillStyle = "#f2f7ff";
-  rr(ctx, -22, -98, 44, 9, 4); ctx.fill();       // suds on the pad
+  drawBrush(-88, 88, -98, 5);
   ctx.restore();
 
-  // faucet + coiled fresh-water hose
-  panel(Hs, "💧 HOSE — rinse", w.tool === "hose");
-  const fcx = Hs.x + 75, fcy = Hs.y + 87;
-  ctx.fillStyle = mix("#9aa4b2", "#39414d", nf);
+  // a tap on a standpipe out of the pad, the hose coiled on the floor beside it
+  station(Hs, "💧 HORTUM — durula", w.tool === "hose");
+  const base = Hs.y + Hs.h - 14;                // where the pipe meets the floor
+  const fcx = Hs.x + 118, fcy = base - 62;
+  const ccx = Hs.x + 58;                        // coil centre
+  ctx.fillStyle = "rgba(0,0,0,0.35)";
+  ctx.beginPath(); ctx.ellipse(ccx, base - 2, 54, 12, 0, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(fcx + 3, base + 1, 16, 4, 0, 0, 7); ctx.fill();
+  const chrome = ctx.createLinearGradient(fcx - 14, 0, fcx + 14, 0);
+  chrome.addColorStop(0, mix("#7c8696", "#2c333e", nf));
+  chrome.addColorStop(0.4, mix("#e6ebf2", "#5a6370", nf));
+  chrome.addColorStop(1, mix("#7c8696", "#2c333e", nf));
+  ctx.fillStyle = mix("#2a313c", "#161b22", nf);
+  ctx.beginPath(); ctx.ellipse(fcx, base, 11, 3.5, 0, 0, 7); ctx.fill();   // floor flange
+  ctx.fillStyle = chrome;
+  rr(ctx, fcx - 4, fcy - 10, 8, base - fcy + 10, 3); ctx.fill();          // standpipe
+  ctx.fillStyle = chrome;
   rr(ctx, fcx - 6, fcy - 18, 12, 26, 3); ctx.fill();
   rr(ctx, fcx - 14, fcy + 4, 28, 10, 3); ctx.fill();
   ctx.fillStyle = "#3f7fd4";
   rr(ctx, fcx - 3, fcy + 14, 6, 7, 2); ctx.fill();
-  ctx.strokeStyle = "#3f9c57";
-  ctx.lineWidth = 6;
-  ctx.lineCap = "round";
-  for (let k = 0; k < 4; k++) {
-    ctx.beginPath();
-    ctx.ellipse(Hs.x + 75, Hs.y + 122 + k * 20, 44 - k * 4, 8, 0, 0, 7);
-    ctx.stroke();
+  ctx.fillStyle = "#2f6fc4";
+  rr(ctx, fcx - 13, fcy - 23, 26, 6, 3); ctx.fill();
+  ctx.beginPath(); ctx.arc(fcx, fcy - 20, 4, 0, 7); ctx.fill();
+  if (w.tool !== "hose") { // the coil is connected to the tap while it hangs here
+    hoseStroke(o => { ctx.beginPath(); ctx.moveTo(fcx, fcy + 20 + o); ctx.quadraticCurveTo(fcx - 6, base - 16 + o, ccx + 40, base - 20 + o); });
+  } else { // a slow drip from the open tap
+    const t = (now / 900) % 1;
+    ctx.fillStyle = `rgba(140, 210, 255, ${0.85 * (1 - t * 0.6)})`;
+    ctx.beginPath(); ctx.ellipse(fcx, fcy + 23 + t * 22, 1.8, 2.6, 0, 0, 7); ctx.fill();
   }
-  ctx.lineWidth = 1;
-  ctx.lineCap = "butt";
+  for (let k = 0; k < 4; k++) { // flat loops piled on the floor, bottom one first
+    const cy = base - 6 - k * 5, rx = 46 - k * 5;
+    hoseStroke(o => { ctx.beginPath(); ctx.ellipse(ccx, cy + o, rx, 12 - k, 0, 0, 7); });
+  }
 
   // --- the active tool, following the pointer (nothing when none is in hand)
   const px = pointer.x, py = pointer.y;
@@ -1271,42 +1937,15 @@ function drawWashView() {
     ctx.save();
     ctx.translate(px, py);
     ctx.rotate(-0.6);
-    ctx.fillStyle = "#8a5a2b";
-    rr(ctx, -5, -8, 10, 96, 4); ctx.fill();      // the handle trails off behind
-    rr(ctx, -27, -26, 54, 20, 10); ctx.fill();   // the pad on the glass
-    ctx.fillStyle = "rgba(255,255,255,0.9)";
-    for (let k = 0; k < 5; k++) {
-      ctx.beginPath(); ctx.arc(-18 + k * 9, -26, 3 + (k % 3), 0, 7); ctx.fill();
-    }
+    ctx.fillStyle = "rgba(0,0,0,0.18)";
+    rr(ctx, -24, -14, 54, 18, 9); ctx.fill();      // soft contact shadow on the glass
+    drawBrush(-8, 96, -22, 6);
     ctx.restore();
   } else if (w.tool === "hose") {
     // the hose drapes from the faucet to the nozzle at the pointer
-    const ox = Hs.x + 75, oy = Hs.y + 101;
-    ctx.strokeStyle = "#3f9c57";
-    ctx.lineWidth = 6;
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(ox, oy);
-    ctx.quadraticCurveTo((ox + px) / 2 - 60, (oy + py) / 2 + 40, px - 6, py - 6);
-    ctx.stroke();
-    ctx.lineWidth = 1;
-    ctx.lineCap = "butt";
-    ctx.save();
-    ctx.translate(px - 6, py - 6);
-    ctx.rotate(0.6);
-    ctx.fillStyle = "#22303f";
-    rr(ctx, -8, -5, 22, 10, 3); ctx.fill();
-    ctx.fillStyle = "#3f7fd4";
-    rr(ctx, 14, -4, 5, 8, 2); ctx.fill();
-    ctx.restore();
-    if (pointerDown && !w.done) {
-      ctx.fillStyle = "rgba(120, 210, 255, 0.75)";
-      for (let k = 0; k < 8; k++) {
-        ctx.beginPath();
-        ctx.arc(px + 10 + 8 * k, py + 10 + 6 * k, 2.2, 0, 7);
-        ctx.fill();
-      }
-    }
+    drawHoseLine(fcx, fcy + 20, px, py);
+    if (pointerDown && !w.done) drawHoseSpray(px, py, now);
+    drawHoseNozzle(px, py);
   }
 
   // --- status: how much grime and suds remain, and which step is up
@@ -1314,45 +1953,71 @@ function drawWashView() {
   const gAvg = w.g.reduce((a, v) => a + v, 0) / n;
   const fAvg = w.f.reduce((a, v) => a + v, 0) / n;
   const P = { x: 330, y: 18, w: 300, h: 84 }; // top center — where the old sign used to sit
-  ctx.fillStyle = mix("#151c26", "#0e141d", nf);
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,0.35)";
+  ctx.shadowBlur = 12;
+  ctx.shadowOffsetY = 3;
+  const sg = ctx.createLinearGradient(0, P.y, 0, P.y + P.h);
+  sg.addColorStop(0, mix("#1d2734", "#121924", nf));
+  sg.addColorStop(1, mix("#121821", "#0b1018", nf));
+  ctx.fillStyle = sg;
   rr(ctx, P.x, P.y, P.w, P.h, 12); ctx.fill();
+  ctx.restore();
   ctx.lineWidth = 2;
-  ctx.strokeStyle = "rgba(255,255,255,0.12)";
+  ctx.strokeStyle = w.done ? `rgba(143, 227, 242, ${0.35 + 0.25 * pulse})` : "rgba(255,255,255,0.12)";
   rr(ctx, P.x, P.y, P.w, P.h, 12); ctx.stroke();
   ctx.font = "bold 11px system-ui, sans-serif";
   ctx.fillStyle = "rgba(226,235,248,0.8)";
-  ctx.fillText(`DIRT ${Math.round(gAvg * 100)}%`, P.x + 16, P.y + 24);
+  ctx.fillText(`KİR ${Math.round(gAvg * 100)}%`, P.x + 16, P.y + 24);
   ctx.fillStyle = `rgba(143, 227, 242, ${fAvg < 0.05 ? 0.35 : 1})`;
-  ctx.fillText(`SOAP ${Math.round(fAvg * 100)}%`, P.x + 128, P.y + 24);
+  ctx.fillText(`KÖPÜK ${Math.round(fAvg * 100)}%`, P.x + 128, P.y + 24);
   const bar = { x: P.x + 16, y: P.y + 34, w: P.w - 32, h: 10 };
-  ctx.fillStyle = "rgba(255,255,255,0.12)";
+  ctx.fillStyle = "rgba(0,0,0,0.35)";
   rr(ctx, bar.x, bar.y, bar.w, bar.h, 5); ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.08)";
+  ctx.lineWidth = 1;
+  rr(ctx, bar.x, bar.y, bar.w, bar.h, 5); ctx.stroke();
   if (gAvg < 1) {
-    ctx.fillStyle = "#57e08a";
-    rr(ctx, bar.x, bar.y, bar.w * (1 - gAvg), bar.h, 5); ctx.fill();
+    const fw = bar.w * (1 - gAvg);
+    const bg2 = ctx.createLinearGradient(bar.x, 0, bar.x + bar.w, 0);
+    bg2.addColorStop(0, "#3cc878"); bg2.addColorStop(1, "#8ff0b4");
+    ctx.fillStyle = bg2;
+    rr(ctx, bar.x, bar.y, fw, bar.h, 5); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.28)";
+    rr(ctx, bar.x + 2, bar.y + 1.5, Math.max(0, fw - 4), 3, 1.5); ctx.fill();
   }
   ctx.font = "12px system-ui, sans-serif";
   ctx.fillStyle = w.done ? "#8fe3f2" : fAvg < 0.5 ? "rgba(255,220,150,0.95)" : "rgba(226,235,248,0.85)";
   ctx.fillText(
-    w.done ? "✨ Sparkling clean — the driver will notice"
-      : fAvg < 0.5 ? "1 · soap up the windshield (brush)"
-      : "2 · rinse the soap off (hose)",
+    w.done ? "✨ Pırıl pırıl — şoför bunu fark edecek"
+      : fAvg < 0.5 ? "1 · ön camı köpükle (fırça)"
+      : "2 · köpüğü durula (hortum)",
     P.x + 16, P.y + 66);
 
   // sparkles over a finished windshield
   if (w.done) {
     ctx.fillStyle = "#fff";
-    for (let k = 0; k < 8; k++) {
+    for (let k = 0; k < 5; k++) {
       const u = ((k * 53) % 10) / 10, v = ((k * 29) % 10) / 10;
-      ctx.globalAlpha = 0.25 + 0.75 * Math.abs(Math.sin(performance.now() / 300 + k * 1.7));
-      ctx.font = "11px system-ui";
-      ctx.fillText("✦", Wd.x + 8 + u * (Wd.w - 16), Wd.y + 6 + v * (Wd.h - 12));
+      const tw = Math.abs(Math.sin(now / 300 + k * 1.7));
+      const sx = Wd.x + 8 + u * (Wd.w - 16), sy = Wd.y + 2 + v * (Wd.h - 12), r = 1.5 + 3 * tw;
+      ctx.globalAlpha = 0.15 + 0.45 * tw;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy - r);
+      ctx.quadraticCurveTo(sx, sy, sx + r, sy);
+      ctx.quadraticCurveTo(sx, sy, sx, sy + r);
+      ctx.quadraticCurveTo(sx, sy, sx - r, sy);
+      ctx.quadraticCurveTo(sx, sy, sx, sy - r);
+      ctx.fill();
     }
     ctx.globalAlpha = 1;
   }
 
   // --- exit back to the layover
-  ctx.fillStyle = mix("#20303f", "#111925", nf);
+  const eg = ctx.createLinearGradient(0, Ex.y, 0, Ex.y + Ex.h);
+  eg.addColorStop(0, mix("#26394b", "#152030", nf));
+  eg.addColorStop(1, mix("#1a2836", "#0e1621", nf));
+  ctx.fillStyle = eg;
   rr(ctx, Ex.x, Ex.y, Ex.w, Ex.h, 10); ctx.fill();
   ctx.lineWidth = 2;
   ctx.strokeStyle = `rgba(120, 225, 255, ${0.35 + 0.3 * pulse})`;
@@ -1361,7 +2026,7 @@ function drawWashView() {
   ctx.font = "bold 12px system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText("🚪 EXIT (E)", Ex.x + Ex.w / 2, Ex.y + Ex.h / 2 + 1);
+  ctx.fillText("🚪 ÇIKIŞ (E)", Ex.x + Ex.w / 2, Ex.y + Ex.h / 2 + 1);
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
 }
@@ -1499,7 +2164,7 @@ function finalizePayment(p) {
   // Teach the crisp-change rule: the same total in more bills rates worse.
   if (p.owed > 0 && p.changeGiven === p.owed &&
       (p.changeNotes || []).length > minNotes(p.owed))
-    toast("🤏 Change back, but in a fistful of small bills — the guest notices", "bad");
+    toast("🤏 Para üstü verildi ama bir avuç bozuk banknotla — misafir fark etti", "bad");
   finishVisit(p, finalSat(p), true); // change in hand — walk out through the EXIT door
 }
 
@@ -1508,7 +2173,7 @@ function stormOut(p) {
   // — no red badge, never catchable — they simply walk out and board.
   p.unpaid = true; // used the toilet, paid nothing (the fee is lost)
   if (S.stats) S.stats.evaded = (S.stats.evaded || 0) + 1;
-  toast("A guest stormed out of the counter — no payment", "bad");
+  toast("Bir misafir öfkeyle gişeden çıktı — ödeme yok", "bad");
   finishVisit(p, clamp((p.useSat != null ? p.useSat : 60) - 20, 15, 60));
 }
 
@@ -1520,7 +2185,7 @@ function giveUpLine(p) {
   // they sprint for the boarding door.
   p.unpaid = true; // used the toilet, paid nothing (the fee is lost)
   if (S.stats) S.stats.evaded = (S.stats.evaded || 0) + 1;
-  toast("A guest stormed out of the counter — no payment", "bad");
+  toast("Bir misafir öfkeyle gişeden çıktı — ödeme yok", "bad");
   finishVisit(p, clamp((p.useSat != null ? p.useSat : 60) - 15, 15, 60));
   // Belt-and-braces: finishVisit only sprints when boardAt is reached; if the
   // guest is left walking or idling, send them for the door at full sprint.
@@ -1545,7 +2210,7 @@ function giveChange(d) {
 // You splash cologne on the guest at the counter (called on bottle clicks).
 function offerCologne() {
   const front = facilities.C.queue[0];
-  if (S.bottle <= 0) { toast("🧴 The cologne bottle is empty — it refills at midnight", ""); return; }
+  if (S.bottle <= 0) { toast("🧴 Kolonya şişesi boş — gece yarısı dolacak", ""); return; }
   if (!front || (front.state !== "payC" && front.state !== "doneC") || front.cologne) return;
   front.cologne = true;
   front.colognePrev = front.state;
@@ -1647,7 +2312,7 @@ function update(dt, timeDt = dt) {
   S.tea = Math.max(0, S.tea - timeDt / SECONDS_PER_HOUR / TEA_HOURS);
   if (S.teaOrder != null) {
     S.teaOrder -= timeDt / SECONDS_PER_HOUR;
-    if (S.teaOrder <= 0) { S.teaOrder = null; S.tea = 1; toast("🍵 Fresh tea is here!", "good"); }
+    if (S.teaOrder <= 0) { S.teaOrder = null; S.tea = 1; toast("🍵 Taze çay geldi!", "good"); }
   }
   // while-loop: a catch-up after a long hidden tab may cross several midnights
   while (S.time >= 24) {
@@ -1688,14 +2353,23 @@ function update(dt, timeDt = dt) {
   for (let i = buses.length - 1; i >= 0; i--) {
     const b = buses[i];
     if (b.state === "drive") {
-      b.cx += 185 * dt;
-      b.cy = lerp(b.cy, LANE_Y - 45, Math.min(1, dt * 3));
+      if (b.v == null) b.v = BUS_V;
+      if (b.holdT > 0) {
+        b.holdT -= dt; b.v = 0; b.brake = true;
+      } else {
+        const vT = driveTarget(b);
+        b.brake = b.v > vT + 0.2;
+        b.v = b.v < vT ? Math.min(vT, b.v + BUS_ACC * dt) : Math.max(vT, b.v - 3 * BUS_BRAKE * dt);
+      }
+      const step = b.v * dt;
+      b.cx += step;
+      b.cy = lerp(b.cy, LANE_CY, Math.min(1, dt * 3));
       b.ang = lerp(b.ang, 0, Math.min(1, dt * 5));
-      // Entry is purely geometric (baySlotFor: the bus must have passed a free
-      // slot) — no time gate, so entry works at any time scale.
+      // Entry is purely geometric (baySlotFor: the bus has reached a free
+      // bay's turn-in point) — no time gate, so entry works at any time scale.
       if (!b.stoppedOnce) {
-        const si = baySlotFor(b);
-        if (si >= 0) beginEnter(b, si);
+        const si = baySlotFor(b, step + 2);
+        if (si >= 0 && b.cx >= enterGeom(b, si).x0) beginEnter(b, si);
       }
       // Only cull buses still driving: a coarse step (a 100x/200x frame on a
       // busy tab moves a bus 185·10 = 1850px) can carry an inbound bus past
@@ -1760,17 +2434,20 @@ function update(dt, timeDt = dt) {
             if (qi >= 0) { q.splice(qi, 1); giveUpLine(p); }
           }
         }
-        toast("⏱ An hour in the terminal — the bus pulls out no matter what", "bad");
+        toast("⏱ Terminalde bir saat oldu — otobüs ne olursa olsun kalkıyor", "bad");
         endStop(b);
       }
-    } else { // "enter" | "exit" — the 1.4 s eased turn
-      b.animT = Math.min(1, b.animT + dt / 1.4);
-      if (b.state === "enter") b.stopElapsed = (b.stopElapsed || 0) + timeDt; // dwell clock keeps running
-      const t = easeInOut(b.animT);
-      b.cx = lerp(b.animFrom.cx, b.animTo.cx, t);
-      b.cy = lerp(b.animFrom.cy, b.animTo.cy, t);
-      b.ang = lerp(b.animFrom.ang, b.animTo.ang, t);
-      if (b.animT >= 1) (b.state === "enter" ? finishEnter : finishExit)(b);
+    } else if (b.state === "enter") {
+      b.stopElapsed = (b.stopElapsed || 0) + timeDt; // dwell clock keeps running
+      const g = enterGeom(b, b.slot);
+      const done = moveAlong(b, dt, g.L, BUS_TURN_V, BUS_ACC, BUS_BRAKE * 0.6);
+      Object.assign(b, enterPose(g, b.mv.s));
+      if (done) finishEnter(b);
+    } else { // "exit" — backing out of the stall onto the lane
+      const g = exitGeom(b);
+      const done = moveAlong(b, dt, g.L, BUS_REV_V, 30, 45);
+      Object.assign(b, exitPose(g, b.mv.s));
+      if (done) finishExit(b);
     }
     // passengers
     for (const p of b.pax) updatePax(p, b, dt, timeDt);
@@ -1850,10 +2527,10 @@ function updatePax(p, bus, dt, timeDt = dt) {
       if (Math.hypot(p.x - p.enterT.x, p.y - p.enterT.y) < 8) p.enterT = null;
       return;
     }
-    moveToward(p, stallBay(ti).x + 26, 298, 100 * dt);
+    moveToward(p, stallBay(ti).x + 26, 224, 100 * dt);
     // the door shuts only once the guest has stepped in — before that the
     // leaf stays ajar and the guest is visible walking off to their bay
-    if (Math.hypot(p.x - (stallBay(ti).x + 26), p.y - 298) < 8) p.inStall = true;
+    if (Math.hypot(p.x - (stallBay(ti).x + 26), p.y - 224) < 8) p.inStall = true;
     return;
   }
   if (p.state === "queueC2" || p.state === "payC2") {
@@ -2040,7 +2717,12 @@ function nightFactor() {
   return (t - 19) / 2;
 }
 
-const trees = [ { x: 60, s: 1.1 }, { x: 150, s: 0.8 }, { x: 250, s: 1.2 }, { x: 930, s: 0.9 } ];
+const trees = [
+  { x: 60, s: 1.1 }, { x: 150, s: 0.8 }, { x: 250, s: 1.2 }, { x: 930, s: 0.9 },
+  { x: -60, s: 1.0 }, { x: -140, s: 0.85 }, { x: 1010, s: 1.15 }, { x: 1095, s: 0.8 }, // only seen on wide screens
+];
+const clouds = [ { x: 80, y: 30, s: 1 }, { x: 340, y: 16, s: 0.7 }, { x: 560, y: 38, s: 1.2 }, { x: 820, y: 22, s: 0.85 }, { x: 1100, y: 34, s: 1 } ];
+const LAMPS = [200, 410, 902];
 
 function drawScene() {
   if (S.view === "wc") drawWCInterior();
@@ -2053,63 +2735,11 @@ function drawScene() {
 }
 
 function drawOutdoor() {
-  // sky
-  const [top, bot] = skyColors(S.time);
-  const g = ctx.createLinearGradient(0, 0, 0, GRASS.top);
-  g.addColorStop(0, top); g.addColorStop(1, bot);
-  ctx.fillStyle = g;
-  ctx.fillRect(-offX, -offY, Wdyn, GRASS.top + offY);
-
-  const nf = nightFactor();
-  if (nf > 0.3) {
-    ctx.fillStyle = `rgba(255,255,255,${0.8 * (nf - 0.3)})`;
-    for (const s of stars) { ctx.globalAlpha = (nf - 0.3); ctx.fillRect(s.x, s.y, s.s, s.s); }
-    ctx.globalAlpha = 1;
-  }
-
-  // sun / moon
-  const dayT = (S.time - 6) / 12;           // sun arc 6..18
-  if (S.time >= 5 && S.time <= 19) {
-    const f = clamp(dayT, 0, 1);
-    const sx = lerp(offX + 60, Wdyn - offX - 60, f), sy = 70 - Math.sin(f * Math.PI) * 45;
-    ctx.fillStyle = "#ffd75e";
-    ctx.beginPath(); ctx.arc(sx, sy, 22, 0, 7); ctx.fill();
-  } else {
-    const f = clamp(((S.time + 24 - 19) % 24) / 11, 0, 1);
-    const mx = lerp(offX + 60, Wdyn - offX - 60, f), my = 66 - Math.sin(f * Math.PI) * 40;
-    ctx.fillStyle = "#e8ecf5";
-    ctx.beginPath(); ctx.arc(mx, my, 16, 0, 7); ctx.fill();
-    ctx.fillStyle = skyColors(S.time)[0];
-    ctx.beginPath(); ctx.arc(mx + 7, my - 4, 13, 0, 7); ctx.fill();
-  }
-
-  // mountains
-  // The ridge stretches with the view (a smooth silhouette — the extra width
-  // is invisible in a hill), so the range always meets the horizon edges.
-  const ms = Wdyn / W, M = (x) => -offX + x * ms;
-  ctx.fillStyle = mix("#3c6e58", "#141d33", nf * 0.8);
-  ctx.beginPath();
-  ctx.moveTo(M(0), GRASS.top);
-  ctx.lineTo(M(0), 60); ctx.lineTo(M(140), 28); ctx.lineTo(M(300), 64); ctx.lineTo(M(430), 36);
-  ctx.lineTo(M(590), 56); ctx.lineTo(M(740), 32); ctx.lineTo(M(900), 64); ctx.lineTo(M(W), 48); ctx.lineTo(M(W), GRASS.top);
-  ctx.closePath(); ctx.fill();
-
-  // grass
-  ctx.fillStyle = mix("#58b368", "#1c3a2a", nf * 0.85);
-  ctx.fillRect(-offX, GRASS.top, Wdyn, GRASS.bot - GRASS.top);
-
-  // trees
-  for (const tr of trees) {
-    const s = tr.s, bx = tr.x, by = GRASS.bot - 24;
-    ctx.fillStyle = mix("#6b4a2b", "#232c33", nf * 0.7);
-    ctx.fillRect(bx - 4 * s, by - 18 * s, 8 * s, 20 * s);
-    ctx.fillStyle = mix("#2e8b57", "#16324a", nf * 0.75);
-    ctx.beginPath();
-    ctx.moveTo(bx, by - 62 * s);
-    ctx.lineTo(bx - 22 * s, by - 16 * s);
-    ctx.lineTo(bx + 22 * s, by - 16 * s);
-    ctx.closePath(); ctx.fill();
-  }
+  const nf = nightFactor(), now = performance.now();
+  drawSky(nf, now);
+  drawHills(nf);
+  drawGrassBand(GRASS.top, GRASS.bot, nf, 3);
+  for (const tr of trees) drawTree(tr, nf);
 
   drawLot();
   drawSign();
@@ -2123,98 +2753,441 @@ function drawOutdoor() {
   if (nf > 0.05) {
     ctx.fillStyle = `rgba(8, 12, 34, ${0.34 * nf})`;
     ctx.fillRect(-offX, -offY, Wdyn, Hdyn + offY);
-    if (nf > 0.4) {
-      // warm window glow
-      ctx.fillStyle = `rgba(255, 190, 90, ${0.5 * nf})`;
-      ctx.fillRect(630, 130, 26, 22); ctx.fillRect(700, 130, 26, 22); ctx.fillRect(750, 130, 26, 22);
-      ctx.fillRect(826, 134, 20, 18); ctx.fillRect(858, 134, 20, 18);
-    }
+    drawNightLights(nf, now);
   }
 
   drawWcPrompt(); // after the overlay — the nudge stays bright at night
   drawWashHint(); // ditto — a dusty parked bus hints at the wash
 }
 
+const duskGlow = t => Math.max(0, 1 - Math.abs(t - 6.3) / 1.5) + Math.max(0, 1 - Math.abs(t - 19.2) / 1.8);
+
+function drawSky(nf, now) {
+  const [top, bot] = skyColors(S.time);
+  const g = ctx.createLinearGradient(0, -offY, 0, GRASS.top);
+  g.addColorStop(0, top); g.addColorStop(1, bot);
+  ctx.fillStyle = g;
+  ctx.fillRect(-offX, -offY, Wdyn, GRASS.top + offY);
+
+  const dusk = Math.min(1, duskGlow(S.time));
+  if (dusk > 0) {
+    const hg = ctx.createLinearGradient(0, 0, 0, GRASS.top);
+    hg.addColorStop(0, "rgba(255,150,90,0)");
+    hg.addColorStop(1, `rgba(255,135,80,${0.55 * dusk})`);
+    ctx.fillStyle = hg;
+    ctx.fillRect(-offX, 0, Wdyn, GRASS.top);
+  }
+
+  if (nf > 0.3) {
+    ctx.fillStyle = "#fff";
+    for (const s of stars) {
+      ctx.globalAlpha = 0.85 * (nf - 0.3) * (0.6 + 0.4 * Math.sin(now / 1000 * s.tw + s.t));
+      ctx.fillRect(s.x, s.y, s.s, s.s);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // sun / moon
+  if (S.time >= 5 && S.time <= 19) {
+    const f = clamp((S.time - 6) / 12, 0, 1), h = Math.sin(f * Math.PI);
+    const sx = lerp(offX + 60, Wdyn - offX - 60, f), sy = 70 - h * 45;
+    const halo = ctx.createRadialGradient(sx, sy, 12, sx, sy, 90);
+    halo.addColorStop(0, "rgba(255,226,140,0.55)");
+    halo.addColorStop(1, "rgba(255,226,140,0)");
+    ctx.fillStyle = halo;
+    ctx.beginPath(); ctx.arc(sx, sy, 90, 0, 7); ctx.fill();
+    const disk = ctx.createRadialGradient(sx - 6, sy - 6, 2, sx, sy, 22);
+    disk.addColorStop(0, "#fffbe0");
+    disk.addColorStop(1, mix("#ffd75e", "#ff9248", (1 - h) * 0.85));
+    ctx.fillStyle = disk;
+    ctx.beginPath(); ctx.arc(sx, sy, 22, 0, 7); ctx.fill();
+  } else {
+    const f = clamp(((S.time + 24 - 19) % 24) / 11, 0, 1);
+    const mx = lerp(offX + 60, Wdyn - offX - 60, f), my = 66 - Math.sin(f * Math.PI) * 40;
+    const halo = ctx.createRadialGradient(mx, my, 8, mx, my, 60);
+    halo.addColorStop(0, "rgba(200,215,255,0.28)");
+    halo.addColorStop(1, "rgba(200,215,255,0)");
+    ctx.fillStyle = halo;
+    ctx.beginPath(); ctx.arc(mx, my, 60, 0, 7); ctx.fill();
+    ctx.save();
+    ctx.beginPath(); ctx.arc(mx, my, 16, 0, 7); ctx.clip();
+    ctx.beginPath(); ctx.rect(mx - 17, my - 17, 34, 34); ctx.arc(mx + 7, my - 4, 13, 0, 7);
+    ctx.fillStyle = "#eef1f8"; ctx.fill("evenodd");
+    ctx.fillStyle = "rgba(150,160,190,0.45)";
+    for (const [cx, cy, r] of [[-9, 3, 2.6], [-4, 10, 1.8], [-11, -5, 1.6]]) {
+      ctx.beginPath(); ctx.arc(mx + cx, my + cy, r, 0, 7); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // drifting clouds — tinted peach at dawn/dusk, slate at night
+  const cA = hex("#ffffff"), cB = hex("#ffcfb3"), cN = hex("#2a3352");
+  const col = [0, 1, 2].map(i => Math.round(lerp(lerp(cA[i], cB[i], dusk), cN[i], nf)));
+  const span = Wdyn + 280, drift = now * 0.004;
+  ctx.globalAlpha = 0.9 - nf * 0.35;
+  for (const c of clouds) {
+    const x = -offX - 140 + (((c.x + offX + 140 + drift * c.s) % span) + span) % span;
+    drawCloud(x, c.y, c.s, col);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawCloud(x, y, s, col) {
+  ctx.fillStyle = `rgb(${col})`;
+  ctx.beginPath();
+  ctx.arc(x, y, 13 * s, 0, 7);
+  ctx.arc(x + 16 * s, y - 7 * s, 17 * s, 0, 7);
+  ctx.arc(x + 36 * s, y - 2 * s, 14 * s, 0, 7);
+  ctx.arc(x + 52 * s, y + 2 * s, 10 * s, 0, 7);
+  ctx.fill();
+  ctx.fillRect(x, y, 52 * s, 12 * s);
+  ctx.fillStyle = "rgba(40,60,100,0.08)";
+  ctx.fillRect(x - 6 * s, y + 7 * s, 66 * s, 5 * s);
+}
+
+function drawHills(nf) {
+  // Ridges stretch with the view (smooth silhouettes hide the stretch), so the
+  // ranges always meet the horizon edges.
+  const ms = Wdyn / W, M = x => -offX + x * ms;
+  const ridge = (pts) => {
+    ctx.beginPath();
+    ctx.moveTo(M(0), GRASS.top);
+    for (const [x, y] of pts) ctx.lineTo(M(x), y);
+    ctx.lineTo(M(W), GRASS.top);
+    ctx.closePath(); ctx.fill();
+  };
+  // far, hazy range
+  ctx.fillStyle = mix("#93b7c6", "#1b2440", nf * 0.85);
+  ridge([[0, 50], [90, 34], [210, 52], [340, 24], [470, 48], [610, 30], [700, 44], [840, 20], [W, 42]]);
+
+  // main range
+  const main = [[0, 60], [140, 28], [300, 64], [430, 36], [590, 56], [740, 32], [900, 64], [W, 48]];
+  const mg = ctx.createLinearGradient(0, 28, 0, GRASS.top);
+  mg.addColorStop(0, mix("#4f8169", "#182238", nf * 0.8));
+  mg.addColorStop(1, mix("#2f5a47", "#111a2c", nf * 0.8));
+  ctx.fillStyle = mg;
+  ridge(main);
+  // shaded east faces + snow caps on the tall peaks
+  for (let i = 1; i < main.length - 1; i++) {
+    const [px, py] = main[i], [lx, ly] = main[i - 1], [rx, ry] = main[i + 1];
+    if (py > ly || py > ry) continue;
+    ctx.fillStyle = "rgba(0,0,0,0.13)";
+    ctx.beginPath();
+    ctx.moveTo(M(px), py); ctx.lineTo(M(rx), ry); ctx.lineTo(M(rx), GRASS.top); ctx.lineTo(M(px + (rx - px) * 0.2), GRASS.top);
+    ctx.closePath(); ctx.fill();
+    if (py > 40) continue;
+    const k = 0.26;
+    const ax = px + (lx - px) * k, ay = py + (ly - py) * k;
+    const bx = px + (rx - px) * k, by = py + (ry - py) * k;
+    ctx.fillStyle = mix("#f3f7fb", "#4a5470", nf * 0.8);
+    ctx.beginPath();
+    ctx.moveTo(M(px), py); ctx.lineTo(M(bx), by);
+    ctx.lineTo(M(lerp(bx, ax, 0.3)), by - 3);
+    ctx.lineTo(M(lerp(bx, ax, 0.5)), (ay + by) / 2 + 3);
+    ctx.lineTo(M(lerp(bx, ax, 0.72)), ay - 3);
+    ctx.lineTo(M(ax), ay);
+    ctx.closePath(); ctx.fill();
+  }
+
+  // near, rolling foothills
+  ctx.fillStyle = mix("#4c9a5e", "#173022", nf * 0.85);
+  ctx.beginPath();
+  ctx.moveTo(M(0), GRASS.top); ctx.lineTo(M(0), 80);
+  for (let i = 0; i < 6; i++) {
+    const x0 = i * 160;
+    ctx.quadraticCurveTo(M(x0 + 80), i % 2 ? 64 : 70, M(x0 + 160), 80 - (i % 3) * 3);
+  }
+  ctx.lineTo(M(W), GRASS.top);
+  ctx.closePath(); ctx.fill();
+}
+
+function drawGrassBand(y0, y1, nf, seed) {
+  const g = ctx.createLinearGradient(0, y0, 0, y1);
+  g.addColorStop(0, mix("#64bf72", "#1d3b2b", nf * 0.85));
+  g.addColorStop(1, mix("#4da05d", "#163022", nf * 0.85));
+  ctx.fillStyle = g;
+  ctx.fillRect(-offX, y0, Wdyn, y1 - y0);
+  const n = Math.min(700, Math.round((y1 - y0) * Wdyn / 700));
+  ctx.strokeStyle = mix("#3c8a4c", "#122719", nf * 0.85);
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const x = -offX + grimeRnd(i, seed) * Wdyn, y = y0 + 6 + grimeRnd(i, seed + 1) * (y1 - y0 - 8);
+    ctx.moveTo(x - 2, y); ctx.lineTo(x - 3.5, y - 4);
+    ctx.moveTo(x, y); ctx.lineTo(x, y - 5);
+    ctx.moveTo(x + 2, y); ctx.lineTo(x + 3.5, y - 4);
+  }
+  ctx.stroke();
+  if (nf < 0.8) { // wildflowers by day
+    ctx.globalAlpha = 1 - nf;
+    for (let i = 0; i < n / 5; i++) {
+      ctx.fillStyle = i % 3 ? "#fff6d8" : "#ffd54f";
+      ctx.fillRect(-offX + grimeRnd(i, seed + 7) * Wdyn, y0 + 5 + grimeRnd(i, seed + 8) * (y1 - y0 - 8), 2, 2);
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawTree(tr, nf) {
+  const s = tr.s, bx = tr.x, by = GRASS.bot - 24;
+  ctx.fillStyle = "rgba(0,0,0,0.18)";
+  ctx.beginPath(); ctx.ellipse(bx + 5 * s, by + 2, 22 * s, 4 * s, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = mix("#6b4a2b", "#232c33", nf * 0.7);
+  ctx.fillRect(bx - 3.5 * s, by - 18 * s, 7 * s, 20 * s);
+  ctx.fillStyle = "rgba(0,0,0,0.2)";
+  ctx.fillRect(bx, by - 18 * s, 3.5 * s, 20 * s);
+  const light = mix("#38a064", "#1a3a52", nf * 0.75), dark = mix("#226e45", "#10263a", nf * 0.75);
+  for (const [yb, hw, h] of [[by - 12 * s, 24 * s, 26 * s], [by - 26 * s, 19 * s, 24 * s], [by - 40 * s, 13 * s, 22 * s]]) {
+    ctx.fillStyle = light;
+    ctx.beginPath(); ctx.moveTo(bx, yb - h); ctx.lineTo(bx - hw, yb); ctx.lineTo(bx + hw, yb); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = dark;
+    ctx.beginPath(); ctx.moveTo(bx, yb - h); ctx.lineTo(bx + hw * 0.15, yb); ctx.lineTo(bx + hw, yb); ctx.closePath(); ctx.fill();
+  }
+}
+
+// Fixed pseudo-random asphalt grain, spread over the current view width.
+function drawSpeckle(y0, y1, seed) {
+  const n = Math.min(900, Math.round((y1 - y0) * Wdyn / 260));
+  ctx.fillStyle = "rgba(255,255,255,0.05)";
+  for (let i = 0; i < n; i += 2)
+    ctx.fillRect(-offX + grimeRnd(i, seed) * Wdyn, y0 + grimeRnd(i, seed + 1) * (y1 - y0), 1.5, 1.5);
+  ctx.fillStyle = "rgba(0,0,0,0.12)";
+  for (let i = 1; i < n; i += 2)
+    ctx.fillRect(-offX + grimeRnd(i, seed) * Wdyn, y0 + grimeRnd(i, seed + 1) * (y1 - y0), 2, 2);
+}
+
+function drawLampPost(x, y, nf) {
+  ctx.fillStyle = mix("#3a4252", "#1a1f2a", nf * 0.6);
+  rr(ctx, x - 5, y - 4, 10, 6, 2); ctx.fill();
+  ctx.fillRect(x - 1.5, y - 58, 3, 56);
+  ctx.fillRect(x - 1.5, y - 60, 15, 3);
+  rr(ctx, x + 6, y - 61, 15, 6, 3); ctx.fill();
+  ctx.fillStyle = mix("#d7dde6", "#ffe3a0", nf);
+  ctx.fillRect(x + 8, y - 56, 11, 2);
+}
+
 function drawLot() {
   const nf = nightFactor();
-  // asphalt band
-  ctx.fillStyle = mix("#4a5261", "#1d232e", nf * 0.7);
+  const g = ctx.createLinearGradient(0, LOT.top, 0, LOT.bot);
+  g.addColorStop(0, mix("#545c6b", "#1f2530", nf * 0.7));
+  g.addColorStop(1, mix("#464e5c", "#1a1f29", nf * 0.7));
+  ctx.fillStyle = g;
   ctx.fillRect(-offX, LOT.top, Wdyn, LOT.bot - LOT.top);
-  // dashed outline per stall
-  ctx.strokeStyle = "rgba(255,205,80,0.55)";
-  ctx.lineWidth = 2.5;
-  ctx.setLineDash([14, 10]);
+  drawSpeckle(LOT.top, LOT.bot, 11);
+  // oil stains where buses idle
+  ctx.fillStyle = "rgba(0,0,0,0.07)";
   for (const s of BAY_SLOTS) {
-    ctx.strokeRect(s.cx - 36, LOT_NOSE, 72, LOT.bot - LOT_NOSE);
+    ctx.beginPath(); ctx.ellipse(s.cx - 3, 236, 9, 6, 0.3, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(s.cx + 4, 244, 5, 3.5, -0.4, 0, 7); ctx.fill();
   }
-  ctx.setLineDash([]);
-  // label
-  ctx.fillStyle = "rgba(255,205,80,0.5)";
-  ctx.font = "bold 12px system-ui";
-  ctx.fillText("BUS PARKING", 240, 250);
+  // curb along the building edge
+  ctx.fillStyle = mix("#bcc2cb", "#3d434e", nf * 0.7);
+  ctx.fillRect(-offX, LOT.top, Wdyn, 5);
+  ctx.fillStyle = "rgba(0,0,0,0.2)";
+  ctx.fillRect(-offX, LOT.top + 5, Wdyn, 2);
+
+  // painted stalls, open toward the road
+  const paint = `rgba(255, 214, 90, ${0.78 - nf * 0.2})`;
+  ctx.strokeStyle = paint;
+  ctx.lineWidth = 3;
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  for (const s of BAY_SLOTS) {
+    const l = s.cx - 36, r = s.cx + 36;
+    ctx.moveTo(l, LOT.bot - 8); ctx.lineTo(l, LOT_NOSE); ctx.lineTo(r, LOT_NOSE); ctx.lineTo(r, LOT.bot - 8);
+  }
+  ctx.stroke();
+  ctx.lineJoin = "miter";
+  ctx.textAlign = "center";
+  ctx.font = "bold 16px system-ui";
+  BAY_SLOTS.forEach((s, i) => {
+    ctx.fillStyle = mix("#c9ced6", "#40464f", nf * 0.7);
+    rr(ctx, s.cx - 22, LOT_NOSE + 8, 44, 6, 2); ctx.fill();
+    ctx.fillStyle = paint;
+    ctx.fillText(String(i + 1), s.cx, LOT.bot - 18);
+  });
+
+  // painted label + arrow toward the stalls
+  ctx.textAlign = "left";
+  ctx.fillStyle = `rgba(255, 214, 90, ${0.42 - nf * 0.12})`;
+  ctx.font = "900 20px system-ui";
+  ctx.fillText("OTOBÜS PARKI", 240, 250);
+  ctx.beginPath();
+  ctx.moveTo(250, 272); ctx.lineTo(340, 272); ctx.lineTo(340, 264); ctx.lineTo(360, 278);
+  ctx.lineTo(340, 292); ctx.lineTo(340, 284); ctx.lineTo(250, 284);
+  ctx.closePath(); ctx.fill();
+
+  for (const lx of LAMPS) drawLampPost(lx, LOT.top + 3, nf);
+}
+
+// Highway pylon sign: tall black pole planted at the curb, white lightbox on top.
+const PYLON = { x: 110, base: LOT.bot - 2, top: 26, pw: 22, bw: 136, bh: 70 };
+
+function drawPylonFace() {
+  const P = PYLON, cx = P.x, bx = cx - P.bw / 2, by = P.top;
+  ctx.fillStyle = "#f7f9fc";
+  ctx.fillRect(bx + 4, by + 4, P.bw - 8, P.bh - 8);
+  ctx.font = "900 22px system-ui";
+  const word = "MOLA YERİ";
+  let tx = cx - ctx.measureText(word).width / 2;
+  ctx.textAlign = "left";
+  for (const ch of word) {
+    ctx.fillStyle = ch === "A" ? "#e0262b" : "#1d3f8f"; // red A, like the real pylon's lettering
+    ctx.fillText(ch, tx, by + 29);
+    tx += ctx.measureText(ch).width;
+  }
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#1d3f8f";
+  ctx.font = "800 11px system-ui";
+  ctx.fillText("DİNLENME TESİSİ", cx, by + 45);
+  ctx.fillStyle = "#e0262b";
+  ctx.fillRect(bx + 14, by + 51, P.bw - 28, 1.5);
+  const stars = Math.round(S.rep / 20);
+  let ss = "";
+  for (let i = 0; i < 5; i++) ss += i < stars ? "★" : "☆";
+  ctx.fillStyle = "#e8a317";
+  ctx.font = "11px system-ui";
+  ctx.fillText(ss, cx, by + 63);
+  ctx.textAlign = "left";
 }
 
 function drawSign() {
-  const x = 470, y = 124;
-  ctx.fillStyle = "#8a6a3d";
-  ctx.fillRect(x + 18, y + 52, 8, 14);
-  ctx.fillRect(x + 96, y + 52, 8, 14);
-  ctx.fillStyle = "#173a5e";
-  rr(ctx, x, y, 122, 52, 8); ctx.fill();
-  ctx.strokeStyle = "#ffb347"; ctx.lineWidth = 2;
-  rr(ctx, x, y, 122, 52, 8); ctx.stroke();
-  ctx.fillStyle = "#ffb347";
-  ctx.font = "bold 15px system-ui";
-  ctx.textAlign = "center";
-  ctx.fillText("LAYOVER LANE", x + 61, y + 22);
-  ctx.fillStyle = "#cfe0ff";
-  ctx.font = "10px system-ui";
-  ctx.fillText("FOOD • TOILETS", x + 61, y + 38);
-  // rep stars
-  const stars = Math.round(S.rep / 20);
-  ctx.fillStyle = "#ffd36b";
-  ctx.font = "11px system-ui";
-  let ss = "";
-  for (let i = 0; i < 5; i++) ss += i < stars ? "★" : "☆";
-  ctx.fillText(ss, x + 61, y + 50);
-  ctx.textAlign = "left";
+  const nf = nightFactor(), P = PYLON, cx = P.x;
+  const bx = cx - P.bw / 2, by = P.top, poleTop = by + P.bh;
+  // footing on the curb, right by the road
+  ctx.fillStyle = "rgba(0,0,0,0.25)";
+  ctx.beginPath(); ctx.ellipse(cx + 10, P.base, 34, 5, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = mix("#c9c3b4", "#4a4740", nf * 0.7);
+  ctx.fillRect(cx - 20, P.base - 6, 40, 7);
+  ctx.fillStyle = mix("#a39d8f", "#3a3833", nf * 0.7);
+  ctx.fillRect(cx - 20, P.base - 1, 40, 2);
+  ctx.fillStyle = "#1b1e23";
+  ctx.fillRect(cx - P.pw / 2, poleTop, P.pw, P.base - 6 - poleTop);
+  ctx.fillRect(bx, by, P.bw, P.bh);
+  drawPylonFace();
+}
+
+const DINER_WINDOWS = [[630, 140, 26, 22], [700, 140, 26, 22], [750, 140, 26, 22]];
+const WC_WINDOWS = [[826, 134, 20, 18], [858, 134, 20, 18]];
+
+function drawWindow(x, y, w, h, top, bot, frame) {
+  ctx.fillStyle = frame;
+  ctx.fillRect(x - 2, y - 2, w + 4, h + 4);
+  const g = ctx.createLinearGradient(0, y, 0, y + h);
+  g.addColorStop(0, top); g.addColorStop(1, bot);
+  ctx.fillStyle = g;
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = "rgba(255,255,255,0.32)";
+  ctx.beginPath();
+  ctx.moveTo(x + 3, y + h); ctx.lineTo(x + 8, y + h); ctx.lineTo(x + 16, y); ctx.lineTo(x + 11, y);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = frame;
+  ctx.fillRect(x + w / 2 - 0.75, y, 1.5, h);
+  ctx.fillStyle = "rgba(255,255,255,0.35)";
+  ctx.fillRect(x - 3, y + h + 2, w + 6, 2);
 }
 
 function drawRestStop() {
-  const nf = nightFactor();
+  const nf = nightFactor(), now = performance.now();
   // --- diner ---
-  ctx.fillStyle = mix("#d94f3d", "#3a2430", nf * 0.7);
+  const red = mix("#d94f3d", "#3a2430", nf * 0.7);
+  ctx.fillStyle = "rgba(0,0,0,0.25)";
+  ctx.fillRect(613, 170, 184, 4);
+  const bg = ctx.createLinearGradient(0, 110, 0, 170);
+  bg.addColorStop(0, mix("#e05a46", "#3a2430", nf * 0.7));
+  bg.addColorStop(1, mix("#b8402f", "#2a1a24", nf * 0.7));
+  ctx.fillStyle = bg;
   rr(ctx, 615, 110, 180, 60, 6); ctx.fill();
-  // awning stripes
+  ctx.fillStyle = "rgba(0,0,0,0.08)";
+  for (let yy = 115; yy < 124; yy += 4) ctx.fillRect(615, yy, 180, 1);
+  ctx.fillStyle = mix("#7d2c22", "#22141b", nf * 0.7);
+  rr(ctx, 611, 106, 188, 7, 3); ctx.fill();
+  // chrome kickplate
+  const kp = ctx.createLinearGradient(0, 162, 0, 170);
+  kp.addColorStop(0, mix("#eef2f6", "#4a505a", nf * 0.7));
+  kp.addColorStop(1, mix("#98a1ac", "#2a2e36", nf * 0.7));
+  ctx.fillStyle = kp;
+  ctx.fillRect(615, 162, 180, 8);
+  // scalloped awning
   for (let i = 0; i < 10; i++) {
-    ctx.fillStyle = i % 2 ? "#f4ede0" : mix("#d94f3d", "#3a2430", nf * 0.7);
+    ctx.fillStyle = i % 2 ? mix("#f6efe2", "#4a4450", nf * 0.6) : red;
     ctx.fillRect(615 + i * 18, 124, 18, 12);
+    ctx.beginPath(); ctx.ellipse(615 + i * 18 + 9, 136, 9, 4, 0, 0, Math.PI); ctx.fill();
   }
-  ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.fillRect(615, 136, 180, 3);
+  ctx.fillStyle = "rgba(255,255,255,0.22)"; ctx.fillRect(615, 124, 180, 2);
+  ctx.fillStyle = "rgba(0,0,0,0.18)"; ctx.fillRect(615, 140, 180, 3);
   // windows
-  ctx.fillStyle = mix("#ffe9b8", "#5a4a30", nf * 0.5);
-  ctx.fillRect(630, 140, 26, 22); ctx.fillRect(700, 140, 26, 22); ctx.fillRect(750, 140, 26, 22);
+  for (const [x, y, w, h] of DINER_WINDOWS)
+    drawWindow(x, y, w, h, mix("#fff4d6", "#6a5634", nf * 0.5), mix("#ffd98f", "#4a3a24", nf * 0.5), "#4a2c22");
   // door (serving point)
+  ctx.fillStyle = "#3b2414";
+  ctx.fillRect(681, 140, 18, 30);
   ctx.fillStyle = "#5e3b22";
   ctx.fillRect(683, 142, 14, 28);
-  // roof sign
+  ctx.fillStyle = mix("#ffe9b8", "#5a4a30", nf * 0.5);
+  ctx.fillRect(685, 145, 10, 10);
+  ctx.fillStyle = "#e8c26a";
+  ctx.fillRect(693, 157, 2, 5);
+  // roof sign with chasing marquee bulbs
   ctx.fillStyle = "#2b2117";
   rr(ctx, 660, 90, 90, 22, 5); ctx.fill();
+  ctx.strokeStyle = "rgba(255,211,107,0.45)"; ctx.lineWidth = 1.5;
+  rr(ctx, 660, 90, 90, 22, 5); ctx.stroke();
+  const chase = Math.floor(now / 260);
+  for (let i = 0; i < 11; i++) {
+    const on = (i + chase) % 3 === 0;
+    ctx.fillStyle = on ? "#fff3b0" : "rgba(255,211,107,0.45)";
+    ctx.beginPath(); ctx.arc(666 + i * 7.8, 93, 1.3, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(666 + i * 7.8, 109, 1.3, 0, 7); ctx.fill();
+  }
   ctx.fillStyle = "#ffd36b";
   ctx.font = "bold 12px system-ui";
   ctx.textAlign = "center";
-  ctx.fillText("DINER", 705, 105);
+  ctx.fillText("LOKANTA", 705, 105);
   ctx.textAlign = "left";
+  // shrubs flanking the diner
+  for (const [sx, sr] of [[604, 10], [806, 7]]) {
+    ctx.fillStyle = mix("#2f8a4c", "#12281c", nf * 0.8);
+    for (const [ox, oy, k] of [[-0.55, 0.45, 0.65], [0.5, 0.45, 0.6], [0, 0.8, 0.75]]) {
+      ctx.beginPath(); ctx.arc(sx + sr * ox, 169 - sr * oy, sr * k, 0, 7); ctx.fill();
+    }
+    ctx.fillStyle = "rgba(255,255,255,0.12)";
+    ctx.beginPath(); ctx.arc(sx - sr * 0.3, 168 - sr, sr * 0.4, 0, 7); ctx.fill();
+  }
 
   // --- toilets ---
-  ctx.fillStyle = mix("#8d99ae", "#2c3547", nf * 0.7);
+  ctx.fillStyle = "rgba(0,0,0,0.25)";
+  ctx.fillRect(810, 170, 82, 4);
+  const wg = ctx.createLinearGradient(0, 118, 0, 170);
+  wg.addColorStop(0, mix("#a3aec0", "#2c3547", nf * 0.7));
+  wg.addColorStop(1, mix("#7f8ca2", "#222a3a", nf * 0.7));
+  ctx.fillStyle = wg;
   rr(ctx, 812, 118, 78, 52, 6); ctx.fill();
-  ctx.fillStyle = mix("#ffe9b8", "#5a4a30", nf * 0.5);
-  ctx.fillRect(826, 134, 20, 18); ctx.fillRect(858, 134, 20, 18);
-  ctx.fillStyle = "#1d2333";
-  ctx.fillRect(845, 140, 12, 30); // open doorway — the WC has no door
+  // tiled facade
+  ctx.save();
+  rr(ctx, 812, 118, 78, 52, 6); ctx.clip();
+  ctx.fillStyle = "rgba(255,255,255,0.09)";
+  for (let yy = 132; yy < 170; yy += 6) ctx.fillRect(812, yy, 78, 1);
+  for (let row = 0, yy = 132; yy < 170; yy += 6, row++)
+    for (let xx = 812 + (row % 2) * 4; xx < 890; xx += 8) ctx.fillRect(xx, yy, 1, 6);
+  ctx.restore();
+  ctx.fillStyle = mix("#3f86c2", "#1b2c44", nf * 0.7);
+  ctx.fillRect(812, 124, 78, 5);
+  ctx.fillStyle = mix("#3a4458", "#161b26", nf * 0.6);
+  rr(ctx, 808, 114, 86, 6, 3); ctx.fill();
+  for (const [x, y, w, h] of WC_WINDOWS)
+    drawWindow(x, y, w, h, mix("#fff2d0", "#5a4a30", nf * 0.5), mix("#f3d9a0", "#40342a", nf * 0.5), "#2a3142");
+  // open doorway — the WC has no door
+  ctx.fillStyle = mix("#d3d9e2", "#3a4250", nf * 0.6);
+  ctx.fillRect(843, 138, 16, 32);
+  const dg = ctx.createLinearGradient(0, 140, 0, 170);
+  dg.addColorStop(0, "#121725"); dg.addColorStop(1, "#262d40");
+  ctx.fillStyle = dg;
+  ctx.fillRect(845, 140, 12, 30);
   ctx.fillStyle = "#1d2333";
   rr(ctx, 818, 100, 66, 20, 5); ctx.fill();
+  ctx.strokeStyle = "rgba(159,232,255,0.4)"; ctx.lineWidth = 1.5;
+  rr(ctx, 818, 100, 66, 20, 5); ctx.stroke();
   ctx.fillStyle = "#9fe8ff";
   ctx.font = "bold 12px system-ui";
   ctx.textAlign = "center";
@@ -2223,14 +3196,18 @@ function drawRestStop() {
   // cleanliness bar
   const cw = 66;
   ctx.fillStyle = "#0d1120";
-  ctx.fillRect(818, 90, cw, 6);
+  rr(ctx, 817, 89, cw + 2, 8, 4); ctx.fill();
   const cfrac = S.cleanliness / 100;
-  ctx.fillStyle = cfrac > 0.6 ? "#5ad07a" : cfrac > 0.3 ? "#ffd36b" : "#ff6b6b";
-  ctx.fillRect(818, 90, cw * cfrac, 6);
+  if (cfrac > 0) {
+    ctx.fillStyle = cfrac > 0.6 ? "#5ad07a" : cfrac > 0.3 ? "#ffd36b" : "#ff6b6b";
+    rr(ctx, 818, 90, Math.max(6, cw * cfrac), 6, 3); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.3)";
+    ctx.fillRect(820, 91, Math.max(2, cw * cfrac - 4), 1.5);
+  }
   // stink cloud when dirty
   if (S.cleanliness < 40) {
     const a = (40 - S.cleanliness) / 40 * 0.7;
-    ctx.fillStyle = `rgba(120, 160, 90, ${a * (0.6 + 0.4 * Math.sin(performance.now() / 300))})`;
+    ctx.fillStyle = `rgba(120, 160, 90, ${a * (0.6 + 0.4 * Math.sin(now / 300))})`;
     for (let i = 0; i < 3; i++) {
       ctx.beginPath();
       ctx.arc(884 + i * 8, 86 - i * 8, 6 + i * 2, 0, 7);
@@ -2239,72 +3216,320 @@ function drawRestStop() {
   }
 }
 
+// Drawn over the night overlay: lamp pools, lit windows, glowing signs.
+function drawNightLights(nf, now) {
+  if (nf <= 0.3) return;
+  const a = (nf - 0.3) / 0.7;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (const lx of LAMPS) {
+    const hx = lx + 13, hy = LOT.top - 54;
+    ctx.save();
+    ctx.translate(hx, LOT.top + 34);
+    ctx.scale(1, 0.45);
+    const pg = ctx.createRadialGradient(0, 0, 4, 0, 0, 95);
+    pg.addColorStop(0, `rgba(255,196,110,${0.24 * a})`);
+    pg.addColorStop(1, "rgba(255,196,110,0)");
+    ctx.fillStyle = pg;
+    ctx.fillRect(-95, -95, 190, 190);
+    ctx.restore();
+    const cone = ctx.createLinearGradient(0, hy, 0, LOT.top + 40);
+    cone.addColorStop(0, `rgba(255,214,140,${0.16 * a})`);
+    cone.addColorStop(1, "rgba(255,214,140,0)");
+    ctx.fillStyle = cone;
+    ctx.beginPath();
+    ctx.moveTo(hx - 6, hy); ctx.lineTo(hx + 6, hy); ctx.lineTo(hx + 40, LOT.top + 40); ctx.lineTo(hx - 40, LOT.top + 40);
+    ctx.closePath(); ctx.fill();
+    const bg = ctx.createRadialGradient(hx, hy, 1, hx, hy, 16);
+    bg.addColorStop(0, `rgba(255,236,180,${0.8 * a})`);
+    bg.addColorStop(1, "rgba(255,236,180,0)");
+    ctx.fillStyle = bg;
+    ctx.beginPath(); ctx.arc(hx, hy, 16, 0, 7); ctx.fill();
+  }
+  // window light spilling onto the curb
+  for (const [sx, rx] of [[705, 100], [851, 46]]) {
+    ctx.save();
+    ctx.translate(sx, 170);
+    ctx.scale(1, 0.28);
+    const sg = ctx.createRadialGradient(0, 0, 2, 0, 0, rx);
+    sg.addColorStop(0, `rgba(255,190,100,${0.2 * a})`);
+    sg.addColorStop(1, "rgba(255,190,100,0)");
+    ctx.fillStyle = sg;
+    ctx.fillRect(-rx, 0, rx * 2, rx);
+    ctx.restore();
+  }
+  ctx.restore();
+
+  ctx.fillStyle = `rgba(255, 196, 100, ${0.5 * nf})`;
+  for (const [x, y, w, h] of [...DINER_WINDOWS, ...WC_WINDOWS]) ctx.fillRect(x, y, w, h);
+
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.shadowBlur = 10 * a;
+  ctx.font = "bold 12px system-ui";
+  ctx.shadowColor = "#ffb02e";
+  ctx.fillStyle = "#ffd36b";
+  ctx.fillText("LOKANTA", 705, 105);
+  ctx.shadowColor = "#4fd8ff";
+  ctx.fillStyle = "#b6f0ff";
+  ctx.fillText("WC · ₺20", 851, 114);
+  ctx.restore();
+  // backlit pylon face cuts through the night overlay
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, a);
+  ctx.shadowColor = "rgba(230, 240, 255, 0.9)";
+  ctx.shadowBlur = 16;
+  ctx.fillStyle = "#f7f9fc";
+  ctx.fillRect(PYLON.x - PYLON.bw / 2 + 4, PYLON.top + 4, PYLON.bw - 8, PYLON.bh - 8);
+  ctx.shadowBlur = 0;
+  drawPylonFace();
+  ctx.restore();
+}
+
 /* ------------------ Counter room (you, behind the counter) ----------- */
+function shade(hex, f) {                                            // f<0 darkens, f>0 lightens
+  const n = parseInt(hex.slice(1), 16);
+  const ch = s => {
+    const v = (n >> s) & 255;
+    return Math.round(f < 0 ? v * (1 + f) : v + (255 - v) * f);
+  };
+  return `rgb(${ch(16)}, ${ch(8)}, ${ch(0)})`;
+}
+
+// A landscape banknote held in a guest's hand, centered on (cx, cy) and u px
+// per unit (the note is 16u x 8u) — a mini of the drawer's drawNote look.
+function drawHeldBill(cx, cy, u, color, d) {
+  const w = 16 * u, h = 8 * u, x = -w / 2, y = -h / 2;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(-0.18);
+  ctx.fillStyle = "rgba(0, 0, 0, 0.3)";
+  rr(ctx, x + 0.4 * u, y + 0.5 * u, w, h, 0.5 * u); ctx.fill();
+  ctx.fillStyle = shade(color, 0.4);                                // paper + pale margin
+  rr(ctx, x, y, w, h, 0.5 * u); ctx.fill();
+  ctx.fillStyle = color;
+  rr(ctx, x + 0.7 * u, y + 0.7 * u, w - 1.4 * u, h - 1.4 * u, 0.4 * u); ctx.fill();
+  ctx.strokeStyle = shade(color, -0.3);                             // guilloche waves
+  ctx.lineWidth = Math.max(0.5, 0.18 * u);
+  ctx.beginPath();
+  for (let k = 0; k < 3; k++) {
+    const yy = y + 2 * u + k * 2 * u;
+    ctx.moveTo(x + 0.9 * u, yy);
+    for (let xx = 0.9; xx <= 15.1; xx += 0.6) ctx.lineTo(x + xx * u, yy + Math.sin(xx * 1.6 + k) * 0.35 * u);
+  }
+  ctx.stroke();
+  ctx.fillStyle = shade(color, 0.55);                               // watermark window
+  ctx.beginPath(); ctx.ellipse(x + 12 * u, y + 4 * u, 1.9 * u, 2.4 * u, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = shade(color, -0.38);                              // portrait
+  ctx.beginPath(); ctx.arc(x + 4 * u, y + 3.3 * u, 1.2 * u, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(x + 4 * u, y + 6.3 * u, 2.1 * u, 1.6 * u, 0, Math.PI, 0); ctx.fill();
+  ctx.fillStyle = "rgba(170, 175, 185, 0.85)";                      // security thread
+  ctx.fillRect(x + 9 * u, y + 0.7 * u, 0.35 * u, h - 1.4 * u);
+  ctx.fillStyle = shade(color, -0.55);                              // denomination
+  ctx.font = `bold ${(2.4 * u).toFixed(1)}px system-ui, sans-serif`;
+  ctx.textAlign = "right";
+  ctx.fillText(d, x + w - 1 * u, y + 2.7 * u);
+  ctx.textAlign = "left";
+  ctx.restore();
+}
+
 function drawCounterIn() {
   const d = COUNTER_IN.desk;
-  // the full-width wooden teller counter
-  ctx.fillStyle = "#8a6a3d";
-  rr(ctx, d.x, d.y, d.w, 68, 3); ctx.fill();                        // front panels
-  ctx.fillStyle = "#7d5f36";
-  rr(ctx, d.x, d.y - 1, d.w, 3, 2); ctx.fill();
-  ctx.strokeStyle = "rgba(0, 0, 0, 0.25)";
+  // the full-width wooden teller counter: a raised guest-side ledge (guests
+  // stand behind it) and your desktop running down to the bottom of the view
+  const L = -offX, R = L + Wdyn, B = H + offY;
+  const top = d.y + 8;                                              // desktop starts under the ledge face
+  const wood = ctx.createLinearGradient(0, top, 0, B);
+  wood.addColorStop(0, "#7a5a32");
+  wood.addColorStop(0.25, "#8f6b3c");
+  wood.addColorStop(1, "#5e4426");
+  ctx.fillStyle = wood;
+  ctx.fillRect(L, top, Wdyn, B - top);
   ctx.lineWidth = 1;
-  for (let x = d.x + 30; x < d.x + d.w - 8; x += 30) {
-    ctx.beginPath(); ctx.moveTo(x, d.y + 6); ctx.lineTo(x, d.y + 62); ctx.stroke();
+  for (let y = top + 22, k = 0; y < B; y += 34, k++) {              // plank seams + grain
+    ctx.fillStyle = "rgba(0, 0, 0, 0.22)";
+    ctx.fillRect(L, y, Wdyn, 1.5);
+    ctx.fillStyle = "rgba(255, 228, 170, 0.07)";
+    ctx.fillRect(L, y + 1.5, Wdyn, 1);
+    ctx.strokeStyle = "rgba(60, 38, 16, 0.18)";
+    ctx.beginPath();
+    for (let g = 0; g < 3; g++) {
+      const gy = y + 8 + g * 8;
+      ctx.moveTo(L, gy);
+      for (let x = L; x <= R; x += 24) ctx.lineTo(x, gy + Math.sin(x * 0.013 + k * 1.7 + g) * 2.2);
+    }
+    ctx.stroke();
   }
-  ctx.strokeStyle = "rgba(255, 226, 160, 0.10)";
-  ctx.beginPath();
-  for (let x = d.x + 15; x < d.x + d.w - 8; x += 30) {
-    ctx.moveTo(x, d.y + 34); ctx.lineTo(x + 10, d.y + 30);
-  }
-  ctx.stroke();                                                     // wood grain
-  ctx.fillStyle = "#a9854f";
-  rr(ctx, d.x - 8, d.y - 8, d.w + 16, 10, 3); ctx.fill();           // counter top
-  ctx.fillStyle = "rgba(255, 240, 200, 0.35)";
-  ctx.fillRect(d.x - 8, d.y - 8, d.w + 16, 3);
-  ctx.fillStyle = "rgba(0, 0, 0, 0.28)";
-  ctx.fillRect(d.x - 8, d.y + 2, d.w + 16, 3);
+  const sheen = ctx.createRadialGradient(480, top + 60, 20, 480, top + 60, 520);
+  sheen.addColorStop(0, "rgba(255, 236, 190, 0.10)");
+  sheen.addColorStop(1, "rgba(255, 236, 190, 0)");
+  ctx.fillStyle = sheen;
+  ctx.fillRect(L, top, Wdyn, B - top);
+  const ls = ctx.createLinearGradient(0, top, 0, top + 18);         // the ledge's shadow on the desk
+  ls.addColorStop(0, "rgba(0, 0, 0, 0.45)");
+  ls.addColorStop(1, "rgba(0, 0, 0, 0)");
+  ctx.fillStyle = ls;
+  ctx.fillRect(L, top, Wdyn, 18);
+  // the raised ledge: its top surface, then the face turned toward you
+  ctx.fillStyle = "#b48d55";
+  ctx.fillRect(L, d.y - 12, Wdyn, 9);                               // ledge top
+  ctx.fillStyle = "rgba(255, 240, 200, 0.4)";
+  ctx.fillRect(L, d.y - 12, Wdyn, 2);
+  const face = ctx.createLinearGradient(0, d.y - 3, 0, top);
+  face.addColorStop(0, "#8a6838");
+  face.addColorStop(1, "#6c4f2b");
+  ctx.fillStyle = face;
+  ctx.fillRect(L, d.y - 3, Wdyn, top - d.y + 3);                    // ledge face
+  ctx.fillStyle = "rgba(0, 0, 0, 0.3)";
+  ctx.fillRect(L, d.y - 3, Wdyn, 1);
+  ctx.fillRect(L, top - 1, Wdyn, 1);
   // the open cash drawer
+  function drawNote(x, y, w, h, color, d) {
+    ctx.fillStyle = shade(color, 0.35);                             // paper + pale margin
+    rr(ctx, x, y, w, h, 2); ctx.fill();
+    ctx.fillStyle = color;
+    rr(ctx, x + 3, y + 3, w - 6, h - 6, 2); ctx.fill();
+    ctx.strokeStyle = shade(color, -0.3);
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();                                                // guilloche waves
+    for (let k = 0; k < 5; k++) {
+      const yy = y + 10 + k * ((h - 20) / 4);
+      ctx.moveTo(x + 4, yy);
+      for (let xx = x + 4; xx <= x + w - 4; xx += 3) {
+        ctx.lineTo(xx, yy + Math.sin((xx - x) * 0.45 + k) * 1.6);
+      }
+    }
+    ctx.stroke();
+    ctx.fillStyle = shade(color, 0.5);                              // watermark window
+    ctx.beginPath(); ctx.ellipse(x + w - 19, y + h - 20, 8, 10, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = shade(color, -0.35);                            // portrait
+    ctx.beginPath(); ctx.arc(x + 17, y + h - 26, 6, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(x + 17, y + h - 12, 10, 6, 0, Math.PI, 0); ctx.fill();
+    ctx.fillStyle = "rgba(170, 175, 185, 0.85)";                    // security thread
+    ctx.fillRect(x + w - 8, y + 3, 1.5, h - 6);
+    ctx.fillStyle = shade(color, -0.5);                             // corner numerals
+    ctx.font = "bold 9px system-ui, sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText(d, x + 5, y + 12);
+    ctx.textAlign = "right";
+    ctx.fillText(d, x + w - 5, y + h - 5);
+  }
+  // Turkish coins: 1₺ bimetallic, 50/25 kuruş silver, 10/5 kuruş brass
+  const COINS = [
+    { r: 7,   rim: "#c9ced6", core: "#d8b25a" },
+    { r: 6.4, rim: "#c3c8d0", core: "#c3c8d0" },
+    { r: 5.8, rim: "#bfc4cc", core: "#bfc4cc" },
+    { r: 5.2, rim: "#cfa64e", core: "#cfa64e" },
+    { r: 4.6, rim: "#c99d47", core: "#c99d47" },
+  ];
+  const PILE = [[-8, 6], [6, 8], [-2, -2], [9, -3], [-9, -6], [2, 12], [0, -9]];
+  function drawCoin(x, y, c) {
+    ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+    ctx.beginPath(); ctx.arc(x + 1, y + 1.5, c.r, 0, 7); ctx.fill();
+    ctx.fillStyle = shade(c.rim, -0.35);                            // milled edge
+    ctx.beginPath(); ctx.arc(x, y, c.r, 0, 7); ctx.fill();
+    ctx.fillStyle = c.rim;
+    ctx.beginPath(); ctx.arc(x, y, c.r - 0.8, 0, 7); ctx.fill();
+    ctx.fillStyle = c.core;
+    ctx.beginPath(); ctx.arc(x, y, c.r * 0.62, 0, 7); ctx.fill();
+    ctx.strokeStyle = shade(c.core, -0.25);
+    ctx.lineWidth = 0.6;
+    ctx.beginPath(); ctx.arc(x, y, c.r * 0.62, 0, 7); ctx.stroke();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.55)";                  // sheen
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(x, y, c.r - 1.6, Math.PI * 1.05, Math.PI * 1.55); ctx.stroke();
+  }
+  function softShadow(x, y, w, h, r, blur = 10, oy = 4) {
+    ctx.save();
+    ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+    ctx.shadowBlur = blur;
+    ctx.shadowOffsetY = oy;
+    ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+    rr(ctx, x, y, w, h, r); ctx.fill();
+    ctx.restore();
+  }
   function drawDrawer() {
-    ctx.fillStyle = "#3a4150";
-    rr(ctx, 434, 372, 212, 152, 4); ctx.fill();                    // open drawer
+    softShadow(374, 372, 212, 152, 4, 14, 6);
+    const mg = ctx.createLinearGradient(374, 0, 586, 0);            // brushed-metal till body
+    mg.addColorStop(0, "#2f3542");
+    mg.addColorStop(0.5, "#454d5e");
+    mg.addColorStop(1, "#2c323e");
+    ctx.fillStyle = mg;
+    rr(ctx, 374, 372, 212, 152, 4); ctx.fill();                    // open drawer
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.5)";
+    ctx.lineWidth = 1;
+    rr(ctx, 374.5, 372.5, 211, 151, 4); ctx.stroke();
+    ctx.fillStyle = "rgba(255, 255, 255, 0.18)";
+    ctx.fillRect(376, 373, 208, 2);
     ctx.fillStyle = "#12151d";
-    ctx.fillRect(440, 378, 200, 90);
+    ctx.fillRect(380, 378, 200, 90);
     for (const c of COUNTER_IN.chips) {                             // the three bill trays
       ctx.fillStyle = "#0e1118";
       rr(ctx, c.x - 4, c.y - 4, c.w + 8, c.h + 8, 3); ctx.fill();
-      ctx.fillStyle = c.color;
-      rr(ctx, c.x, c.y, c.w, c.h + 20, 3); ctx.fill();
-      ctx.fillStyle = "rgba(15, 30, 20, 0.65)";
-      ctx.fillRect(c.x + 2, c.y + c.h / 2 - 7, c.w - 4, 22);
-      ctx.fillStyle = "#eaf5e6";
+      const nh = c.h + 20;
+      for (let k = 3; k >= 1; k--) {                                // the stack under the top note
+        ctx.fillStyle = shade(c.color, -0.15 - k * 0.08);
+        rr(ctx, c.x + (k % 2 ? 1 : -1), c.y + k * 1.5, c.w, nh, 2); ctx.fill();
+        ctx.fillStyle = shade(c.color, 0.3);
+        ctx.fillRect(c.x + 2, c.y + nh + k * 1.5 - 1, c.w - 4, 0.8);
+      }
+      drawNote(c.x, c.y, c.w, nh, c.color, c.d);
+      ctx.fillStyle = "#8d96a6";                                    // spring clip arm
+      rr(ctx, c.x + c.w / 2 - 3, c.y - 6, 6, 22, 2); ctx.fill();
+      ctx.fillStyle = "#dfe4ec";
+      ctx.fillRect(c.x + c.w / 2 - 1.5, c.y - 5, 1.5, 19);
+      ctx.fillStyle = "#5d6574";
+      rr(ctx, c.x + c.w / 2 - 6, c.y + 14, 12, 5, 2); ctx.fill();
+      ctx.fillStyle = "rgba(15, 30, 20, 0.62)";                      // readable label band
+      rr(ctx, c.x + 4, c.y + c.h / 2 - 6, c.w - 8, 20, 3); ctx.fill();
+      ctx.fillStyle = "#f4f8f0";
       ctx.font = "bold 14px system-ui, sans-serif";
       ctx.textAlign = "center";
       ctx.fillText(c.label, c.x + c.w / 2, c.y + c.h / 2 + 9);
     }
     ctx.fillStyle = "#0e1118";                                      // coin compartment
-    rr(ctx, 440, 468, 200, 44, 3); ctx.fill();
-    ctx.fillStyle = "#2a3040";
-    for (let i = 1; i < 5; i++) ctx.fillRect(440 + i * 40, 470, 1.5, 16);
-    for (let i = 0; i < 5; i++) {
-      ctx.fillStyle = "#d9a94e";
-      for (let k = 0; k < 3; k++) {
-        ctx.beginPath(); ctx.arc(448 + i * 40 + k * 9, 478, 3.5, 0, 7); ctx.fill();
-      }
+    rr(ctx, 380, 468, 200, 44, 3); ctx.fill();
+    const cg = ctx.createLinearGradient(0, 468, 0, 512);
+    cg.addColorStop(0, "rgba(0, 0, 0, 0.5)");
+    cg.addColorStop(0.35, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = cg;
+    ctx.fillRect(380, 468, 200, 44);
+    for (let i = 1; i < 5; i++) {                                   // cup dividers
+      ctx.fillStyle = "#2a3040";
+      ctx.fillRect(380 + i * 40 - 1, 470, 2.5, 40);
+      ctx.fillStyle = "rgba(255, 255, 255, 0.1)";
+      ctx.fillRect(380 + i * 40 - 1, 470, 0.8, 40);
     }
-    // ctx.fillStyle = "#3a4150";                                      // front face + handle
-    // ctx.fillRect(436, 478, 208, 8);
-    ctx.fillStyle = "#cfd6e4";
-    rr(ctx, 526, 513, 28, 5, 2); ctx.fill();
+    for (let i = 0; i < 5; i++) {
+      const cx = 400 + i * 40, cy = 490;
+      const n = 7 - i % 3;
+      for (let k = 0; k < n; k++) drawCoin(cx + PILE[k][0] * 0.95, cy + PILE[k][1] * 0.95, COINS[i]);
+    }
+    ctx.fillStyle = "#cfd6e4";                                      // drawer pull
+    rr(ctx, 466, 513, 28, 5, 2); ctx.fill();
+    ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+    ctx.fillRect(468, 513.5, 24, 1);
     ctx.textAlign = "left";
   }
   drawDrawer();
   // calculator, cologne
   function drawCounterItems() {
-    ctx.fillStyle = "#222835";                                      // calculator
-    rr(ctx, 288, 396, 66, 68, 5); ctx.fill();
-    ctx.fillStyle = "#9fe8c8";
-    ctx.fillRect(295, 403, 52, 16);
+    softShadow(218, 396, 66, 68, 6, 8, 4);                          // calculator
+    const cb = ctx.createLinearGradient(0, 396, 0, 464);
+    cb.addColorStop(0, "#343b4b");
+    cb.addColorStop(1, "#1b202b");
+    ctx.fillStyle = cb;
+    rr(ctx, 218, 396, 66, 68, 6); ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
+    ctx.lineWidth = 1;
+    rr(ctx, 218.5, 396.5, 65, 67, 6); ctx.stroke();
+    ctx.fillStyle = "#11151d";                                      // screen bezel
+    rr(ctx, 223, 401, 56, 20, 3); ctx.fill();
+    const lcd = ctx.createLinearGradient(0, 403, 0, 419);
+    lcd.addColorStop(0, "#b4f0d4");
+    lcd.addColorStop(1, "#86d6b0");
+    ctx.fillStyle = lcd;
+    ctx.fillRect(225, 403, 52, 16);
     ctx.fillStyle = "#1e3a2c";
     ctx.font = "bold 13px monospace";
     ctx.textAlign = "right";
@@ -2314,11 +3539,17 @@ function drawCounterIn() {
     const f = facilities.C.queue[0];
     const inC = p => p && (p.state === "queueC" || p.state === "payC" || p.state === "doneC" || p.state === "dripC");
     const g = (f && f.state === "doneC" && inC(facilities.C.queue[1])) ? facilities.C.queue[1] : f;
-    ctx.fillText(String(inC(g) ? Math.max(0, g.owed - g.changeGiven) : 0).padStart(3, "0"), 343, 416);
+    ctx.fillText(String(inC(g) ? Math.max(0, g.owed - g.changeGiven) : 0).padStart(3, "0"), 273, 416);
     ctx.textAlign = "left";
-    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
-      ctx.fillStyle = (r + c) % 2 ? "#39404f" : "#4a5261";
-      ctx.fillRect(295 + c * 18, 426 + r * 12, 15, 8);
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {      // keys: dark cap with a lit top edge
+      const kx = 225 + c * 18, ky = 426 + r * 12;
+      const op = c === 2 && r === 2;
+      ctx.fillStyle = "#0f1219";
+      rr(ctx, kx, ky + 1, 15, 8, 2); ctx.fill();
+      ctx.fillStyle = op ? "#d9823b" : (r + c) % 2 ? "#454c5c" : "#565e70";
+      rr(ctx, kx, ky, 15, 8, 2); ctx.fill();
+      ctx.fillStyle = "rgba(255, 255, 255, 0.18)";
+      ctx.fillRect(kx + 2, ky + 0.5, 11, 1);
     }
     drawBottle();
     drawTea();
@@ -2330,24 +3561,121 @@ function drawCounterIn() {
 function drawBottle() {
   const b = COUNTER_IN.bottle;
   const f = S.bottle / BOTTLE_MAX;
-  // the 500 ml Turkish cologne: glass body, liquid level, neck, red cap
-  if (f > 0.02) {
-    const fillH = 30 * f;
-    ctx.fillStyle = `rgba(190, 120, 40, ${0.3 + 0.6 * f})`;
-    ctx.fillRect(b.x + 2, b.y + 40 - fillH - 1, 20, fillH);
+  // a Pereja-style lemon cologne: ribbed pale-yellow plastic body, white
+  // screw cap, cream label with brown bands and the PE·RE·JA hexagons
+  // drawn at a fixed 54×108 design size, scaled down into the hit rect
+  const x = 0, w = 54, cx = w / 2;
+  const capH = 15, top = capH, bot = 108, bodyH = bot - top;
+  const lblY = top + 26, lblH = 36;
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  ctx.scale(b.w / w, b.h / bot);
+
+  ctx.fillStyle = "rgba(0, 0, 0, 0.28)";                            // shadow on the counter
+  ctx.beginPath(); ctx.ellipse(cx + 3, bot, w / 2 + 3, 5, 0, 0, 7); ctx.fill();
+
+  rr(ctx, x, top, w, bodyH, 9);                                     // body (empty plastic)
+  ctx.fillStyle = "#f7f3d2";
+  ctx.fill();
+  ctx.save();
+  ctx.clip();
+  if (f > 0.02) {                                                    // cologne level
+    const fillH = (bodyH - 4) * f;
+    ctx.fillStyle = "#ece17f";
+    ctx.fillRect(x, bot - fillH, w, fillH);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+    ctx.fillRect(x, bot - fillH, w, 1.2);
   }
-  ctx.fillStyle = "rgba(210, 230, 240, 0.22)";
-  ctx.fillRect(b.x, b.y + 8, 24, 32);
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
-  ctx.lineWidth = 1.2;
-  ctx.strokeRect(b.x, b.y + 8, 24, 32);          // glass
-  ctx.strokeRect(b.x + 7, b.y, 10, 9);           // neck
+  ctx.lineWidth = 1;                                                 // vertical ribs
+  for (let rx = x + 4; rx < x + w - 2; rx += 4.5) {
+    ctx.strokeStyle = "rgba(150, 140, 60, 0.18)";
+    ctx.beginPath(); ctx.moveTo(rx, top + 6); ctx.lineTo(rx, bot - 12); ctx.stroke();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
+    ctx.beginPath(); ctx.moveTo(rx + 1.2, top + 6); ctx.lineTo(rx + 1.2, bot - 12); ctx.stroke();
+  }
+  ctx.strokeStyle = "rgba(150, 140, 60, 0.3)";                       // base groove
+  ctx.beginPath(); ctx.moveTo(x, bot - 10); ctx.lineTo(x + w, bot - 10); ctx.stroke();
+  const sh = ctx.createLinearGradient(x, 0, x + w, 0);              // round-body shading
+  sh.addColorStop(0, "rgba(120, 110, 40, 0.25)");
+  sh.addColorStop(0.18, "rgba(255, 255, 255, 0.45)");
+  sh.addColorStop(0.32, "rgba(255, 255, 255, 0)");
+  sh.addColorStop(0.8, "rgba(120, 110, 40, 0.08)");
+  sh.addColorStop(1, "rgba(100, 90, 30, 0.35)");
+  ctx.fillStyle = sh;
+  ctx.fillRect(x, top, w, bodyH);
+
+  // label: cream band, brown rules, a taller central plaque
+  ctx.fillStyle = "#f6efd8";
+  ctx.fillRect(x, lblY, w, lblH);
+  rr(ctx, x + 9, lblY - 4, w - 18, lblH + 8, 7); ctx.fill();
+  ctx.strokeStyle = "#7d6b45";
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.moveTo(x, lblY + 1.5); ctx.lineTo(x + 9, lblY + 1.5);
+  ctx.moveTo(x + w - 9, lblY + 1.5); ctx.lineTo(x + w, lblY + 1.5);
+  ctx.moveTo(x, lblY + lblH - 1.5); ctx.lineTo(x + 9, lblY + lblH - 1.5);
+  ctx.moveTo(x + w - 9, lblY + lblH - 1.5); ctx.lineTo(x + w, lblY + lblH - 1.5);
+  ctx.stroke();
+  rr(ctx, x + 10, lblY - 2.5, w - 20, lblH + 5, 6); ctx.stroke();
+  ctx.fillStyle = "#5a4a2e";                                         // side medallions
+  for (const mx of [x + 3.5, x + w - 3.5]) {
+    ctx.beginPath(); ctx.arc(mx, lblY + lblH / 2, 3, 0, 7); ctx.fill();
+  }
   ctx.fillStyle = "#c0392b";
-  rr(ctx, b.x + 6, b.y - 5, 12, 6, 2); ctx.fill(); // cap
-  ctx.fillStyle = "rgba(255,255,255,0.75)";
-  ctx.font = "6px system-ui, sans-serif";
+  for (const mx of [x + 3.5, x + w - 3.5]) {
+    ctx.beginPath(); ctx.arc(mx, lblY + lblH / 2, 1.2, 0, 7); ctx.fill();
+  }
+
   ctx.textAlign = "center";
-  ctx.fillText("500 ml", b.x + 12, b.y + 48);
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#3a2f1e";
+  ctx.font = "4px system-ui, sans-serif";
+  ctx.fillText("80°", cx, lblY + 1.5);
+  ctx.fillStyle = "#c0392b";
+  ctx.font = "bold 5px system-ui, sans-serif";
+  ctx.fillText("TURİSTİK", cx, lblY + 7);
+  const hexR = 5;                                                    // PE · RE · JA hexagons
+  ["PE", "RE", "JA"].forEach((t, i) => {
+    const hx = cx + (i - 1) * (hexR * 1.8), hy = lblY + 15.5;
+    ctx.fillStyle = "#8a7850";
+    ctx.beginPath();
+    for (let k = 0; k < 6; k++) {
+      const a = Math.PI / 6 + k * Math.PI / 3;
+      ctx[k ? "lineTo" : "moveTo"](hx + hexR * Math.cos(a), hy + hexR * Math.sin(a));
+    }
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 4.5px system-ui, sans-serif";
+    ctx.fillText(t, hx, hy + 0.3);
+  });
+  ctx.fillStyle = "#c0392b";
+  ctx.font = "bold 3.2px system-ui, sans-serif";
+  ctx.fillText("LİMON KOLONYASI", cx, lblY + 24);
+  ctx.fillStyle = "#1e1a14";
+  ctx.font = "bold 5px system-ui, sans-serif";
+  ctx.fillText("500 ml", cx, lblY + 30.5);
+  ctx.textBaseline = "alphabetic";
+
+  ctx.restore();                                                     // end body clip
+  ctx.strokeStyle = "rgba(140, 130, 60, 0.45)";
+  ctx.lineWidth = 1;
+  rr(ctx, x, top, w, bodyH, 9); ctx.stroke();
+
+  // white screw cap
+  const capX = x + 9, capW = w - 18;
+  const cg = ctx.createLinearGradient(capX, 0, capX + capW, 0);
+  cg.addColorStop(0, "#c9ced6");
+  cg.addColorStop(0.25, "#ffffff");
+  cg.addColorStop(0.7, "#e6e9ee");
+  cg.addColorStop(1, "#aab0ba");
+  ctx.fillStyle = cg;
+  rr(ctx, capX, 0, capW, capH + 2, 4); ctx.fill();
+  ctx.strokeStyle = "rgba(90, 100, 115, 0.5)";
+  ctx.stroke();
+  ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+  ctx.fillRect(capX + 3, 2, capW - 6, 1.5);
+
+  ctx.restore();
   ctx.textAlign = "left";
 }
 
@@ -2418,8 +3746,11 @@ function drawTea() {
  * it to call for tea; orderTea brings a fresh glass within TEA_DELIVERY. */
 function drawIntercom() {
   const b = COUNTER_IN.intercom;
-  ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
-  rr(ctx, b.x + 2, b.y + 3, b.w, b.h, 6); ctx.fill();           // shadow
+  ctx.save();                                                   // soft shadow on the desk
+  ctx.shadowColor = "rgba(0, 0, 0, 0.5)"; ctx.shadowBlur = 8; ctx.shadowOffsetY = 4;
+  ctx.fillStyle = "rgba(0, 0, 0, 0.3)";
+  rr(ctx, b.x, b.y, b.w, b.h, 6); ctx.fill();
+  ctx.restore();
   ctx.fillStyle = "#eceae4";
   rr(ctx, b.x, b.y, b.w, b.h, 6); ctx.fill();                   // case
   ctx.strokeStyle = "rgba(0, 0, 0, 0.18)";
@@ -2447,13 +3778,16 @@ function drawIntercom() {
 
 // Intercom click: call for a fresh glass of tea.
 function orderTea() {
-  if (S.teaOrder != null) { toast("🍵 Your tea is already on the way", ""); return; }
+  if (S.teaOrder != null) { toast("🍵 Çayın zaten yolda", ""); return; }
   S.teaOrder = rand(TEA_DELIVERY[0], TEA_DELIVERY[1]);
-  toast("🍵 Tea is on the way!", "");
+  toast("🍵 Çay geliyor!", "");
 }
 
 function drawCounterInPrompts() {
   const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 200);
+  ctx.save();
+  ctx.shadowColor = "rgba(0, 0, 0, 0.85)";                         // legible on the wooden desk
+  ctx.shadowBlur = 3;
   ctx.textAlign = "center";
   const front = facilities.C.queue[0];
   if (front) {
@@ -2461,28 +3795,32 @@ function drawCounterInPrompts() {
       const b = COUNTER_IN.bottle;
       ctx.fillStyle = `rgba(255, 211, 107, ${pulse})`;
       ctx.font = "bold 10px system-ui, sans-serif";
-      ctx.fillText("drop!", b.x + 12, b.y - 10);
+      ctx.fillText("kolonya!", b.x + b.w / 2, b.y - 6);
     }
     if (front.state === "payC" && front.changeGiven < front.owed) {
       const c = COUNTER_IN.chips[0];
       ctx.fillStyle = `rgba(255, 211, 107, ${pulse})`;
       ctx.font = "bold 10px system-ui, sans-serif";
-      ctx.fillText("change!", c.x + 32, c.y - 8);
+      ctx.fillText("para üstü!", c.x + 32, c.y - 8);
     }
   }
+  ctx.restore();
   ctx.textAlign = "left";
 }
 
-/* Red badge pinned to the exit door's top-right corner — how many guests are
+/* Red badge pinned just ABOVE the "EXIT" text inside the exit door — how many guests are
  * standing OUTSIDE the WC building, waiting for a toilet (the T line).
  * The line moves on its own (visits last 1–10 game minutes), so the badge
- * is the at-a-glance "the door is busy" signal for you behind the counter. */
+ * is the at-a-glance "the door is busy" signal for you behind the counter.
+ * (Above, not over: a badge on the text would swallow it.) */
 function drawExitQueueBadge() {
   const n = facilities.T.queue.length;
   if (n === 0) return;
   const ex = COUNTER_IN.exit;
   const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 200);
-  const cx = ex.x + ex.w, cy = ex.y; // the door's top-right corner
+  const exTop = -offY; // the doorway runs to the top of the frame (same as the door draw)
+  const cx = ex.x + ex.w / 2; // horizontally over the "EXIT" text
+  const cy = (exTop + ex.y + ex.h) / 2 - 24; // just above the text — the badge must not cover it
   const label = String(n);           // exact count — no "9+" cap
   ctx.font = "bold 11px system-ui, sans-serif";
   ctx.textAlign = "center";
@@ -2508,6 +3846,66 @@ function drawExitQueueBadge() {
   ctx.textBaseline = "alphabetic";
 }
 
+/* --------------------- shared garden-hose drawing ------------------- */
+// a garden hose stroke: dark outline, green tube, a thin highlight on top
+function hoseStroke(path) {
+  ctx.lineCap = "round";
+  ctx.strokeStyle = "#1c5230"; ctx.lineWidth = 8; path(0); ctx.stroke();
+  ctx.strokeStyle = "#3f9c57"; ctx.lineWidth = 6; path(0); ctx.stroke();
+  ctx.strokeStyle = "rgba(170, 240, 190, 0.55)"; ctx.lineWidth = 1.5; path(-1.5); ctx.stroke();
+  ctx.lineCap = "butt";
+  ctx.lineWidth = 1;
+}
+
+// the hose draped from its tap (ox, oy) to the nozzle at the pointer
+function drawHoseLine(ox, oy, px, py) {
+  hoseStroke(o => {
+    ctx.beginPath();
+    ctx.moveTo(ox, oy + o);
+    ctx.quadraticCurveTo((ox + px) / 2 - 60, (oy + py) / 2 + 40 + o, px - 6, py - 6 + o);
+  });
+}
+
+// the trigger nozzle held at the pointer, tilted down-right
+function drawHoseNozzle(px, py) {
+  ctx.save();
+  ctx.translate(px - 6, py - 6);
+  ctx.rotate(0.6);
+  const nz = ctx.createLinearGradient(0, -5, 0, 5);
+  nz.addColorStop(0, "#3a4b5f"); nz.addColorStop(1, "#18222e");
+  ctx.fillStyle = nz;
+  rr(ctx, -8, -5, 22, 10, 3); ctx.fill();
+  ctx.fillStyle = "#e0a63a";
+  rr(ctx, -2, 4, 6, 7, 2); ctx.fill();          // trigger
+  ctx.fillStyle = "#3f7fd4";
+  rr(ctx, 14, -4, 5, 8, 2); ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,0.25)";
+  rr(ctx, -6, -4, 18, 2.5, 1); ctx.fill();
+  ctx.restore();
+}
+
+// mist where the jet hits, droplets bursting outward, runs trickling down
+function drawHoseSpray(px, py, now) {
+  const hsh = n => frac(Math.sin(n * 127.1 + 11.3) * 43758.5453);
+  const mist = ctx.createRadialGradient(px, py, 2, px, py, 28);
+  mist.addColorStop(0, "rgba(215, 242, 255, 0.6)");
+  mist.addColorStop(1, "rgba(160, 220, 255, 0)");
+  ctx.fillStyle = mist;
+  ctx.beginPath(); ctx.arc(px, py, 28, 0, 7); ctx.fill();
+  for (let k = 0; k < 16; k++) {
+    const t = (now / 380 + hsh(k)) % 1;
+    const ang = k * 2.39996 + Math.floor(now / 380 + hsh(k)) * 0.9;
+    const rad = 6 + t * 24;
+    ctx.fillStyle = `rgba(150, 215, 255, ${(0.9 * (1 - t)).toFixed(2)})`;
+    ctx.beginPath(); ctx.arc(px + Math.cos(ang) * rad, py + Math.sin(ang) * rad, 1.4 + (1 - t) * 1.4, 0, 7); ctx.fill();
+  }
+  for (let k = 0; k < 3; k++) {
+    const t = (now / 650 + k / 3) % 1;
+    ctx.fillStyle = `rgba(160, 220, 255, ${(0.6 * (1 - t)).toFixed(2)})`;
+    ctx.beginPath(); ctx.ellipse(px - 11 + k * 11, py + 14 + t * 34, 1.6, 3 + t * 2, 0, 0, 7); ctx.fill();
+  }
+}
+
 /* --------------------- WC interior (behind the counter) ------------- */
 /* The cleaning-hose station: a wall faucet with a coiled hose beside the stall row,
  * on the left of the screen, closest to the stalls. Click it to pick the hose up;
@@ -2517,39 +3915,37 @@ function drawHoseStation() {
   const st = COUNTER_IN.hose;
   const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 200);
   const needsClean = S.stallClean.some(v => v < 60);
-  ctx.save();
-  if (hoseInHand) { ctx.shadowColor = "rgba(90, 200, 255, 0.9)"; ctx.shadowBlur = 14; }
-  ctx.fillStyle = hoseInHand ? "#1f2c3c" : "#151c26";
-  rr(ctx, st.x, st.y, st.w, st.h, 8); ctx.fill();
-  ctx.restore();
-  ctx.lineWidth = 1.5;
-  ctx.strokeStyle = hoseInHand ? `rgba(120, 225, 255, ${0.5 + 0.5 * pulse})`
-    : needsClean ? `rgba(255, 211, 107, ${0.4 + 0.5 * pulse})`
-    : "rgba(255,255,255,0.12)";
-  rr(ctx, st.x, st.y, st.w, st.h, 8); ctx.stroke();
-  ctx.lineWidth = 1;
-  const fcx = st.x + st.w / 2; // the faucet
-  ctx.fillStyle = "#9aa4b2";
-  rr(ctx, fcx - 5, st.y + 16, 10, 16, 3); ctx.fill();   // riser
-  rr(ctx, fcx - 11, st.y + 30, 22, 8, 3); ctx.fill();  // spout bar
+  const fcx = st.x + st.w / 2, fcy = st.y + 30; // the wall faucet; the coil sits on the stalls' floor line
+  ctx.fillStyle = "rgba(0,0,0,0.3)";
+  ctx.beginPath(); ctx.ellipse(fcx, st.y + st.h - 4, 26, 5, 0, 0, 7); ctx.fill();
+  const chrome = ctx.createLinearGradient(fcx - 11, 0, fcx + 11, 0);
+  chrome.addColorStop(0, "#7c8696"); chrome.addColorStop(0.4, "#e6ebf2"); chrome.addColorStop(1, "#7c8696");
+  ctx.fillStyle = chrome;
+  rr(ctx, fcx - 5, fcy - 8, 10, 16, 3); ctx.fill();    // riser
+  rr(ctx, fcx - 11, fcy + 6, 22, 8, 3); ctx.fill();    // spout bar
   ctx.fillStyle = "#3f7fd4";
-  rr(ctx, fcx - 2.5, st.y + 38, 5, 6, 2); ctx.fill();  // tip
-  // the hose coil — full on its station, a stub when it's in your hand
-  ctx.strokeStyle = "#3f9c57";
-  ctx.lineWidth = 5;
-  ctx.lineCap = "round";
-  const coils = hoseInHand ? 1 : 3;
-  for (let k = 0; k < coils; k++) {
-    ctx.beginPath();
-    ctx.ellipse(fcx, st.y + 50 + k * 10, 26 - k * 3, 6, 0, 0, 7);
-    ctx.stroke();
+  rr(ctx, fcx - 2.5, fcy + 14, 5, 6, 2); ctx.fill();   // tip
+  ctx.fillStyle = "#2f6fc4";
+  rr(ctx, fcx - 10, fcy - 12, 20, 5, 2.5); ctx.fill(); // handle
+  const now = performance.now();
+  const base = st.y + st.h - 9;
+  if (!hoseInHand) { // the coil hangs off the tap until you pick it up
+    hoseStroke(o => { ctx.beginPath(); ctx.moveTo(fcx, fcy + 19 + o); ctx.quadraticCurveTo(fcx + 14, base - 14 + o, fcx + 16, base - 16 + o); });
+    for (let k = 0; k < 3; k++) { // flat loops piled on the floor, bottom one first
+      const cy = base - k * 6, rx = 22 - k * 3;
+      hoseStroke(o => { ctx.beginPath(); ctx.ellipse(fcx, cy + o, rx, 7 - k, 0, 0, 7); });
+    }
+  } else { // a slow drip from the open tap
+    const t = (now / 900) % 1;
+    ctx.fillStyle = `rgba(140, 210, 255, ${0.85 * (1 - t * 0.6)})`;
+    ctx.beginPath(); ctx.ellipse(fcx, fcy + 22 + t * 22, 1.8, 2.6, 0, 0, 7); ctx.fill();
   }
-  ctx.lineWidth = 1;
-  ctx.lineCap = "butt";
-  ctx.fillStyle = "rgba(226,235,248,0.8)";
+  ctx.fillStyle = hoseInHand ? `rgba(120, 225, 255, ${0.6 + 0.4 * pulse})`
+    : needsClean ? `rgba(255, 211, 107, ${0.5 + 0.5 * pulse})`
+    : "rgba(226,235,248,0.8)";
   ctx.font = "bold 9px system-ui, sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText(hoseInHand ? "IN HAND" : "HOSE — clean", fcx, st.y + st.h - 5);
+  ctx.fillText(hoseInHand ? "ELİNDE" : "HORTUM", fcx, st.y + 8);
   ctx.textAlign = "left";
 }
 
@@ -2585,8 +3981,8 @@ function paxInFrontOfClosedDoor(p) {
   for (let i = 0; i < WC_STALLS; i++) {
     if (!stallDoorClosed(i)) continue;
     if (facilities.T.spots[i].pax === p) continue; // the occupant stays hidden
-    const bx = stallBay(i).x; // the closed leaf rect is (bx+1, 180, 50, 140) — ends at the stall floor
-    if (b.x < bx + 51 && b.x + b.w > bx + 1 && b.y < 320 && b.y + b.h > 180) return true;
+    const bx = stallBay(i).x; // the closed leaf rect is (bx+1, 106, 50, 140) — ends at the stall floor
+    if (b.x < bx + 51 && b.x + b.w > bx + 1 && b.y < 246 && b.y + b.h > 106) return true;
   }
   return false;
 }
@@ -2610,7 +4006,7 @@ function drawScrub() {
         const u = ((i * 7 + k * 13) % 10) / 10;
         ctx.fillStyle = `rgba(245, 252, 255, ${0.6 + 0.3 * (k % 2)})`;
         ctx.beginPath();
-        ctx.arc(bx + 12 + u * 28, 280 - (k % 3) * 5 + Math.sin(t * 6 + k + i) * 1.5, 2.5 + (k % 3), 0, 7);
+        ctx.arc(bx + 12 + u * 28, 206 - (k % 3) * 5 + Math.sin(t * 6 + k + i) * 1.5, 2.5 + (k % 3), 0, 7);
         ctx.fill();
       }
     }
@@ -2675,7 +4071,7 @@ function drawScrub() {
     ctx.fillStyle = "#cfefff";
     ctx.font = "bold 11px system-ui, sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText("🧽 CAUGHT — scrubbing every toilet", B.x + B.w / 2, B.y + 14);
+    ctx.fillText("🧽 YAKALANDI — bütün tuvaletleri ovuyor", B.x + B.w / 2, B.y + 14);
     ctx.textAlign = "left";
     ctx.fillStyle = "rgba(255,255,255,0.12)";
     rr(ctx, B.x + 10, B.y + 20, B.w - 20, 5, 2.5); ctx.fill();
@@ -2694,19 +4090,143 @@ function drawScrub() {
     ctx.font = "bold 12px system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText("✨ ALL TOILETS SPARKLING CLEAN ✨", B.x + B.w / 2, B.y + B.h / 2 + 1);
+    ctx.fillText("✨ BÜTÜN TUVALETLER PIRIL PIRIL ✨", B.x + B.w / 2, B.y + B.h / 2 + 1);
     ctx.textAlign = "left";
     ctx.textBaseline = "alphabetic";
     ctx.globalAlpha = 1;
   }
 }
 
+// stable per-stall pseudo-random 0..1, so stains keep their spot frame to frame
+const grimeRnd = (i, k) => { const v = Math.sin(i * 127.1 + k * 311.7) * 43758.5453; return v - Math.floor(v); };
+
+// Layered grime for one stall; each layer fades in past its own dirt threshold.
+function drawStallGrime(i, bx, cx, dirty) {
+  const ramp = (from, to) => clamp((dirty - from) / (to - from), 0, 1);
+  const r = k => grimeRnd(i, k);
+  const blob = (x, y, rx, ry, n, k) => {
+    ctx.beginPath();
+    for (let j = 0; j < n; j++) {
+      const ox = (r(k + j) - 0.5) * rx * 1.4, oy = (r(k + j + 9) - 0.5) * ry * 1.2;
+      const s = 0.45 + r(k + j + 17) * 0.55;
+      ctx.moveTo(x + ox + rx * s, y + oy);
+      ctx.ellipse(x + ox, y + oy, rx * s, ry * s, 0, 0, 7);
+    }
+    ctx.fill();
+  };
+
+  // yellowed, murky water
+  let a = ramp(0.08, 0.6);
+  ctx.fillStyle = `rgba(190, 160, 50, ${a * 0.55})`;
+  ctx.beginPath(); ctx.ellipse(cx, 199, 10.5, 3.6, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = `rgba(120, 90, 30, ${a * 0.45})`;
+  ctx.beginPath(); ctx.ellipse(cx, 200, 7.5, 2.4, 0, 0, 7); ctx.fill();
+
+  // limescale ring hugging the inside of the bowl
+  a = ramp(0.2, 0.7);
+  if (a > 0) {
+    ctx.strokeStyle = `rgba(110, 78, 34, ${a * 0.85})`;
+    ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.ellipse(cx, 199.3, 10, 3.3, 0, 0, 7); ctx.stroke();
+    ctx.lineWidth = 1;
+  }
+
+  // brown drip streaks down the bowl front and under the tank lid
+  a = ramp(0.3, 0.8);
+  if (a > 0) {
+    ctx.fillStyle = `rgba(105, 72, 30, ${a * 0.6})`;
+    const drips = 2 + Math.round(dirty * 3);
+    for (let j = 0; j < drips; j++) {
+      const x = bx + 15 + r(30 + j) * 22, len = 4 + r(40 + j) * 10 * dirty;
+      rr(ctx, x, 204, 1.6, len, 0.8); ctx.fill();
+      ctx.beginPath(); ctx.arc(x + 0.8, 204 + len, 1.3, 0, 7); ctx.fill();
+    }
+    for (let j = 0; j < 2; j++) {
+      const x = bx + 16 + r(50 + j) * 20;
+      rr(ctx, x, 164, 1.4, 3 + r(55 + j) * 8 * dirty, 0.7); ctx.fill();
+    }
+  }
+
+  // splash spots on the seat
+  a = ramp(0.35, 0.85);
+  if (a > 0) {
+    ctx.fillStyle = `rgba(170, 140, 40, ${a * 0.75})`;
+    for (let j = 0; j < 3 + Math.round(dirty * 4); j++) {
+      const ang = r(60 + j) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.ellipse(cx + Math.cos(ang) * 13, 199 + Math.sin(ang) * 4.8, 1.6, 1, 0, 0, 7);
+      ctx.fill();
+    }
+  }
+
+  // floor puddle with a wet sheen
+  a = ramp(0.25, 0.75);
+  if (a > 0) {
+    const pw = 6 + dirty * 9;
+    ctx.fillStyle = `rgba(175, 150, 60, ${a * 0.4})`;
+    blob(cx - 2 + (r(70) - 0.5) * 6, 239, pw, 3.5, 4, 71);
+    ctx.fillStyle = `rgba(255, 255, 230, ${a * 0.25})`;
+    ctx.beginPath(); ctx.ellipse(cx - pw * 0.4, 238, pw * 0.3, 0.8, 0, 0, 7); ctx.fill();
+  }
+
+  // grimy smudges on the side walls
+  a = ramp(0.45, 1);
+  if (a > 0) {
+    ctx.fillStyle = `rgba(70, 55, 30, ${a * 0.45})`;
+    blob(bx + 8 + r(80) * 6, 140 + r(81) * 30, 4, 6, 3, 82);
+    blob(bx + 40 + r(90) * 4, 130 + r(91) * 40, 3, 5, 3, 92);
+  }
+
+  // used paper dropped on the floor, and the roll unspooled down the wall
+  a = ramp(0.5, 0.75);
+  if (a > 0) {
+    ctx.globalAlpha = a;
+    const wads = dirty > 0.75 ? 3 : dirty > 0.6 ? 2 : 1;
+    for (let j = 0; j < wads; j++) {
+      const x = bx + 6 + r(100 + j) * 36, y = 238 + r(105 + j) * 5;
+      ctx.fillStyle = "#e6e1d2";
+      blob(x, y, 3, 2.2, 3, 110 + j * 5);
+      ctx.fillStyle = "rgba(0,0,0,0.18)";
+      ctx.fillRect(x - 2, y + 0.5, 4, 0.8);
+    }
+    if (dirty > 0.65) {
+      ctx.strokeStyle = "#ece8dc"; ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(bx + 8.5, 214);
+      ctx.bezierCurveTo(bx + 11, 225, bx + 6, 232, bx + 12, 243);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // flies circling the bowl once it gets really bad
+  if (dirty > 0.6) {
+    const t = performance.now() / 1000;
+    const flies = dirty > 0.85 ? 3 : dirty > 0.72 ? 2 : 1;
+    ctx.fillStyle = "#15171c";
+    for (let j = 0; j < flies; j++) {
+      const sp = 2 + r(120 + j) * 2, ph = r(125 + j) * 7;
+      const fx = cx + Math.sin(t * sp + ph) * 11 + Math.sin(t * 7.3 + j) * 2;
+      const fy = 186 + Math.cos(t * sp * 1.3 + ph) * 7 + Math.sin(t * 9 + j) * 1.5;
+      ctx.beginPath(); ctx.arc(fx, fy, 1.1, 0, 7); ctx.fill();
+      ctx.fillStyle = `rgba(220, 230, 255, ${0.35 + 0.35 * Math.sin(t * 60 + j)})`;
+      ctx.beginPath();
+      ctx.ellipse(fx - 1.3, fy - 1, 1.3, 0.7, -0.5, 0, 7);
+      ctx.ellipse(fx + 1.3, fy - 1, 1.3, 0.7, 0.5, 0, 7);
+      ctx.fill();
+      ctx.fillStyle = "#15171c";
+    }
+  }
+}
+
 function drawWCInterior() {
-  // warm back wall — spans the full view (a wider room in wide windows)
+  // warm back wall — spans the full view (a wider room in wide windows); it
+  // ends where the EXIT door ends, so the floor starts right at its base
   ctx.fillStyle = "#5d584c";
-  ctx.fillRect(-offX, -offY, Wdyn, 120 + offY);
+  ctx.fillRect(-offX, -offY, Wdyn, 72 + offY);
   ctx.fillStyle = "#494438";
-  ctx.fillRect(-offX, 114, Wdyn, 6); // baseboard
+  ctx.fillRect(-offX, 66, Wdyn, 6); // baseboard
   ctx.strokeStyle = "rgba(255,255,255,0.05)";
   ctx.lineWidth = 1;
   ctx.beginPath();
@@ -2714,74 +4234,171 @@ function drawWCInterior() {
   ctx.stroke();
   // floor
   ctx.fillStyle = "#262b36";
-  ctx.fillRect(-offX, 120, Wdyn, H + 2 * offY - 120);
+  ctx.fillRect(-offX, 72, Wdyn, H + 2 * offY - 72);
   ctx.strokeStyle = "rgba(255,255,255,0.05)";
   ctx.lineWidth = 1;
   ctx.beginPath();
-  for (let x = -offX; x <= Wdyn; x += 48) { ctx.moveTo(x, 120); ctx.lineTo(x, H + 2 * offY); }
-  for (let y = 120; y <= H + 2 * offY; y += 48) { ctx.moveTo(-offX, y); ctx.lineTo(Wdyn, y); }
+  for (let x = -offX; x <= Wdyn; x += 48) { ctx.moveTo(x, 72); ctx.lineTo(x, H + 2 * offY); }
+  for (let y = 72; y <= H + 2 * offY; y += 48) { ctx.moveTo(-offX, y); ctx.lineTo(Wdyn, y); }
   ctx.stroke();
   // the two stall rows — five bays on the left, five mirrored on the right
   ctx.fillStyle = "#3d465e";
-  rr(ctx, 68, 158, 324, 162, 6); ctx.fill();
-  rr(ctx, 568, 158, 324, 162, 6); ctx.fill();
+  rr(ctx, 68, 84, 324, 162, 6); ctx.fill();
+  rr(ctx, 568, 84, 324, 162, 6); ctx.fill();
   for (let i = 0; i < WC_STALLS; i++) {
     const bx = stallBay(i).x;
     const s = facilities.T.spots[i];
     const dirty = 1 - S.stallClean[i] / 100;
     ctx.fillStyle = "#171c28";
-    ctx.fillRect(bx, 182, 52, 138); // dark opening
+    ctx.fillRect(bx, 108, 52, 138); // dark opening
     // this stall's cleanliness bar — pinned to the top of each toilet
     ctx.fillStyle = "#0d1120";
-    rr(ctx, bx + 6, 168, 40, 8, 2); ctx.fill();
+    rr(ctx, bx + 6, 94, 40, 8, 2); ctx.fill();
     const f = S.stallClean[i] / 100;
     if (f > 0.01) {
       ctx.fillStyle = f > 0.6 ? "#5ad07a" : f > 0.3 ? "#ffd36b" : "#ff6b6b";
-      rr(ctx, bx + 6, 168, 40 * f, 8, 2); ctx.fill();
+      rr(ctx, bx + 6, 94, 40 * f, 8, 2); ctx.fill();
     }
-    ctx.fillStyle = "#e8e6e0";
-    rr(ctx, bx + 10, 236, 32, 24, 4); ctx.fill(); // tank
-    ctx.beginPath(); ctx.ellipse(bx + 26, 282, 15, 8, 0, 0, 7); ctx.fill(); // bowl
-    ctx.fillRect(bx + 21, 282, 10, 12);
-    // grime builds up on the fixtures and the floor as this stall gets dirty
-    if (dirty > 0.1) {
-      ctx.fillStyle = `rgba(96, 72, 36, ${Math.min(0.5, dirty * 0.5)})`;
-      ctx.beginPath(); ctx.ellipse(bx + 26, 283, 11 + dirty * 7, 6, 0, 0, 7); ctx.fill(); // ring on the bowl
-      ctx.fillRect(bx + 8, 304, 8 + dirty * 10, 9);   // floor stain
-      ctx.fillRect(bx + 30, 308, 6 + dirty * 6, 5);
-      ctx.fillRect(bx + 13, 257, 5 + dirty * 5, 5);   // drip on the tank
-    }
+    const cx = bx + 26;
+    const porcelain = ctx.createLinearGradient(bx + 10, 0, bx + 42, 0);
+    porcelain.addColorStop(0, "#c9ccd0");
+    porcelain.addColorStop(0.35, "#f6f6f3");
+    porcelain.addColorStop(1, "#b9bcc2");
+    // toilet-paper roll on the side wall
+    ctx.fillStyle = "#8d96a6";
+    ctx.fillRect(bx + 1, 205, 7, 2);
+    ctx.fillStyle = "#f2efe6";
+    ctx.beginPath(); ctx.arc(bx + 4.5, 211, 3.5, 0, 7); ctx.fill();
+    ctx.fillRect(bx + 1, 211, 3.5, 8);
+    ctx.fillStyle = "#b8b3a6";
+    ctx.beginPath(); ctx.arc(bx + 4.5, 211, 1.2, 0, 7); ctx.fill();
+    // the open door leaf covers bx+44..52, so center the toilet on the visible bx..bx+44
+    ctx.save();
+    ctx.translate(-4, 0);
+    // water supply pipe + shut-off valve
+    ctx.strokeStyle = "#a9b2bf"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(bx + 15, 186); ctx.lineTo(bx + 15, 196); ctx.lineTo(bx + 10, 196); ctx.stroke();
+    ctx.lineWidth = 1;
+    ctx.fillStyle = "#cfd6e2";
+    ctx.fillRect(bx + 8, 194, 3, 4);
+    // tank, lid and chrome flush lever
+    ctx.fillStyle = porcelain;
+    rr(ctx, bx + 11, 162, 30, 24, 3); ctx.fill();
+    ctx.fillStyle = "rgba(0,0,0,0.12)";
+    ctx.fillRect(bx + 11, 182, 30, 4);
+    ctx.fillStyle = "#fbfbf9";
+    rr(ctx, bx + 9, 158, 34, 6, 2); ctx.fill();
+    ctx.fillStyle = "rgba(0,0,0,0.18)";
+    ctx.fillRect(bx + 10, 163, 32, 1);
+    ctx.fillStyle = "#dfe4ec";
+    rr(ctx, bx + 13, 167, 7, 3, 1.5); ctx.fill();
+    ctx.fillStyle = "#9aa4b2";
+    ctx.beginPath(); ctx.arc(bx + 20, 168.5, 1.8, 0, 7); ctx.fill();
+    // neck joining tank to bowl
+    ctx.fillStyle = porcelain;
+    ctx.fillRect(bx + 19, 186, 14, 8);
+    // bowl: rounded front tapering into the pedestal
+    ctx.beginPath();
+    ctx.moveTo(bx + 11, 199);
+    ctx.bezierCurveTo(bx + 11, 214, bx + 18, 220, bx + 20, 226);
+    ctx.lineTo(bx + 19, 234);
+    ctx.lineTo(bx + 33, 234);
+    ctx.lineTo(bx + 32, 226);
+    ctx.bezierCurveTo(bx + 34, 220, bx + 41, 214, bx + 41, 199);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "rgba(0,0,0,0.14)";
+    ctx.beginPath();
+    ctx.moveTo(bx + 33, 204);
+    ctx.bezierCurveTo(bx + 37, 210, bx + 34, 220, bx + 32, 226);
+    ctx.lineTo(bx + 33, 234); ctx.lineTo(bx + 29, 234);
+    ctx.bezierCurveTo(bx + 31, 222, bx + 34, 212, bx + 33, 204);
+    ctx.fill();
+    // foot + floor shadow, with the bolt caps
+    ctx.fillStyle = "rgba(0,0,0,0.35)";
+    ctx.beginPath(); ctx.ellipse(cx, 236, 13, 2.5, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = "#e9eaea";
+    rr(ctx, bx + 16, 231, 20, 4, 2); ctx.fill();
+    ctx.fillStyle = "#cfd3d8";
+    ctx.beginPath(); ctx.arc(bx + 18, 232.5, 1.3, 0, 7); ctx.arc(bx + 34, 232.5, 1.3, 0, 7); ctx.fill();
+    // seat ring, hinges and the water in the bowl
+    ctx.fillStyle = "#f4f4f1";
+    ctx.beginPath(); ctx.ellipse(cx, 199, 15.5, 6, 0, 0, 7); ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,0.18)";
+    ctx.beginPath(); ctx.ellipse(cx, 199.5, 15.5, 6, 0, 0, Math.PI); ctx.stroke();
+    ctx.fillStyle = "#aab2bc";
+    ctx.fillRect(bx + 18, 192, 4, 2); ctx.fillRect(bx + 30, 192, 4, 2);
+    ctx.fillStyle = "#8fa3b0";
+    ctx.beginPath(); ctx.ellipse(cx, 199, 10.5, 3.6, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = "#bfe3ef";
+    ctx.beginPath(); ctx.ellipse(cx, 200, 7.5, 2.4, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.7)";
+    ctx.fillRect(bx + 14, 166, 2, 14);
+    ctx.fillRect(bx + 15, 205, 2, 9);
+    if (dirty > 0.08) drawStallGrime(i, bx, cx, dirty);
+    ctx.restore();
     if (stallDoorClosed(i)) {
       ctx.fillStyle = `hsl(${s.pax.hue}, 55%, 55%)`;
-      ctx.fillRect(bx + 16, 196, 20, 26); // someone's in there (the closed door hides them below)
+      ctx.fillRect(bx + 16, 122, 20, 26); // someone's in there (the closed door hides them below)
     } else {
       // free or walk-in — the door leaf swings open against the wall
       ctx.fillStyle = "#2c3345";
-      ctx.fillRect(bx + 44, 182, 8, 138);
+      ctx.fillRect(bx + 44, 108, 8, 138);
       ctx.fillStyle = "rgba(255,255,255,0.18)";
-      ctx.fillRect(bx + 44, 182, 2, 138); // its edge
+      ctx.fillRect(bx + 44, 108, 2, 138); // its edge
     }
   }
-  // the counter (first-person view); the hose station stands beside the stall row
-  drawCounterIn();
-  drawHoseStation();
+  drawHoseStation(); // beside the stall row
   // EXIT door (top center of the back wall)
   const ex = COUNTER_IN.exit;
-  ctx.fillStyle = "#141824";
-  rr(ctx, ex.x, ex.y, ex.w, ex.h, 6); ctx.fill(); // doorway
-  ctx.fillStyle = "#5e3b22";
-  rr(ctx, ex.x + 8, ex.y + 8, ex.w - 16, ex.h - 16, 5); ctx.fill(); // door panel
-  ctx.fillStyle = "#ffd36b";
-  ctx.font = "bold 13px system-ui, sans-serif";
+  const exTop = -offY; // the frame runs to the top of the wall — no gap above the door
+  const exMidY = (exTop + ex.y + ex.h) / 2;
+  const exBot = ex.y + ex.h;
+  const exCx = ex.x + ex.w / 2;
+  // brushed-steel frame
+  const frame = ctx.createLinearGradient(ex.x, 0, ex.x + ex.w, 0);
+  frame.addColorStop(0, "#6f7682");
+  frame.addColorStop(0.5, "#a9b0bb");
+  frame.addColorStop(1, "#5d636e");
+  ctx.fillStyle = "rgba(0,0,0,0.3)";
+  ctx.fillRect(ex.x - 3, exTop, ex.w + 6, exBot - exTop); // shadow on the wall
+  ctx.fillStyle = frame;
+  ctx.fillRect(ex.x, exTop, ex.w, exBot - exTop);
+  // door leaf
+  const lx = ex.x + 5, lw = ex.w - 10, ly = exTop + 4, lh = exBot - 2 - ly;
+  const leaf = ctx.createLinearGradient(lx, 0, lx + lw, 0);
+  leaf.addColorStop(0, "#6b4428");
+  leaf.addColorStop(0.45, "#7d5232");
+  leaf.addColorStop(1, "#553420");
+  ctx.fillStyle = leaf;
+  ctx.fillRect(lx, ly, lw, lh);
+  // recessed panels
+  ctx.strokeStyle = "rgba(0,0,0,0.35)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(lx + 5.5, ly + 5.5, lw - 11, lh * 0.42);
+  ctx.strokeRect(lx + 5.5, ly + lh * 0.42 + 9.5, lw - 11, lh * 0.58 - 15);
+  ctx.strokeStyle = "rgba(255,220,180,0.12)";
+  ctx.strokeRect(lx + 6.5, ly + 6.5, lw - 11, lh * 0.42);
+  ctx.strokeRect(lx + 6.5, ly + lh * 0.42 + 10.5, lw - 11, lh * 0.58 - 15);
+  // illuminated green exit sign on the leaf
+  ctx.font = "bold 12px system-ui, sans-serif";
+  const sw = ctx.measureText("ÇIKIŞ").width + 14, sh = 17;
+  ctx.save();
+  ctx.shadowColor = "rgba(80, 255, 140, 0.7)";
+  ctx.shadowBlur = 10;
+  ctx.fillStyle = "#1e9e4f";
+  rr(ctx, exCx - sw / 2, exMidY - sh / 2, sw, sh, 3); ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle = "rgba(0,0,0,0.45)";
+  rr(ctx, exCx - sw / 2, exMidY - sh / 2, sw, sh, 3); ctx.stroke();
+  ctx.fillStyle = "#f2fff5";
   ctx.textAlign = "center";
-  ctx.fillText("EXIT", ex.x + ex.w / 2, ex.y + ex.h / 2);
-  ctx.fillStyle = "rgba(255,255,255,0.6)";
-  ctx.font = "9px system-ui, sans-serif";
-  ctx.fillText("→ outside", ex.x + ex.w / 2, ex.y + ex.h / 2 + 14);
+  ctx.textBaseline = "middle"; // dead-center of the door (exMidY) — not baseline-dependent
+  ctx.fillText("ÇIKIŞ", exCx, exMidY + 0.5);
   ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic"; // restore for the rest of the scene
   // the guests (drawn 5x — the room is a close-up)
   for (const b of buses) for (const p of b.pax) if (isIndoorPax(p) && p.state !== "scrubC") drawPax(p, 5);
-  drawCounterInPrompts();
   // the stall doors close while someone is inside — drawn AFTER the guests so
   // the closed leaf hides the person (and the grime) from the counter side
   for (let i = 0; i < WC_STALLS; i++) {
@@ -2789,57 +4406,59 @@ function drawWCInterior() {
     const bx = stallBay(i).x;
     ctx.fillStyle = "#46506b";
     // The leaf is painted AFTER the counter (so it hides the occupant); it
-    // spans the full opening (y 180–320), which ends well above the counter top.
-    rr(ctx, bx + 1, 180, 50, 140, 3); ctx.fill();
+    // spans the full opening (y 106–246), which ends well above the counter top.
+    rr(ctx, bx + 1, 106, 50, 140, 3); ctx.fill();
     ctx.strokeStyle = "rgba(0,0,0,0.4)";
     ctx.lineWidth = 1.5;
-    rr(ctx, bx + 1, 180, 50, 140, 3); ctx.stroke();
+    rr(ctx, bx + 1, 106, 50, 140, 3); ctx.stroke();
     ctx.lineWidth = 1;
     ctx.fillStyle = "#cfd6e4";
-    ctx.beginPath(); ctx.arc(bx + 9, 252, 2.5, 0, 7); ctx.fill(); // handle
+    ctx.beginPath(); ctx.arc(bx + 9, 178, 2.5, 0, 7); ctx.fill(); // handle
     ctx.fillStyle = "#ff6b6b";                                    // "in use" lamp
-    ctx.beginPath(); ctx.arc(bx + 26, 192, 3, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(bx + 26, 118, 3, 0, 7); ctx.fill();
   }
   // guests passing IN FRONT of a closed door draw above the leaf — the stall's
   // own occupant is excluded, so they stay hidden behind their door
   for (const b of buses) for (const p of b.pax)
     if (isIndoorPax(p) && p.state !== "scrubC" && paxInFrontOfClosedDoor(p)) drawPax(p, 5);
+  // the counter (first-person view) is painted over the guests, so whoever
+  // stands at the pay spot is seen behind its ledge, not on top of it
+  drawCounterIn();
+  drawCounterInPrompts();
   // the caught runaway scrubs in front of everything (drawn from the sequence
   // itself, so they stay visible even if their bus has already pulled out)
   drawScrub();
-  // stink puffs rise only from the stalls that are actually dirty
+  // wavy stink lines rise only from the stalls that are actually dirty
+  const stinkT = performance.now() / 1000;
+  ctx.lineCap = "round";
   for (let i = 0; i < WC_STALLS; i++) {
     const sc = S.stallClean[i];
-    if (sc >= 40) continue;
-    const a = (40 - sc) / 40 * 0.7;
-    ctx.fillStyle = `rgba(120, 160, 90, ${a * (0.6 + 0.4 * Math.sin(performance.now() / 300))})`;
-    ctx.beginPath();
-    ctx.arc(stallBay(i).x + 42, 152, 8, 0, 7);
-    ctx.fill();
+    if (sc >= 45) continue;
+    const k = (45 - sc) / 45;
+    const bx = stallBay(i).x;
+    const n = 1 + Math.round(k * 2);
+    ctx.lineWidth = 2;
+    for (let w = 0; w < n; w++) {
+      const ph = ((stinkT * 0.45 + w / n + i * 0.37) % 1);
+      const x0 = bx + 14 + w * 12;
+      const y0 = 90 - ph * 30;
+      ctx.strokeStyle = `rgba(150, 190, 90, ${k * 0.8 * Math.sin(ph * Math.PI)})`;
+      ctx.beginPath();
+      for (let s2 = 0; s2 <= 10; s2++) {
+        const yy = y0 - s2 * 2.2;
+        const xx = x0 + Math.sin(s2 * 0.8 + stinkT * 3 + w * 2) * 3;
+        s2 ? ctx.lineTo(xx, yy) : ctx.moveTo(xx, yy);
+      }
+      ctx.stroke();
+    }
   }
+  ctx.lineCap = "butt";
+  ctx.lineWidth = 1;
   // the cleaning hose in hand: drapes from its faucet to the pointer; holding
   // the mouse sprays the stall under it (hoseApply throttles the actual work)
   if (hoseInHand) {
     const st = COUNTER_IN.hose;
-    const ox = st.x + st.w / 2, oy = st.y + 34; // the faucet spout
-    ctx.strokeStyle = "#3f9c57";
-    ctx.lineWidth = 6;
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(ox, oy);
-    ctx.quadraticCurveTo((ox + pointer.x) / 2 - 60, (oy + pointer.y) / 2 + 40, pointer.x - 6, pointer.y - 6);
-    ctx.stroke();
-    ctx.lineWidth = 1;
-    ctx.lineCap = "butt";
-    // the nozzle, tilted down-right
-    ctx.save();
-    ctx.translate(pointer.x - 6, pointer.y - 6);
-    ctx.rotate(0.6);
-    ctx.fillStyle = "#22303f";
-    rr(ctx, -8, -5, 22, 10, 3); ctx.fill();
-    ctx.fillStyle = "#3f7fd4";
-    rr(ctx, 14, -4, 5, 8, 2); ctx.fill();
-    ctx.restore();
+    drawHoseLine(st.x + st.w / 2, st.y + 49, pointer.x, pointer.y); // from the faucet spout
     if (pointerDown) {
       const si = stallAt(pointer.x, pointer.y);
       if (si >= 0) {
@@ -2849,19 +4468,14 @@ function drawWCInterior() {
           ctx.fillStyle = "rgba(255, 120, 120, 0.9)";
           ctx.font = "bold 11px system-ui, sans-serif";
           ctx.textAlign = "center";
-          ctx.fillText("door closed", pointer.x, pointer.y - 14);
+          ctx.fillText("kapı kapalı", pointer.x, pointer.y - 14);
           ctx.textAlign = "left";
         } else {
-          // the spray fan + falling droplets
-          ctx.fillStyle = "rgba(120, 210, 255, 0.75)";
-          for (let k = 0; k < 8; k++) {
-            ctx.beginPath();
-            ctx.arc(pointer.x + 10 + 8 * k, pointer.y + 10 + 6 * k, 2.2, 0, 7);
-            ctx.fill();
-          }
+          drawHoseSpray(pointer.x, pointer.y, performance.now());
         }
       }
     }
+    drawHoseNozzle(pointer.x, pointer.y);
   }
   // a sparkle burst where a stall just hit 100
   const gnow = performance.now();
@@ -2871,7 +4485,7 @@ function drawWCInterior() {
     ctx.fillStyle = `rgba(160, 235, 255, ${1 - age / 1200})`;
     ctx.font = "14px system-ui, sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText("✨", stallBay(i).x + 26, 165);
+    ctx.fillText("✨", stallBay(i).x + 26, 91);
     ctx.textAlign = "left";
   }
   // the waiting-for-a-toilet badge — drawn last so guests and stall doors never cover it
@@ -2912,7 +4526,7 @@ function drawWcPrompt() {
   // pulsing hint pointing at the building (the click target)
   ctx.fillStyle = `rgba(255, 179, 71, ${pulse})`;
   ctx.font = "bold 9px system-ui, sans-serif";
-  ctx.fillText((coarseQ ? "tap" : "click") + " to enter ↓", 851, 84);
+  ctx.fillText((coarseQ ? "girmek için dokun" : "girmek için tıkla") + " ↓", 851, 84);
   // restore text state for the rest of the scene
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
@@ -2928,35 +4542,53 @@ function drawWashHint() {
   ctx.fillStyle = `rgba(140, 220, 255, ${0.4 + 0.6 * pulse})`;
   for (const b of buses) {
     if (b.state !== "stop" || b.washDone) continue;
-    ctx.fillText("🚿 wash", b.cx, LOT_NOSE - 6);
+    ctx.fillText("🚿 yıka", b.cx, LOT_NOSE - 6);
   }
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
 }
 
+function drawRoadSign(x, y, label, alignRight) {
+  ctx.font = "bold 11px system-ui";
+  const w = ctx.measureText(label).width + 14;
+  const sx = alignRight ? x - w : x;
+  ctx.fillStyle = "#1f6b45";
+  rr(ctx, sx, y, w, 16, 3); ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 1;
+  rr(ctx, sx + 1.5, y + 1.5, w - 3, 13, 2); ctx.stroke();
+  ctx.fillStyle = "#fff";
+  ctx.fillText(label, sx + 7, y + 12);
+}
+
 function drawRoads() {
   const nf = nightFactor();
-  ctx.fillStyle = mix("#3a4150", "#181d27", nf * 0.7);
+  const g = ctx.createLinearGradient(0, ROAD.top, 0, ROAD.bot);
+  g.addColorStop(0, mix("#3f4655", "#191e28", nf * 0.7));
+  g.addColorStop(1, mix("#353b48", "#151921", nf * 0.7));
+  ctx.fillStyle = g;
   ctx.fillRect(-offX, ROAD.top, Wdyn, ROAD.bot - ROAD.top);        // main road
-  ctx.fillStyle = mix("#58b368", "#1c3a2a", nf * 0.85);
-  ctx.fillRect(-offX, ROAD.bot, Wdyn, H + 2 * offY - ROAD.bot);    // grass strip below
-  ctx.strokeStyle = `rgba(240, 230, 180, ${0.8 - nf * 0.3})`;
+  drawSpeckle(ROAD.top, ROAD.bot, 21);
+  ctx.fillStyle = "rgba(0,0,0,0.09)";                               // worn tire tracks
+  for (const y of [448, 470, 500, 516]) ctx.fillRect(-offX, y, Wdyn, 6);
+  drawGrassBand(ROAD.bot, H + offY, nf, 31);                        // grass strip below
+  ctx.fillStyle = mix("#bcc2cb", "#3d434e", nf * 0.7);
+  ctx.fillRect(-offX, ROAD.bot, Wdyn, 4);
+  ctx.fillStyle = "rgba(0,0,0,0.2)";
+  ctx.fillRect(-offX, ROAD.bot + 4, Wdyn, 2);
+  ctx.strokeStyle = `rgba(240, 230, 180, ${0.85 - nf * 0.3})`;
   ctx.lineWidth = 3;
   ctx.setLineDash([26, 22]);
   ctx.beginPath(); ctx.moveTo(-offX, 486); ctx.lineTo(Wdyn, 486); ctx.stroke();
   ctx.setLineDash([]);
-  ctx.strokeStyle = "rgba(255,255,255,0.5)";
+  ctx.strokeStyle = "rgba(255,255,255,0.55)";
   ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(-offX, ROAD.top + 3); ctx.lineTo(560, ROAD.top + 3); ctx.stroke();
   ctx.setLineDash([18, 14]);   // dashed = where buses turn onto the lot
   ctx.beginPath(); ctx.moveTo(560, ROAD.top + 3); ctx.lineTo(Wdyn, ROAD.top + 3); ctx.stroke();
   ctx.setLineDash([]);
   ctx.beginPath(); ctx.moveTo(-offX, ROAD.bot - 3); ctx.lineTo(Wdyn, ROAD.bot - 3); ctx.stroke();
-  ctx.fillStyle = "rgba(255,255,255,0.65)";
-  ctx.font = "11px system-ui";
-  ctx.fillText(`${DEST_A} →`, -offX + 8, ROAD.top + 16);
-  const tw = ctx.measureText(`${DEST_B} →`).width;
-  ctx.fillText(`${DEST_B} →`, Wdyn - offX - tw - 8, ROAD.top + 16);
+  drawRoadSign(-offX + 8, ROAD.top + 5, `${DEST_A} →`, false);
+  drawRoadSign(Wdyn - offX - 8, ROAD.top + 5, `${DEST_B} →`, true);
 }
 
 function drawBus(b) {
@@ -2964,12 +4596,15 @@ function drawBus(b) {
   // nose-up into the lot — and back out — it faces away from us, so the
   // sprite crossfades to a rear + top view. |sin(ang)| is 0 when level and
   // 1 when nose-up, and the enter/exit turns animate the angle itself.
-  const v = Math.abs(Math.sin(b.ang));
+  const t = clamp((Math.abs(Math.sin(b.ang)) - 0.3) / 0.45, 0, 1);
+  const v = t * t * (3 - 2 * t); // short crossfade mid-turn, so the two views rarely ghost
   if (v >= 0.99) { drawBusRearTop(b, 1); return; }
   if (v <= 0.01) { drawBusSide(b, 1); return; }
   drawBusSide(b, 1 - v);
   drawBusRearTop(b, v);
 }
+
+const blinkOn = () => Math.floor(performance.now() / 380) % 2 === 0;
 
 // Side view — what the bus looks like while driving on the road.
 function drawBusSide(b, alpha) {
@@ -2991,20 +4626,18 @@ function drawBusSide(b, alpha) {
     ctx.lineTo(len / 2 - 4, 15);
     ctx.closePath(); ctx.fill();
   }
+  ctx.fillStyle = "rgba(0,0,0,0.28)";
+  ctx.beginPath(); ctx.ellipse(0, 46, len / 2 - 2, 6, 0, 0, 7); ctx.fill();
   // body (centered; +x = nose)
   ctx.fillStyle = `hsl(${b.hue}, 55%, ${58 - nf * 15}%)`;
   rr(ctx, -len / 2, -33, len, 66, 12); ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,0.2)";
+  rr(ctx, -len / 2 + 8, -31, len - 16, 4, 2); ctx.fill();
+  ctx.fillStyle = `hsl(${b.hue}, 60%, ${38 - nf * 10}%)`;
+  ctx.fillRect(-len / 2 + 2, 17, len - 4, 4);
   // skirt
   ctx.fillStyle = `hsl(${b.hue}, 40%, 30%)`;
   ctx.fillRect(-len / 2 + 4, 25, len - 8, 10);
-  // roof sign
-  ctx.fillStyle = "#1d2333";
-  rr(ctx, -34, -43, 68, 12, 4); ctx.fill();
-  ctx.fillStyle = "#ffd36b";
-  ctx.font = "bold 9px system-ui";
-  ctx.textAlign = "center";
-  ctx.fillText("TOUR  A → B", 0, -34);
-  ctx.textAlign = "left";
   // windows + passenger heads
   const winN = Math.max(1, Math.floor((len - 44) / 21));
   for (let i = 0; i < winN; i++) {
@@ -3018,7 +4651,7 @@ function drawBusSide(b, alpha) {
       const p = b.pax[idx];
       if (p && p.state === "bus") {
         const sc = Math.min(1, (PAX_TYPES[p.type] || PAX_TYPES.m).scale); // kids' heads are smaller + lower
-        const hy = 12 + (1 - sc) * 5;
+        const hy = 2 + (1 - sc) * 3;
         ctx.fillStyle = p.skin || "#e8b88e";
         ctx.beginPath(); ctx.arc(wx + 7, hy, 4 * sc, 0, 7); ctx.fill();
         ctx.fillStyle = p.hair || "#362718";
@@ -3035,19 +4668,28 @@ function drawBusSide(b, alpha) {
   ctx.fillRect(len / 2 - 46, -11, 14, 44);
   ctx.fillStyle = `hsl(${b.hue}, 30%, 35%)`;
   ctx.fillRect(len / 2 - 43, -7, 8, 36);
+  // tail light (brighter on the brakes), reverse lamp, left indicator
+  ctx.fillStyle = b.brake ? "#ff3b2e" : nf > 0.4 ? "#e0473a" : "#9c2a24";
+  ctx.fillRect(-len / 2, 2, 4, 12);
+  if (b.brake) {
+    ctx.fillStyle = "rgba(255,60,40,0.35)";
+    ctx.beginPath(); ctx.arc(-len / 2, 8, 12, 0, 7); ctx.fill();
+  }
+  if (b.rev) { ctx.fillStyle = "#f4f7ff"; ctx.fillRect(-len / 2, 15, 4, 5); }
+  if (b.blink && blinkOn()) {
+    ctx.fillStyle = "#ffb52e";
+    ctx.fillRect(-len / 2, -4, 4, 5);
+    ctx.fillRect(len / 2 - 4, 14, 4, 6);
+  }
   // wheels
   ctx.fillStyle = "#141821";
   for (const wx of [-len / 2 + 34, len / 2 - 44]) {
     ctx.beginPath(); ctx.arc(wx, 35, 12, 0, 7); ctx.fill();
+    ctx.fillStyle = "#7d8696";
+    ctx.beginPath(); ctx.arc(wx, 35, 6.5, 0, 7); ctx.fill();
     ctx.fillStyle = "#3a4150";
-    ctx.beginPath(); ctx.arc(wx, 35, 5, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(wx, 35, 3, 0, 7); ctx.fill();
     ctx.fillStyle = "#141821";
-  }
-  // route text (only when roughly horizontal)
-  if (Math.abs(b.ang) < 0.6) {
-    ctx.fillStyle = "rgba(255,255,255,0.85)";
-    ctx.font = "bold 11px system-ui";
-    ctx.fillText(`${b.from} → ${b.to}`, -len / 2 + 16, 13);
   }
   ctx.restore();
 }
@@ -3057,13 +4699,17 @@ function drawBusSide(b, alpha) {
 // the bus (rear window, route display, tail lights) at the near end.
 function drawBusRearTop(b, alpha) {
   const len = b.len, nf = nightFactor();
-  const cx = b.cx, top = b.cy - len / 2, bot = b.cy + len / 2;
+  const cx = 0, top = -len / 2, bot = len / 2; // local frame: nose up, rotated to the heading below
   const r = Math.min(12, len / 4);
   const slant = 6; // slight perspective taper: the far (top) end reads narrower
   const tl = cx - 27, tr = cx + 27;   // front end, 54 wide
   const bl = cx - 33, br = cx + 33;   // rear end, 66 wide
   ctx.save();
+  ctx.translate(b.cx, b.cy);
+  ctx.rotate(b.ang + Math.PI / 2);
   ctx.globalAlpha = alpha;
+  ctx.fillStyle = "rgba(0,0,0,0.25)";
+  rr(ctx, bl + 4, top + 6, br - bl, len, r); ctx.fill();
   // wheels peeking past the body on both axles
   ctx.fillStyle = "#141821";
   for (const wy of [top + 24, bot - 26]) {
@@ -3093,6 +4739,8 @@ function drawBusRearTop(b, alpha) {
   // the roof — a lighter panel, this is the "top of the bus"
   ctx.fillStyle = `hsl(${b.hue}, 44%, ${64 - nf * 16}%)`;
   rr(ctx, cx - 24, top + 27, 48, len - 72, 8); ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,0.14)";
+  rr(ctx, cx - 22, top + 29, 10, len - 76, 5); ctx.fill();
   // AC units along the roof
   ctx.fillStyle = `hsl(${b.hue}, 30%, ${34 - nf * 10}%)`;
   for (let ay = top + 40; ay < bot - 64; ay += 46) {
@@ -3115,77 +4763,322 @@ function drawBusRearTop(b, alpha) {
   // rear bumper + tail lights
   ctx.fillStyle = `hsl(${b.hue}, 40%, ${30 - nf * 12}%)`;
   ctx.fillRect(bl + 3, bot - 13, 60, 9);
-  if (nf > 0.4) {
-    ctx.fillStyle = `rgba(255, 80, 60, ${0.45 * nf})`; // soft glow
+  if (nf > 0.4 || b.brake) {
+    ctx.fillStyle = `rgba(255, 80, 60, ${b.brake ? 0.6 : 0.45 * nf})`; // soft glow
     rr(ctx, cx - 30, bot - 15, 20, 13, 5); ctx.fill();
     rr(ctx, cx + 10, bot - 15, 20, 13, 5); ctx.fill();
   }
-  ctx.fillStyle = nf > 0.4 ? "#ff6355" : "#c9352f";
+  ctx.fillStyle = b.brake ? "#ff3b2e" : nf > 0.4 ? "#ff6355" : "#c9352f";
   ctx.fillRect(cx - 26, bot - 11, 10, 5);
   ctx.fillRect(cx + 16, bot - 11, 10, 5);
+  if (b.rev) { // reverse lamps
+    ctx.fillStyle = "#f4f7ff";
+    ctx.fillRect(cx - 14, bot - 11, 6, 5);
+    ctx.fillRect(cx + 8, bot - 11, 6, 5);
+  }
+  if (b.blink && blinkOn()) { // left indicator, front and rear corners
+    ctx.fillStyle = "#ffb52e";
+    ctx.fillRect(bl + 1, bot - 12, 5, 7);
+    ctx.fillRect(tl, top + 4, 5, 6);
+  }
   ctx.restore();
 }
 
 function drawCar(c) {
-  ctx.fillStyle = `hsl(${c.hue}, 45%, 50%)`;
-  rr(ctx, c.x, c.y - 22, 52, 16, 6); ctx.fill();
-  ctx.fillStyle = `hsl(${c.hue}, 45%, 62%)`;
-  rr(ctx, c.x + 10, c.y - 30, 30, 10, 5); ctx.fill();
-  ctx.fillStyle = "#141821";
-  ctx.beginPath(); ctx.arc(c.x + 12, c.y - 4, 5, 0, 7); ctx.fill();
-  ctx.beginPath(); ctx.arc(c.x + 40, c.y - 4, 5, 0, 7); ctx.fill();
+  const x = c.x, y = c.y, nf = nightFactor();
+  ctx.fillStyle = "rgba(0,0,0,0.28)";
+  ctx.beginPath(); ctx.ellipse(x + 26, y, 29, 4, 0, 0, 7); ctx.fill();
+  if (nf > 0.4) { // headlight beam — cars drive left
+    const hg = ctx.createLinearGradient(x, 0, x - 80, 0);
+    hg.addColorStop(0, `rgba(255,240,180,${0.35 * nf})`);
+    hg.addColorStop(1, "rgba(255,240,180,0)");
+    ctx.fillStyle = hg;
+    ctx.beginPath();
+    ctx.moveTo(x + 2, y - 18); ctx.lineTo(x - 80, y - 24); ctx.lineTo(x - 80, y - 2); ctx.lineTo(x + 2, y - 12);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.fillStyle = `hsl(${c.hue}, 50%, ${50 - nf * 12}%)`;
+  rr(ctx, x, y - 22, 52, 16, 6); ctx.fill();
+  ctx.fillStyle = `hsl(${c.hue}, 45%, ${60 - nf * 14}%)`;
+  rr(ctx, x + 10, y - 30, 30, 10, 5); ctx.fill();
+  ctx.fillStyle = mix("#cfe8ff", "#26364e", nf * 0.8);
+  rr(ctx, x + 13, y - 28, 11, 7, 2); ctx.fill();
+  rr(ctx, x + 26, y - 28, 11, 7, 2); ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,0.25)";
+  ctx.fillRect(x + 5, y - 20, 42, 2);
+  ctx.fillStyle = "rgba(0,0,0,0.18)";
+  ctx.fillRect(x + 25, y - 21, 1, 13);
+  ctx.fillRect(x + 3, y - 10, 46, 3);
+  ctx.fillStyle = nf > 0.4 ? "#fff6d0" : "#f2ead0";
+  ctx.fillRect(x, y - 18, 3, 4);
+  ctx.fillStyle = nf > 0.4 ? "#ff4a3a" : "#b8322a";
+  ctx.fillRect(x + 49, y - 18, 3, 4);
+  for (const wx of [x + 12, x + 40]) {
+    ctx.fillStyle = "#141821";
+    ctx.beginPath(); ctx.arc(wx, y - 4, 5.5, 0, 7); ctx.fill();
+    ctx.fillStyle = "#8a93a3";
+    ctx.beginPath(); ctx.arc(wx, y - 4, 2.2, 0, 7); ctx.fill();
+  }
+}
+
+// Per-guest walk-cycle state, keyed by the live pax object so it never lands in saves.
+const paxAnim = new WeakMap();
+// states where the guest is dealing with you face to face, whatever way they last walked
+const PAX_FACE_STATES = new Set(["serveR", "payC", "doneC", "payC2", "dripC"]);
+function paxGait(p) {
+  const now = performance.now();
+  let a = paxAnim.get(p);
+  if (!a) { a = { x: p.x, y: p.y, t: now, ph: Math.random() * 6.3, amp: 0, hold: 0, dir: 1, hx: 0, back: false, side: false }; paxAnim.set(p, a); return a; }
+  const dt = Math.min(0.1, (now - a.t) / 1000);
+  a.t = now;
+  if (paused || dt <= 0) return a;
+  const dx = p.x - a.x, dy = p.y - a.y, d = Math.hypot(dx, dy);
+  a.x = p.x; a.y = p.y;
+  if (d > 0.02 && d < 200) { // big jumps are teleports (e.g. stepping off the bus), not steps
+    a.hold = 0.15;
+    if (Math.abs(dx) > 0.01) a.dir = dx > 0 ? 1 : -1;
+    if (Math.abs(dy) > 0.01 && Math.abs(dy) > Math.abs(dx) * 0.35) a.back = dy < 0; // heading up-screen = walking away
+    a.hx += (Math.abs(dx) / d - a.hx) * Math.min(1, dt * 8);
+    a.ph += clamp(d / dt / 9, 7, p.runaway ? 16 : 11) * dt;
+  } else a.hold -= dt;
+  if (a.hx > 0.6) a.side = true; else if (a.hx < 0.4) a.side = false; // hysteresis: no flicker on diagonals
+  const target = a.hold > 0 ? 1 : 0;
+  a.amp += (target - a.amp) * Math.min(1, dt * 10);
+  if (a.amp < 0.02 && !target) a.amp = 0;
+  return a;
 }
 
 function drawPax(p, k = 1) {
   const x = p.x, y = p.y;
   const s = k * ((PAX_TYPES[p.type] || PAX_TYPES.m).scale); // body size — kids are small
+  const g = paxGait(p);
+  const faceOn = PAX_FACE_STATES.has(p.state);
+  // side-on travel draws a profile, mirrored so it always faces +x locally
+  const side = g.side && !faceOn;
+  const amp = g.amp, dir = side ? 1 : g.dir, sw = Math.sin(g.ph);
+  const stride = amp * (0.45 + 0.55 * g.hx); // side-on walks scissor more than walks toward/away
+  // facing direction on screen: x for side-on travel, y (depth, foreshortened) for toward/away
+  const fwdX = dir * g.hx, fwdY = (g.back ? -1 : 1) * (1 - g.hx) * 0.45;
+  const bob = -Math.abs(Math.cos(g.ph)) * 0.7 * s * amp;
   const cloth = `hsl(${p.hue}, 55%, 55%)`;
+  const clothDk = `hsl(${p.hue}, 50%, 42%)`;
+  const clothLt = `hsl(${p.hue}, 60%, 66%)`;
+  const pants = `hsl(${(p.hue * 7 + 200) % 360}, 18%, 24%)`;
+  const shoe = "#1d1f26";
   const skin = p.skin || "#e8b88e", hair = p.hair || "#362718";
-  if (p.type === "w") {
-    ctx.fillStyle = skin; // legs peek out below the skirt
-    ctx.fillRect(x - 3 * s, y - 2.5 * s, 2.2 * s, 2.8 * s);
-    ctx.fillRect(x + 0.8 * s, y - 2.5 * s, 2.2 * s, 2.8 * s);
-    ctx.fillStyle = cloth;
-    ctx.beginPath(); // skirt — flares from the waist
-    ctx.moveTo(x - 3.2 * s, y - 6 * s);
-    ctx.lineTo(x + 3.2 * s, y - 6 * s);
-    ctx.lineTo(x + 5 * s, y - 1.5 * s);
-    ctx.lineTo(x - 5 * s, y - 1.5 * s);
-    ctx.closePath(); ctx.fill();
-    rr(ctx, x - 3.4 * s, y - 11.5 * s, 6.8 * s, 5.6 * s, 3 * s); ctx.fill(); // top
-  } else {
-    ctx.fillStyle = "#2c3444"; // trousers
-    ctx.fillRect(x - 3.1 * s, y - 4 * s, 2.5 * s, 4.2 * s);
-    ctx.fillRect(x + 0.6 * s, y - 4 * s, 2.5 * s, 4.2 * s);
-    ctx.fillStyle = cloth;
-    rr(ctx, x - 3.8 * s, y - 11.5 * s, 7.6 * s, 8 * s, 3 * s); ctx.fill(); // torso
-    if (p.type === "k") {
-      ctx.fillStyle = `hsl(${p.hue}, 45%, 38%)`; // little backpack
-      rr(ctx, x - 2.4 * s, y - 10.8 * s, 4.8 * s, 4.2 * s, 1.8 * s); ctx.fill();
+  const isW = p.type === "w";
+  const back = g.back && !faceOn && !side;
+
+  ctx.save();
+  if (side && g.dir < 0) { ctx.translate(2 * x, 0); ctx.scale(-1, 1); }
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+
+  ctx.fillStyle = "rgba(0, 0, 0, 0.18)";
+  ctx.beginPath(); ctx.ellipse(x, y + 0.4 * s, (4.6 + Math.abs(sw) * stride * 1.2) * s, 1.3 * s, 0, 0, 7); ctx.fill();
+
+  const hipY = y - 5.6 * s + bob;
+  const legs = [-1, 1].map(i => {
+    const ls = i < 0 ? sw : -sw; // legs swing in opposite phase
+    const lift = Math.max(0, i < 0 ? Math.cos(g.ph) : -Math.cos(g.ph)) * 1.3 * s * amp;
+    return {
+      hx: x + i * (side ? 0.5 : 1.5) * s, hy: hipY,
+      fx: x + i * (side ? 0.5 : 1.6) * s + ls * 2.4 * s * stride * fwdX,
+      fy: y - 0.6 * s - lift + ls * 2.4 * s * stride * fwdY,
+    };
+  });
+  // front: the leg stepping back is drawn first so the leading leg overlaps it;
+  // back: the left leg always sits on top of the right
+  if (back) legs.reverse();
+  else if (!side) legs.sort((a, b) => b.fy - a.fy);
+  for (const L of legs) {
+    const legW = (isW ? 1.9 : 2.5) * s;
+    if (back) { // only the heel shows, tucked under the leg
+      ctx.fillStyle = shoe;
+      rr(ctx, L.fx - legW * 0.45, L.fy, legW * 0.9, legW * 0.5 + 0.7 * s, 0.4 * s); ctx.fill(); // peeks out past the leg's round cap
+    }
+    ctx.strokeStyle = isW ? skin : pants;
+    ctx.lineWidth = legW;
+    ctx.beginPath(); ctx.moveTo(L.hx, L.hy); ctx.lineTo(L.fx, L.fy); ctx.stroke();
+    if (side) { // toe points forward
+      ctx.fillStyle = shoe;
+      rr(ctx, L.fx - 1 * s, L.fy - 0.4 * s, 2.9 * s, 1.3 * s, 0.6 * s); ctx.fill();
+    } else if (!back) {
+      ctx.fillStyle = shoe;
+      rr(ctx, L.fx - 1.3 * s + dir * 0.4 * s, L.fy - 0.4 * s, 2.6 * s, 1.3 * s, 0.6 * s); ctx.fill();
     }
   }
-  // head + hair cap
-  const hy = y - 14.5 * s, hr = (p.type === "w" ? 3.3 : 3.4) * s;
-  ctx.fillStyle = skin;
-  ctx.beginPath(); ctx.arc(x, hy, hr, 0, 7); ctx.fill();
-  ctx.fillStyle = hair;
-  ctx.beginPath(); ctx.arc(x, hy, hr + 0.5 * s, Math.PI, Math.PI * 2); ctx.fill();
-  if (p.type === "w") { // long hair down the sides
-    rr(ctx, x - hr - 1 * s, hy - 1 * s, 1.6 * s, 6 * s, 1 * s); ctx.fill();
-    rr(ctx, x + hr - 0.6 * s, hy - 1 * s, 1.6 * s, 6 * s, 1 * s); ctx.fill();
+
+  // arms: swing against the legs; some states pose the right hand
+  const shY = y - 10.6 * s + bob;
+  let reach = null;
+  if (p.state === "serveR") reach = { x: x + 5.2 * s, y: y - 8 * s };
+  else if (p.state === "payC" || p.state === "doneC" || p.state === "payC2") reach = { x: x + 4.6 * s, y: y - 7.2 * s };
+  else if (p.state === "dripC") reach = { x: x + 3.8 * s, y: y - 15 * s };
+  const armW = (isW ? 1.6 : 1.9) * s;
+  const arm = (i, back) => {
+    const ax = x + (side ? -0.3 : i * 3.3) * s, ay = shY;
+    let hx, hy, ex, ey;
+    if (i > 0 && reach) {
+      hx = reach.x; hy = reach.y;
+      // a posed arm's elbow drops below the shoulder→hand line, never kinks up
+      const vx = hx - ax, vy = hy - ay, vl = Math.hypot(vx, vy) || 1;
+      let px = -vy / vl, py = vx / vl;
+      if (py < 0) { px = -px; py = -py; }
+      ex = (ax + hx) / 2 + px * 1.1 * s; ey = (ay + hy) / 2 + py * 1.1 * s;
+    } else {
+      const as = (i < 0 ? -sw : sw) * stride;
+      hx = x + (side ? 0.2 : i * 3.9) * s + as * 2.2 * s * fwdX;
+      hy = y - 5.6 * s + bob - Math.abs(as) * 0.5 * s + as * 2.2 * s * fwdY;
+      // elbows only fold one way: they point behind the walker (more so as the arm swings forward)
+      const bend = (0.35 + 0.5 * Math.max(0, as)) * s;
+      ex = (ax + hx) / 2 + i * 0.5 * s * (1 - g.hx) - fwdX * bend;
+      ey = (ay + hy) / 2 - fwdY * bend;
+    }
+    ctx.strokeStyle = back ? clothDk : cloth;
+    ctx.lineWidth = armW;
+    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ex, ey); ctx.lineTo(hx, hy); ctx.stroke();
+    ctx.fillStyle = skin;
+    ctx.beginPath(); ctx.arc(hx, hy, armW * 0.55, 0, 7); ctx.fill();
+  };
+  // the arm on the far side of the walking direction sits behind the torso
+  arm(-dir, true);
+
+  if (side) {
+    // profile: a narrower body, shaded along the back
+    if (isW) {
+      const sway = sw * stride * 0.4 * s;
+      ctx.fillStyle = cloth;
+      ctx.beginPath();
+      ctx.moveTo(x - 2.4 * s, y - 6.4 * s + bob);
+      ctx.lineTo(x + 2.4 * s, y - 6.4 * s + bob);
+      ctx.lineTo(x + 3.7 * s + sway, y - 2.4 * s + bob * 0.5);
+      ctx.lineTo(x - 3.5 * s + sway, y - 2.4 * s + bob * 0.5);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = clothDk;
+      ctx.fillRect(x - 3.4 * s + sway, y - 3.1 * s + bob * 0.5, 7 * s, 0.7 * s); // hem
+      ctx.fillStyle = cloth;
+      rr(ctx, x - 2.4 * s, y - 11.6 * s + bob, 4.9 * s, 5.8 * s, 2.3 * s); ctx.fill(); // top
+      ctx.fillStyle = clothDk;
+      rr(ctx, x - 2.4 * s, y - 11 * s + bob, 1.4 * s, 4.8 * s, 0.7 * s); ctx.fill(); // back shade
+    } else {
+      ctx.fillStyle = pants;
+      rr(ctx, x - 2.4 * s, y - 6.6 * s + bob, 4.8 * s, 2 * s, 0.8 * s); ctx.fill(); // hips
+      ctx.fillStyle = cloth;
+      rr(ctx, x - 2.6 * s, y - 11.8 * s + bob, 5.4 * s, 6.9 * s, 2.4 * s); ctx.fill(); // torso
+      ctx.fillStyle = clothDk;
+      rr(ctx, x - 2.6 * s, y - 11.2 * s + bob, 1.5 * s, 6 * s, 0.8 * s); ctx.fill(); // back shade
+      ctx.fillRect(x - 2.5 * s, y - 5.8 * s + bob, 5.2 * s, 0.8 * s); // belt line
+    }
+    ctx.fillStyle = clothLt; // shoulder highlight
+    rr(ctx, x - 0.8 * s, y - 11.6 * s + bob, 2.6 * s, 1.1 * s, 0.5 * s); ctx.fill();
+    if (p.type === "k") {
+      ctx.fillStyle = `hsl(${(p.hue + 150) % 360}, 50%, 45%)`;
+      rr(ctx, x - 4.6 * s, y - 11.2 * s + bob * 1.2, 2.6 * s, 5.2 * s, 1 * s); ctx.fill(); // backpack on the back
+      ctx.fillRect(x - 0.2 * s, y - 11.6 * s + bob, 0.9 * s, 5 * s); // strap
+    }
+  } else if (isW) {
+    const sway = sw * stride * 0.5 * s * fwdX;
+    ctx.fillStyle = cloth;
+    ctx.beginPath(); // skirt — flares from the waist, swishing with the stride
+    ctx.moveTo(x - 3.2 * s, y - 6.4 * s + bob);
+    ctx.lineTo(x + 3.2 * s, y - 6.4 * s + bob);
+    ctx.lineTo(x + 4.9 * s + sway, y - 2.4 * s + bob * 0.5);
+    ctx.lineTo(x - 4.9 * s + sway, y - 2.4 * s + bob * 0.5);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = clothDk;
+    ctx.fillRect(x - 4.6 * s + sway, y - 3.1 * s + bob * 0.5, 9.2 * s, 0.7 * s); // hem
+    ctx.fillStyle = cloth;
+    rr(ctx, x - 3.3 * s, y - 11.6 * s + bob, 6.6 * s, 5.8 * s, 2.6 * s); ctx.fill(); // top
+    ctx.fillStyle = clothDk;
+    rr(ctx, x + 1.4 * s, y - 11 * s + bob, 1.9 * s, 4.8 * s, 1 * s); ctx.fill(); // side shade
+  } else {
+    ctx.fillStyle = pants;
+    rr(ctx, x - 3.2 * s, y - 6.6 * s + bob, 6.4 * s, 2 * s, 0.8 * s); ctx.fill(); // hips
+    ctx.fillStyle = cloth;
+    rr(ctx, x - 3.7 * s, y - 11.8 * s + bob, 7.4 * s, 6.9 * s, 2.6 * s); ctx.fill(); // torso
+    ctx.fillStyle = clothDk;
+    rr(ctx, x + 1.6 * s, y - 11.2 * s + bob, 2.1 * s, 6 * s, 1 * s); ctx.fill(); // side shade
+    ctx.fillRect(x - 3.5 * s, y - 5.8 * s + bob, 7 * s, 0.8 * s); // hem / belt line
+    if (back) {
+      ctx.fillStyle = "rgba(0, 0, 0, 0.12)"; // back seam
+      ctx.fillRect(x - 0.3 * s, y - 11 * s + bob, 0.6 * s, 5 * s);
+    }
   }
+  if (!side) {
+    ctx.fillStyle = clothLt; // shoulder highlight
+    rr(ctx, x - 2.6 * s, y - 11.6 * s + bob, 3 * s, 1.1 * s, 0.5 * s); ctx.fill();
+  }
+  if (p.type === "k" && !side) {
+    const pack = `hsl(${(p.hue + 150) % 360}, 50%, 45%)`;
+    ctx.fillStyle = pack;
+    if (back) { // the whole backpack, bouncing a touch behind the step
+      rr(ctx, x - 2.7 * s, y - 11.2 * s + bob * 1.2, 5.4 * s, 5.2 * s, 1.6 * s); ctx.fill();
+      ctx.fillStyle = `hsl(${(p.hue + 150) % 360}, 45%, 35%)`;
+      rr(ctx, x - 1.9 * s, y - 8.4 * s + bob * 1.2, 3.8 * s, 2 * s, 0.8 * s); ctx.fill(); // pocket
+    } else { // straps over the shoulders
+      ctx.fillRect(x - 2.6 * s, y - 11.6 * s + bob, 0.9 * s, 5 * s);
+      ctx.fillRect(x + 1.7 * s, y - 11.6 * s + bob, 0.9 * s, 5 * s);
+    }
+  }
+
+  arm(dir, false);
+
+  // neck + head (no face) + hair
+  const hy = y - 14.6 * s + bob, hr = (isW ? 3.2 : 3.3) * s;
+  ctx.fillStyle = skin;
+  ctx.fillRect(x - 0.9 * s, hy + hr - 1 * s, 1.8 * s, 1.8 * s);
+  ctx.beginPath(); ctx.arc(x, hy, hr, 0, 7); ctx.fill();
+  const hb = -bob * 0.4; // long hair lags the bob a little
+  if (side) {
+    ctx.beginPath(); ctx.arc(x + hr - 0.1 * s, hy + 0.5 * s, 0.75 * s, 0, 7); ctx.fill(); // nose
+    ctx.fillStyle = hair;
+    if (isW) rr(ctx, x - hr - 0.6 * s, hy - 1.2 * s, 2.8 * s, 7 * s + hb, 1.2 * s), ctx.fill(); // long hair down the back
+    ctx.beginPath(); ctx.moveTo(x - 0.2 * s, hy - 0.3 * s);
+    ctx.arc(x - 0.2 * s, hy - 0.3 * s, hr + 0.4 * s, Math.PI * 0.7, Math.PI * 1.9); ctx.fill(); // crown + back of the head
+    ctx.fillStyle = skin;
+    ctx.beginPath(); ctx.ellipse(x - 0.4 * s, hy + 0.5 * s, 0.75 * s, 1.1 * s, 0, 0, 7); ctx.fill(); // ear
+    ctx.fillStyle = "rgba(0, 0, 0, 0.1)";
+    ctx.beginPath(); ctx.ellipse(x - 0.4 * s, hy + 0.6 * s, 0.4 * s, 0.7 * s, 0, 0, 7); ctx.fill();
+  } else if (back) {
+    ctx.beginPath(); // ears peeking out at the sides
+    ctx.ellipse(x - hr, hy + 0.4 * s, 0.7 * s, 1.1 * s, 0, 0, 7);
+    ctx.ellipse(x + hr, hy + 0.4 * s, 0.7 * s, 1.1 * s, 0, 0, 7);
+    ctx.fill();
+    ctx.fillStyle = hair;
+    ctx.save(); // the back of the head is all hair, down to the nape
+    ctx.beginPath(); ctx.rect(x - hr * 2, hy - hr * 2, hr * 4, hr * 2 + hr * 0.62); ctx.clip();
+    ctx.beginPath(); ctx.arc(x, hy - 0.1 * s, hr + 0.4 * s, 0, 7); ctx.fill();
+    ctx.restore();
+    if (isW) rr(ctx, x - hr - 0.5 * s, hy - 0.5 * s, 2 * hr + 1 * s, 7.6 * s + hb, 1.8 * s), ctx.fill();
+    ctx.fillStyle = "rgba(0, 0, 0, 0.12)";
+    ctx.beginPath(); ctx.arc(x + 0.8 * s, hy, hr * 0.85, -1.2, 1.6); ctx.fill(); // side shade
+  } else {
+    ctx.fillStyle = "rgba(0, 0, 0, 0.1)";
+    ctx.beginPath(); ctx.arc(x + 0.9 * s, hy + 0.5 * s, hr * 0.8, -0.9, 1.9); ctx.fill(); // cheek shade
+    ctx.fillStyle = hair;
+    ctx.beginPath(); ctx.arc(x, hy - 0.3 * s, hr + 0.4 * s, Math.PI * 1.02, Math.PI * 1.98); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(x, hy - 0.9 * s, hr + 0.35 * s, hr * 0.55, 0, Math.PI, Math.PI * 2); ctx.fill();
+    if (isW) { // long hair framing the sides
+      rr(ctx, x - hr - 0.9 * s, hy - 1.2 * s, 1.8 * s, 6.4 * s + hb, 0.9 * s); ctx.fill();
+      rr(ctx, x + hr - 0.9 * s, hy - 1.2 * s, 1.8 * s, 6.4 * s + hb, 0.9 * s); ctx.fill();
+    }
+  }
+  if (p.type === "k") {
+    ctx.fillStyle = `hsl(${(p.hue + 150) % 360}, 55%, 50%)`; // ball cap
+    ctx.beginPath(); ctx.arc(x, hy - 0.4 * s, hr + 0.3 * s, Math.PI, Math.PI * 2); ctx.fill();
+    if (!back) ctx.fillRect(x - (dir < 0 ? hr + 1.6 * s : -0.2 * s), hy - 0.9 * s, hr + 1.8 * s, 0.9 * s); // brim
+  }
+  ctx.restore();
+
   // little indicators
   if (p.state === "serveR") {
     ctx.fillStyle = "#ffd36b";
     ctx.beginPath(); ctx.arc(x + 6 * s, y - 8 * s, 2.5 * s, 0, 7); ctx.fill();
   }
   if (p.state === "payC" || p.state === "doneC" || p.state === "payC2") {
-    ctx.fillStyle = BILL_COLORS[p.bill] || "#f5f0e0"; // handing the bill (colored like the real note)
-    ctx.fillRect(x + 3 * s, y - 9 * s, 6 * s, 5 * s);
+    drawHeldBill(x + 5 * s, y - 6.5 * s, 0.3 * s, BILL_COLORS[p.bill] || "#c9c2a8", p.bill); // handing the bill
   }
   if (p.state === "dripC") {
-    ctx.fillStyle = "rgba(235, 195, 140, 0.9)";
-    ctx.fillRect(x + 2.6 * s, y - 15 * s, 2 * s, 5 * s); // raised hand
     const f = clamp(1 - p.dripT / 0.8, 0, 1);
     ctx.fillStyle = "rgba(200, 130, 40, 0.9)";
     ctx.fillRect(x + 2.9 * s, y - 11 * s + f * 13 * s, 1.6 * s, 2.6 * s); // falling drop
@@ -3231,11 +5124,11 @@ function toast(msg, cls) {
 function updateHUD() {
   $("statServed").textContent = "👥 " + S.stats.served;
   const hh = Math.floor(S.time), mm = Math.floor((S.time % 1) * 60);
-  $("statClock").textContent = `Day ${S.day} · ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+  $("statClock").textContent = `Gün ${S.day} · ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
   $("repFill").style.width = S.rep + "%";
   $("repNum").textContent = Math.round(S.rep);
   $("btnWc").textContent = S.view === "out" ? "🚻" : "🚪";
-  $("btnWc").title = S.view === "wc" ? "Go back outside" : S.view === "wash" ? "Back outside" : "Step inside the WC counter";
+  $("btnWc").title = S.view === "wc" ? "Dışarı çık" : S.view === "wash" ? "Dışarı dön" : "WC gişesine gir";
   $("btnPause").textContent = paused ? "▶" : "⏸";
   $("btnSpeed").textContent = speed + "×";
 }
@@ -3245,22 +5138,22 @@ function showDaySummary() {
   const st = S.stats;
   const repDelta = S.rep - st.repStart;
   const avgSat = st.satN ? Math.round(st.satSum / st.satN) : 0;
-  $("modalTitle").textContent = `Day ${S.day - 1} complete`;
+  $("modalTitle").textContent = `${S.day - 1}. gün tamamlandı`;
   $("modalBody").innerHTML = `
     <table>
-      <tr><td>Buses served</td><td>${st.buses}</td></tr>
-      <tr><td>Guests served</td><td>${st.served}</td></tr>
-      <tr><td>Cologne served</td><td>${st.cologne}</td></tr>
-      <tr><td>Windshields washed</td><td>${st.washes}</td></tr>
-      <tr><td>₺20 fees evaded</td><td>${st.evaded || 0}</td></tr>
-      <tr><td>Runaways caught</td><td>${st.caught || 0}</td></tr>
-      <tr><td>Avg satisfaction</td><td>${st.satN ? avgSat + " / 100" : "—"}</td></tr>
-      <tr><td>Reputation</td><td class="${repDelta >= 0 ? "pos" : "neg"}">${Math.round(st.repStart)} → ${Math.round(S.rep)} (${repDelta >= 0 ? "+" : ""}${repDelta.toFixed(1)})</td></tr>
+      <tr><td>Hizmet verilen otobüs</td><td>${st.buses}</td></tr>
+      <tr><td>Hizmet verilen misafir</td><td>${st.served}</td></tr>
+      <tr><td>Dökülen kolonya</td><td>${st.cologne}</td></tr>
+      <tr><td>Yıkanan ön cam</td><td>${st.washes}</td></tr>
+      <tr><td>Kaçırılan ₺20 ücret</td><td>${st.evaded || 0}</td></tr>
+      <tr><td>Yakalanan kaçak</td><td>${st.caught || 0}</td></tr>
+      <tr><td>Ort. memnuniyet</td><td>${st.satN ? avgSat + " / 100" : "—"}</td></tr>
+      <tr><td>İtibar</td><td class="${repDelta >= 0 ? "pos" : "neg"}">${Math.round(st.repStart)} → ${Math.round(S.rep)} (${repDelta >= 0 ? "+" : ""}${repDelta.toFixed(1)})</td></tr>
     </table>
-    <div class="big">${repDelta >= 3 ? "Word is spreading — expect bigger buses tomorrow."
-      : repDelta <= -3 ? "Tough day. Keep those toilets clean."
-      : "A steady day on Layover Lane."}</div>`;
-  $("modalBtn").textContent = `Start day ${S.day} →`;
+    <div class="big">${repDelta >= 3 ? "Ünün yayılıyor — yarın daha büyük otobüsler bekle."
+      : repDelta <= -3 ? "Zor bir gündü. Tuvaletleri temiz tut."
+      : "Mola Yeri'nde sakin bir gün."}</div>`;
+  $("modalBtn").textContent = `${S.day}. güne başla →`;
   $("modalBtn").onclick = () => {
     S.stats = freshDayStats();
     hideModal();
@@ -3274,27 +5167,27 @@ function hideModal() { $("modal").classList.add("hidden"); $("modalBox").classLi
 
 function showIntro(first) {
   const touch = coarseQ; // phones & tablets — say "tap" where the desktop says "click"
-  const act = touch ? "Tap" : "Click";
-  $("modalTitle").textContent = first ? "👋 Welcome to Layover Lane" : "How to play";
+  const act = touch ? "dokun" : "tıkla";
+  $("modalTitle").textContent = first ? "👋 Mola Yeri'ne hoş geldin" : "Nasıl oynanır";
   $("modalBox").classList.add("tall"); // both intro screens are scrollable
   $("modalBody").innerHTML = `
-    <div class="big">You run the layover every tour bus between <strong>${DEST_A}</strong> and <strong>${DEST_B}</strong> relies on.</div>
-    <p>🚌 Buses pull into your parking lot for rest breaks. Passengers get hungry, thirsty, and desperate for the <strong>toilet</strong>.</p>
-    <p>🍔 Diner food and drinks are <strong>free</strong> — guests eat, drink, and wander around while the bus waits.</p>
-    <p>⏱ Buses lay over for about <strong>30 minutes</strong> — a full hour in the terminal is the hard outside limit. When it's time to roll, guests still in the <strong>WC payment line</strong> get <strong>5–10 minutes</strong> to finish paying; if the line is still there, they <strong>abandon it without paying</strong> and board, and the bus leaves.</p>
-    <p>🕐 Time is <strong>compressed</strong> — one game hour takes 6 real minutes at 1×, so a game day takes about 2.4 real hours. Buses, meals and queues all keep their in-world pacing.</p>
-    <p>🚻 Toilets cost <strong>₺20</strong>, paid at the counter <em>after</em> the visit — and <strong>you</strong> are the counter. <strong>${act} the WC building to step inside</strong>: each stall's <strong>door closes while someone's in it</strong> (a visit lasts 1–10 in-game minutes), and <strong>each stall has its own cleanliness</strong> — a dirty one gets the visit rated down, and guests always take the <strong>cleanest free stall</strong> (none will use one that's too filthy).</p>
-    <p>💳 Inside, each guest who finishes joins the line at the counter and hands you a bill. <strong>${act} the trays in the open cash drawer</strong> (₺10 / ₺20 / ₺50) to give the right change — and <strong>guests count the bills</strong>: the same total in fewer bills rates better (₺30 as 10+20 is crisp, 10+10+10 is a fistful; ₺80 as 10+20+50 beats 10×8). Guests with an <strong>exact ₺20 bill</strong> don't need you: they stand in their <strong>own second line</strong>, pay on their own, and start for the EXIT door — no change, no cologne, no clicks. Short or missing change makes the other guests unhappy.</p>
-    <p>💨 A 500 ml bottle of <strong>Turkish cologne</strong> sits on the counter. <strong>${act} it</strong> to drop some onto the hands of the front guest — while they pay. They start for the EXIT door the moment the change is back in their hands (the exact-₺20 line pays on its own — cologne is for the main line's front guest), so splash early. The bottle refills at midnight.</p>
-    <p>🍵 Your <strong>tea</strong> sits on the counter and is gone in about 30 game minutes. <strong>${act} the intercom</strong> at the right end of the counter to call for a fresh glass — it arrives within 2 game minutes.</p>
-    <p>🚪 ${act} the <strong>EXIT door</strong>${touch ? "" : " — or press <strong>E</strong>"} to step back outside. The 🚻 / 🚪 button in the top bar does the same.</p>
-    <p>🧻 <strong>Each stall gets dirtier with every use</strong> (watch the bar atop each stall). The old instant deep clean is gone: <strong>grab the hose</strong> next to the stalls and <strong>hold ${touch ? "your finger" : "the mouse"}, dragging it over a stall</strong> to spray it clean — but a stall with a <strong>closed door</strong> (someone inside) can't be sprayed.</p>
-    <p>🚿 Buses roll in dusty. <strong>${act} a parked bus</strong> to step up to its front: <strong>pick up the long-handled brush and drag it across the windshield</strong> to soap it up, then <strong>grab the fresh-water hose and rinse the soap off</strong>. ${act} a tool again to <strong>put it down</strong>. A sparkling windshield wins the driver's gratitude.</p>
-    <p>💢 Ignored guests <strong>storm out</strong> without paying, and ★ satisfied guests raise your <strong>reputation</strong> → buses stop much more often &amp; arrive bigger. A busy high-rep terminal runs several buses at once — and a freed stall is refilled within 30 minutes, never left standing empty.</p>
-    <p>🚨 Not every guest pays the <strong>₺20</strong>. Guests who <strong>leave the payment queue</strong> (out of patience, or their bus is leaving) just get a <strong>toast</strong> — they are never clickable. But a few guests (about 3 in 100) <strong>finish in the stall and run for the EXIT without paying</strong>, marked with a <strong>red badge</strong>. <strong>${act} them before they reach the EXIT door</strong> to catch them: they grab a mop and <strong>scrub every toilet</strong> for 3 seconds — and every stall ends up <strong>sparkling clean</strong>. Once a runaway is out the door, they're gone.</p>
-    <p><b style="color:var(--good)">No profit, no upgrades</b> — the money is just part of the ritual. ${touch ? "The ⏸ button pauses · the 1× button cycles the speed tier (1×, 10×, 100×, 200×)." : "Space pauses · keys 1–4 pick the speed tier (1×, 10×, 100×, 200×)."}</p>`;
+    <div class="big"><strong>${DEST_A}</strong> ile <strong>${DEST_B}</strong> arasındaki her tur otobüsünün güvendiği mola yerini sen işletiyorsun.</div>
+    <p>🚌 Otobüsler mola vermek için otoparkına girer. Yolcular acıkır, susar ve <strong>tuvalet</strong> için can atar.</p>
+    <p>🍔 Lokantadaki yemek ve içecekler <strong>bedava</strong> — otobüs beklerken misafirler yer, içer ve etrafta dolaşır.</p>
+    <p>⏱ Otobüsler yaklaşık <strong>30 dakika</strong> mola verir — terminalde en fazla bir saat kalabilirler. Kalkış vakti gelince <strong>WC ödeme sırasındaki</strong> misafirlere ödemeyi bitirmeleri için <strong>5–10 dakika</strong> tanınır; sıra hâlâ duruyorsa <strong>ödemeden sırayı terk edip</strong> otobüse binerler ve otobüs kalkar.</p>
+    <p>🕐 Zaman <strong>sıkıştırılmıştır</strong> — 1× hızda bir oyun saati gerçekte 6 dakika sürer, yani bir oyun günü yaklaşık 2,4 gerçek saattir. Otobüsler, yemekler ve sıralar oyun içi temposunu korur.</p>
+    <p>🚻 Tuvalet <strong>₺20</strong>; ücret ziyaretten <em>sonra</em> gişede ödenir — ve gişe <strong>sensin</strong>. <strong>İçeri girmek için WC binasına ${act}</strong>: içinde biri varken <strong>her kabinin kapısı kapanır</strong> (bir ziyaret oyun içinde 1–10 dakika sürer) ve <strong>her kabinin kendi temizliği vardır</strong> — kirli kabin ziyaretin puanını düşürür, misafirler hep <strong>en temiz boş kabini</strong> seçer (çok pis olanı kimse kullanmaz).</p>
+    <p>💳 İçeride işini bitiren her misafir gişedeki sıraya girer ve sana bir banknot uzatır. Doğru para üstünü vermek için <strong>açık kasa çekmecesindeki gözlere ${act}</strong> (₺10 / ₺20 / ₺50) — ve <strong>misafirler banknotları sayar</strong>: aynı tutarı daha az banknotla vermek daha iyi puan alır (₺30'u 10+20 olarak vermek şıktır, 10+10+10 bir avuç kâğıttır; ₺80 için 10+20+50, 10×8'den iyidir). <strong>Tam ₺20</strong> veren misafirlerin sana ihtiyacı yok: <strong>kendi ikinci sıralarında</strong> durur, kendileri öder ve ÇIKIŞ kapısına yönelirler — para üstü yok, kolonya yok, tıklama yok. Eksik ya da hiç verilmeyen para üstü diğer misafirleri mutsuz eder.</p>
+    <p>💨 Gişede 500 ml'lik bir şişe <strong>limon kolonyası</strong> durur. Öndeki misafir öderken ellerine biraz dökmek için <strong>şişeye ${act}</strong>. Para üstü eline geçer geçmez ÇIKIŞ kapısına yönelir (tam ₺20 sırası kendi kendine öder — kolonya ana sıranın öndeki misafiri içindir), o yüzden erken dök. Şişe gece yarısı dolar.</p>
+    <p>🍵 <strong>Çayın</strong> gişede durur ve yaklaşık 30 oyun dakikasında biter. Taze bir bardak istemek için gişenin sağ ucundaki <strong>interkoma ${act}</strong> — 2 oyun dakikası içinde gelir.</p>
+    <p>🚪 Dışarı çıkmak için <strong>ÇIKIŞ kapısına</strong> ${act}${touch ? "" : " — ya da <strong>E</strong> tuşuna bas"}. Üst çubuktaki 🚻 / 🚪 düğmesi de aynı işi yapar.</p>
+    <p>🧻 <strong>Her kabin her kullanımda biraz daha kirlenir</strong> (her kabinin üstündeki çubuğu izle). Eski anında temizlik artık yok: kabinlerin yanındaki <strong>hortumu al</strong> ve <strong>${touch ? "parmağını basılı tutup" : "fareyi basılı tutup"} bir kabinin üzerinde sürükle</strong>, su sıkıp temizle — ama <strong>kapısı kapalı</strong> (içinde biri olan) bir kabine su sıkılamaz.</p>
+    <p>🚿 Otobüsler tozlu gelir. Önüne geçmek için <strong>park etmiş bir otobüse ${act}</strong>: <strong>uzun saplı fırçayı al ve ön camın üzerinde sürükle</strong>, köpükle; sonra <strong>temiz su hortumunu al ve köpüğü durula</strong>. <strong>Bırakmak</strong> için alete yeniden ${act}. Pırıl pırıl bir ön cam şoförün minnetini kazanır.</p>
+    <p>💢 İlgilenilmeyen misafirler ödemeden <strong>öfkeyle çıkıp gider</strong>, ★ memnun misafirler ise <strong>itibarını</strong> yükseltir → otobüsler çok daha sık uğrar ve daha kalabalık gelir. Yoğun ve itibarı yüksek bir terminalde aynı anda birkaç otobüs olur — boşalan bir park yeri 30 dakika içinde dolar, asla boş kalmaz.</p>
+    <p>🚨 Her misafir <strong>₺20</strong>'yi ödemez. <strong>Ödeme sırasını terk eden</strong> misafirler (sabırları tükendiği ya da otobüsleri kalktığı için) sadece bir <strong>bildirim</strong> olarak görünür — onlara tıklanamaz. Ama bazı misafirler (yaklaşık 100'de 3) <strong>kabinde işini bitirip ödemeden ÇIKIŞ'a koşar</strong>; bunlar <strong>kırmızı rozetle</strong> işaretlenir. Yakalamak için <strong>ÇIKIŞ kapısına varmadan onlara ${act}</strong>: bir paspas kapıp 3 saniye boyunca <strong>bütün tuvaletleri ovarlar</strong> — ve her kabin <strong>pırıl pırıl</strong> olur. Kaçak kapıdan çıktıysa gitmiştir.</p>
+    <p><b style="color:var(--good)">Kâr yok, geliştirme yok</b> — para sadece ritüelin bir parçası. ${touch ? "⏸ düğmesi oyunu duraklatır · 1× düğmesi hız kademesini değiştirir (1×, 10×, 100×, 200×)." : "Boşluk tuşu duraklatır · 1–4 tuşları hız kademesini seçer (1×, 10×, 100×, 200×)."}</p>`;
   $("modalBody").scrollTop = 0;
-  $("modalBtn").textContent = first ? "Open for business!" : "Back to work";
+  $("modalBtn").textContent = first ? "Dükkânı aç!" : "İşe dön";
   $("modalBtn").onclick = () => hideModal();
   showModal();
 }
@@ -3337,7 +5230,7 @@ function init() {
   };
   $("btnHelp").onclick = () => { paused = true; showIntro(false); };
   $("btnReset").onclick = () => {
-    if (confirm("Reset the whole game? Your save will be deleted.")) {
+    if (confirm("Bütün oyun sıfırlansın mı? Kayıtlı oyunun silinecek.")) {
       // Stop saving FIRST: location.reload() fires beforeunload, which calls
       // save() and would write the current state back after the delete.
       resetting = true;
@@ -3371,6 +5264,10 @@ function init() {
     try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* pointer released mid-press */ }
     activePointer = e.pointerId;
     const { x, y } = toGame(e);
+    // A still touch tap fires no pointermove, so sync the pointer on press too:
+    // a tool grabbed by the tap must appear where it was touched, and a held
+    // scrub/spray must start from the tap, not wherever the pointer last moved.
+    pointer.x = x; pointer.y = y;
     downClient = { x: e.clientX, y: e.clientY };
     // a press in the wash view starts a scrub/spray; holding the cleaning hose
     // sprays the stall under the pointer (per-cell cooldowns throttle the work)
