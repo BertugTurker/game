@@ -17,8 +17,8 @@
    loses patience) until a clean stall frees up or the hose brings one
    back; if the whole row is filthy beyond the point of no return, no
    guest will use it at all.
-   The moment a guest is settled they head back out through the EXIT door.
-   Click the EXIT door (or press E) to come back outside.
+   The moment a guest is settled they head out through a side passage.
+   Press E (or the 🚪 button) to come back outside.
    Click a parked bus to step up to its front and wash the windshield:
    long-handled brush first (soap), then the fresh-water hose (rinse).
    No profit, no upgrades — money is just part of the ritual.
@@ -50,7 +50,7 @@ const TOILET_STAY = [6, 60];               // a toilet visit lasts 1–10 in-gam
 const SVC_TIME_T  = (TOILET_STAY[0] + TOILET_STAY[1]) / 2; // mean visit length — queue patience & save restore
 const SAT_BASE    = 60;                    // baseline satisfaction per service
 const WC_PRICE    = 20;                    // price of a toilet visit, in Turkish lira
-const WC_EVADE    = 0.03;                  // share of finished toilet visits that skip the fee and run for the EXIT (~3 in 100 — everyone else queues)
+const WC_EVADE    = 0.03;                  // share of finished toilet visits that skip the fee and run for the exit (~3 in 100 — everyone else queues)
 const EVADE_WALK  = 132;                   // a runaway's dash, in px per REAL second — catchable at any speed tier
 const SCRUB_TIME  = 3;                     // real seconds a caught runaway spends scrubbing every toilet
 const WC_NEEDED   = 72;                    // bladder level at which a guest heads for the WC
@@ -71,25 +71,49 @@ const COUNTER_IN = {
   // the open cash drawer — three bill trays; the change click targets are the
   // FULL drawn body of each tray (chipHit below), not just the inner rect
   chips: [
-    { d: 10, x: 388, y: 384, w: 58, h: 64, color: BILL_COLORS[10], label: "₺10" },
-    { d: 20, x: 451, y: 384, w: 58, h: 64, color: BILL_COLORS[20], label: "₺20" },
-    { d: 50, x: 514, y: 384, w: 58, h: 64, color: BILL_COLORS[50], label: "₺50" },
+    { d: 10, x: 360, y: 384, w: 76, h: 98, color: BILL_COLORS[10], label: "₺10" },
+    { d: 20, x: 442, y: 384, w: 76, h: 98, color: BILL_COLORS[20], label: "₺20" },
+    { d: 50, x: 524, y: 384, w: 76, h: 98, color: BILL_COLORS[50], label: "₺50" },
   ],
   bottle: { x: 318, y: 310, w: 26, h: 52 },   // Turkish cologne on the counter
-  desk:   { x: 0, y: 352, w: 960, h: 188 },   // the full-width wooden counter
-  exit:   { x: 446, y: 0, w: 68, h: 72 },     // EXIT door, top center of the far wall (click to go outside)
-  intercom: { x: 884, y: 394, w: 44, h: 62 }, // tea intercom at the right end of the counter (click to order a fresh tea)
-  hose:   { x: 4, y: 150, w: 60, h: 96 },    // wall faucet + coiled cleaning hose, next to the stall row on the left (click to grab)
+  desk:   { x: 96, y: 352, w: 768, h: 188 },  // the wooden counter — 10% of the view stays open on each side (the entrances)
+  intercom: { x: 790, y: 394, w: 44, h: 62 }, // tea intercom at the right end of the counter (click to order a fresh tea)
+  hose:   { x: 18, y: 238, w: 60, h: 96 },   // faucet + coiled hose left of the stall row (x/y track the view — see resize)
+  hoseR:  { x: 882, y: 238, w: 60, h: 96, right: true }, // its mirror right of the stall row
 };
+// The open passages either side of the counter, 10% of the visible width each.
+const SIDE_GAP = 0.1;
+const sideGapX = right => right ? -offX + Wdyn * (1 - SIDE_GAP / 2) : -offX + Wdyn * SIDE_GAP / 2;
+const SIDE_IN_Y = 320;                   // just behind the counter line, at the top of a side passage
+const sideOutY = () => H + offY + 100;   // below the frame — fully out of view
 // The whole VISIBLE body of a bill tray is the click target: the dark tray
 // pocket (x-4, y-4, w+8, h+8) plus the bill note, which overhangs the pocket
 // by 20px (drawn at c.h + 20). h+22 here makes the hit rect's bottom exactly
-// meet the note's bottom (minus the hit pad's 2px, which covers the last sliver)
-// without bleeding into the coin compartment below.
+// meet the note's bottom (minus the hit pad's 2px, which covers the last sliver).
 const chipHit = c => ({ x: c.x - 4, y: c.y - 4, w: c.w + 8, h: c.h + 22 });
+// Ultra-wide stages: a taller, narrower counter with its items drawn 1.5x,
+// packed closer together (per-item x shifts, in base coords) and centered.
+const ULTRA_ASPECT = 2.0;
+const DESK_SHIFT = { calc: 25, bottle: 0, drawer: 0, tea: -25, intercom: -60 };
+const DESK_ULTRA_K = 1.3;
+const DESK_ULTRA = { L: 226.5, R: 790.5 }; // the counter's ends around the scaled items, in base coords
+const DRAWER_BOT = 530;                  // drawer body + shadow bottom, base coords — pinned just inside the frame
+let deskK = 1;                           // DESK_ULTRA_K on ultra-wide (set in resize)
+// [scale, tx, ty] for an item: x' = tx + x*scale, y' = ty + y*scale
+function deskXf(item) {
+  if (deskK === 1) return [1, 0, 0];
+  return [deskK, 480 + ((DESK_SHIFT[item] || 0) - 508.5) * deskK, H - 4 - DRAWER_BOT * deskK];
+}
+function deskRect(r, item) {
+  const [s, tx, ty] = deskXf(item);
+  return { x: tx + r.x * s, y: ty + r.y * s, w: r.w * s, h: r.h * s };
+}
+function withDesk(item, fn) {
+  const [s, tx, ty] = deskXf(item);
+  ctx.save(); ctx.translate(tx, ty); ctx.scale(s, s); fn(); ctx.restore();
+}
 const PAY_SPOT = { x: 560, y: 357 };           // where the front guest stands
 const PAY_SPOT2 = { x: 462, y: 357 };          // the exact-₺20 line's own spot, left of the main one
-const DOOR_IN  = { x: 480, y: 64 };            // just inside the EXIT door (top center) — guests enter & leave here
 const WC_BUILDING = { x: 808, y: 92, w: 86, h: 80 }; // outdoor hit rect: click to enter
 // Car wash view geometry — a close-up of the parked bus's front. The
 // windshield is a cols×rows cell grid; each cell tracks its own dirt and soap.
@@ -98,7 +122,18 @@ const WASH = {
   wind:  { x: 354, y: 138, w: 252, h: 186, cols: 30, rows: 20 }, // glass + frame ≈ 2/3 of the face, painted nose ≈ 1/3; 600 cells of 8.4×9.3
   brush: { x: 96,  y: 280, w: 150, h: 130 },                    // soap bucket + brush on the floor (left)
   hose:  { x: 714, y: 280, w: 150, h: 130 },                    // floor tap + coiled hose (right)
-  exit:  { x: 123, y: 18,  w: 96,  h: 44 },                     // back to the lot (top-left, centred over the brush station)
+  exit:  { x: 18,  y: 18,  w: 96,  h: 44 },                     // back to the lot; x/y re-pinned to the visible top-left each frame
+  // the bus (body + wind) is drawn scaled by s about its base (cx, y0), which lands at screen y1:
+  // antenna tip ≈17px under the top edge, tyres ≈6px above the floor edge
+  zoom:  { s: 1.36, cx: 480, y0: 460, y1: 512 },
+};
+const washZoomXf = () => {
+  const Z = WASH.zoom;
+  ctx.translate(Z.cx, Z.y1); ctx.scale(Z.s, Z.s); ctx.translate(-Z.cx, -Z.y0);
+};
+const washToBus = (x, y) => {
+  const Z = WASH.zoom;
+  return { x: Z.cx + (x - Z.cx) / Z.s, y: Z.y0 + (y - Z.y1) / Z.s };
 };
 
 const DEST_A = "İstanbul", DEST_B = "Trabzon";
@@ -154,7 +189,7 @@ let pointer = { x: W / 2, y: 200 }; // last pointer position in canvas coords �
 let pointerDown = false;
 // The WC cleaning hose: in-hand flag plus per-stall spray pacing. Session aid,
 // never saved — picking it up again costs the player, not their save file.
-let hoseInHand = false;
+let hoseInHand = null; // the hose station (COUNTER_IN.hose / hoseR) whose hose is in hand
 let hoseCd = new Array(WC_STALLS).fill(0);      // last spray timestamp per stall (performance.now)
 let hoseGleam = new Array(WC_STALLS).fill(0);   // per stall: when it last hit 100 (sparkle burst)
 let lastHoseToast = 0;
@@ -235,7 +270,7 @@ function load() {
       if (!p.type) p.type = rollPaxType();
       if (!p.skin) p.skin = pick(SKIN_TONES);
       if (!p.hair) p.hair = pick(HAIR_TONES);
-      // saves from the bastinado era: a `fled` guest still walking to the EXIT
+      // saves from the bastinado era: a `fled` guest still walking to the exit
       // is a runaway; anyone else is just an unpaid guest
       if (p.runaway == null) p.runaway = !!p.fled && p.state === "leaveC";
       delete p.fled; delete p.punishRed;
@@ -412,7 +447,7 @@ function spawnBus(reserved = null) {
     pax,
   };
   buses.push(b);
-  toast(`🚌 ${DEST_A} çıkışlı tur otobüsü geliyor — ${n} yolcu`, "");
+  toast(`🚌 ${DEST_A}'dan ${n} yolcu`, "");
 }
 
 function makePax() {
@@ -430,7 +465,7 @@ function makePax() {
     sat: null, refuseR: false, refuseT: false, wcUsed: false, // this visit was a toilet visit (rep weighs it 2×)
     bill: null, owed: 0, changeGiven: 0, changeNotes: [],  // the ₺20 payment ritual (changeNotes = each bill handed back)
     unpaid: false,   // used the WC and never paid the ₺20 (any reason)
-    runaway: false,  // skipped the counter and is running for the EXIT — catchable
+    runaway: false,  // skipped the counter and is running for the exit — catchable
                      // only while still inside the WC (state "leaveC")
     useSat: null, cologne: false, colognePrev: null,
     waitTotal: 0, payT: 0, doneT: 0, dripT: 0,
@@ -612,8 +647,7 @@ function endStop(b) {
   const delta = clamp((avg - 50) * 0.15 * (b.pax.length / 12), -6, 6);
   S.rep = clamp(S.rep + delta, 0, 100);
   S.stats.buses++;
-  const stars = avg > 80 ? "★★★★★" : avg > 65 ? "★★★★☆" : avg > 45 ? "★★★☆☆" : avg > 25 ? "★★☆☆☆" : "★☆☆☆☆";
-  toast(`🚌 ${DEST_B} otobüsü yola çıktı · ${stars} (ort. ${Math.round(avg)}) · itibar ${delta >= 0 ? "+" : ""}${delta.toFixed(1)}`, delta >= 0 ? "good" : "bad");
+  toast(`🚌 ${DEST_B} · ${delta >= 0 ? "+" : ""}${delta.toFixed(1)}`, delta >= 0 ? "good" : "bad");
 }
 
 function finishExit(b) {
@@ -690,7 +724,7 @@ function evaluate(p, bus) {
       p.want = null;
       if (performance.now() - lastDirtyToast > 2500) {
         lastDirtyToast = performance.now();
-        toast("😖 Bir misafir pis tuvaletleri görünce vazgeçti", "bad");
+        toast("😖 Tuvalet pis, misafir gitti", "bad");
       }
       wander(p);
       return;
@@ -781,11 +815,10 @@ function stepFac(name, timeDt, stalls, svcTime) {
     p.state = name === "R" ? "serveR" : "serveT";
     p.stall = slot; // the stall this visit uses — pinned until the guest leaves
     if (name === "T") {
-      // Step in through the EXIT door, then walk off to their stall bay.
-      // (Indoor pax are invisible in the outdoor view, so the snap reads as
-      // a clean entry in the interior view.)
-      p.x = DOOR_IN.x; p.y = DOOR_IN.y;
-      p.enterT = null;
+      // Walk in up the side passage nearest the stall, then over to the bay.
+      const gx = sideGapX(stallCx(slot) > W / 2);
+      p.x = gx; p.y = sideOutY();
+      p.enterT = { x: gx, y: SIDE_IN_Y };
       p.inStall = false; // door stays ajar until they actually reach the bay
       p.useSat = null;   // a fresh visit clears any stale rating from a previous (evaded) one
     }
@@ -850,10 +883,10 @@ function completeService(name, p) {
 }
 
 // A runaway: the guest finished in the stall and, instead of joining a payment
-// line, dashes for the EXIT door (EVADE_WALK, in real time — see updatePax).
+// line, dashes for the exit (EVADE_WALK, in real time — see updatePax).
 // The visit is settled here (satisfaction + reputation, like any other
 // departure — the theft knocks a little off the rating). `runaway` makes them
-// clickable (catchRunaway) until they cross the EXIT, where it is cleared.
+// clickable (catchRunaway) until they cross the exit, where it is cleared.
 // (Guests who abandon a payment line never come here — see stormOut.)
 function fleeCounter(p) {
   p.unpaid = true;
@@ -862,7 +895,7 @@ function fleeCounter(p) {
   const now = performance.now();
   if (now - lastEvadeToast > 2000) {
     lastEvadeToast = now;
-    toast("🏃 Bir misafir ödemeden kaçmaya çalışıyor!", "bad");
+    toast("🏃 Misafir ödemeden kaçıyor!", "bad");
   }
   const rating = p.useSat;
   finishVisit(p, clamp((p.useSat != null ? p.useSat : SAT_BASE) - 15, 10, 100), true);
@@ -875,10 +908,27 @@ function fleeCounter(p) {
 }
 
 /* ---------------------- WC stall cleaning (the hose) ---------------- */
-// The ten stall bays, in the interior view's coords (drawWCInterior): five
-// in the left row (x = 76 + i*64) and five mirrored in the right row
-// (x = 576 + (i-5)*64) — matching the two stall containers drawWCInterior paints.
-const stallBay = i => ({ x: i < WC_STALLS / 2 ? 76 + i * 64 : 576 + (i - WC_STALLS / 2) * 64, y: 108, w: 52, h: 138 });
+// The ten stalls stand across the top of the room in two blocks of five with
+// an aisle between. Their art is drawn in "stall space" (bay i at stallLx(i),
+// opening y 108–246, row box 0..STALL_ROW_W × 84..246) and mapped to the screen
+// by stallOx/stallKx and STALL_K/stallOy.
+// The row sits at the far wall, so it is drawn at half scale (perspective):
+// half the visible width, centered, and half the old 1.36 vertical scale.
+const STALL_K = 0.78, STALL_MARGIN = 6;
+const STALL_AISLE = 48, STALL_ROW_W = 644 + STALL_AISLE;
+const stallOy = () => -offY - 84 * STALL_K; // row top flush with the top of the view
+const stallKx = () => (Wdyn - 2 * STALL_MARGIN) / 644 / 2;
+const stallOx = () => -offX + (Wdyn - STALL_ROW_W * stallKx()) / 2;
+const stallLx = i => 8 + i * 64 + (i >= WC_STALLS / 2 ? STALL_AISLE : 0);
+const stallSx = lx => stallOx() + stallKx() * lx;
+const stallSy = ly => stallOy() + STALL_K * ly;
+function stallSpace() { ctx.save(); ctx.translate(stallOx(), stallOy()); ctx.scale(stallKx(), STALL_K); }
+// Each bay's art is authored 52 wide but stretched about its center to 60.
+const STALL_WX = 60 / 52;
+const stallEdge = (i, u) => stallLx(i) + 26 + (u - 26) * STALL_WX; // art x (0..52) → stall-space x
+function stallWiden(i) { const c = stallLx(i) + 26; ctx.save(); ctx.translate(c, 0); ctx.scale(STALL_WX, 1); ctx.translate(-c, 0); }
+const stallBay = i => ({ x: stallSx(stallEdge(i, 0)), y: stallSy(108), w: 60 * stallKx(), h: 138 * STALL_K });
+const stallCx = i => stallSx(stallLx(i) + 26);
 
 // Which stall's bay does a point fall in? (the ~18 px reach of the spray fan)
 function stallAt(x, y, R = 18) {
@@ -917,7 +967,7 @@ function hoseApply(x, y) {
     S.stallClean[i] = Math.min(100, before + 5);
     if (before < 100 && S.stallClean[i] >= 100) {
       hoseGleam[i] = now; // sparkle burst on hitting 100
-      if (now - lastHoseToast > 1500) { lastHoseToast = now; toast("🚿 Bir kabin pırıl pırıl oldu!", "good"); }
+      if (now - lastHoseToast > 1500) { lastHoseToast = now; toast("🚿 Kabin pırıl pırıl!", "good"); }
     }
   }
   if (touched) S.cleanliness = S.stallClean.reduce((a, v) => a + v, 0) / WC_STALLS;
@@ -932,7 +982,7 @@ function setView(v) {
   S.view = v;
   viewFade = 1;
   if (from === "wash") S.washBus = null; // we step back out; the bus keeps its washed state
-  if (v !== "wc") hoseInHand = false;    // leaving the counter room — the hose goes back on its faucet
+  if (v !== "wc") hoseInHand = null;    // leaving the counter room — the hose goes back on its faucet
   save();
 }
 
@@ -978,9 +1028,10 @@ function washApply(x, y) {
   if (w.done) return;
   if (w.tool !== "brush" && w.tool !== "hose") return; // no tool in hand
   const { x: wx, y: wy, w: ww, h: wh, cols, rows } = WASH.wind;
+  ({ x, y } = washToBus(x, y));
   // 600 cells of 8.4px would never all be reached one-cell-per-stroke — the
   // tool works every cell a 36px pad / spray fan around the pointer crosses
-  const R = 18;
+  const R = 18 / WASH.zoom.s;
   if (x + R < wx || x - R > wx + ww || y + R < wy || y - R > wy + wh) return;
   const cww = ww / cols, rhh = wh / rows;
   const c0 = Math.max(0, Math.floor((x - R - wx) / cww));
@@ -1014,13 +1065,13 @@ function finishWash(b) {
   b.washDone = true;
   S.stats.washes++;
   S.rep = clamp(S.rep + 2, 0, 100);
-  toast("✨ Ön cam pırıl pırıl — şoför bunu fark edecek!", "good");
+  toast("✨ Ön cam pırıl pırıl!", "good");
   save();
 }
 
 /* ------------------- Runaways & the caught-guest scrub --------------- */
 // A runaway (fleeCounter) can be clicked while they are still inside the WC,
-// running for the EXIT. Caught, they stop dead and scrub every toilet for
+// running for the exit. Caught, they stop dead and scrub every toilet for
 // SCRUB_TIME real seconds — a dash along both stall rows, a quick scrub at
 // each bowl — and when the sequence ends every stall is reset to spotless,
 // exactly once. Then they walk out like any other guest.
@@ -1029,7 +1080,7 @@ function catchRunaway(p) {
   p.runaway = false; // caught once — never catchable again this visit
   p.state = "scrubC";
   if (S.stats) S.stats.caught = (S.stats.caught || 0) + 1;
-  toast("🧽 Yakalandın! Bütün tuvaletleri sen temizliyorsun!", "good");
+  toast("🧽 Yakalandın! Tuvalet senin!", "good");
   startScrub(p);
   return true;
 }
@@ -1039,7 +1090,7 @@ function catchRunaway(p) {
 // distance), the rest scrubbing — an equal dwell at every stall.
 function startScrub(p) {
   const pts = [];
-  for (let i = 0; i < WC_STALLS; i++) pts.push({ x: stallBay(i).x + 26, y: 230 });
+  for (let i = 0; i < WC_STALLS; i++) pts.push({ x: stallCx(i), y: stallSy(230) });
   let prev = { x: p.x, y: p.y }, total = 0;
   const dist = pts.map(q => { const d = Math.hypot(q.x - prev.x, q.y - prev.y); prev = q; total += d; return d; });
   const travel = SCRUB_TIME * 0.4, dwell = SCRUB_TIME * 0.6 / WC_STALLS;
@@ -1087,10 +1138,9 @@ function finishScrub() {
   for (let i = 0; i < WC_STALLS; i++) { S.stallClean[i] = 100; hoseGleam[i] = now; }
   S.cleanliness = 100;
   scrubDoneAt = now;
-  toast("✨ Bütün tuvaletler yine pırıl pırıl!", "good");
+  toast("✨ Tuvaletler pırıl pırıl!", "good");
   // their work is done — they walk out (no longer a runaway, no rush)
   p.state = "leaveC";
-  p.tx = DOOR_IN.x; p.ty = DOOR_IN.y;
   save();
 }
 
@@ -1219,7 +1269,7 @@ function drawWashView() {
   }
   ctx.stroke();
   // floor drain in front of the bumper
-  const dgx = B.x + B.w / 2, dgy = B.y + B.h + 44;
+  const dgx = B.x + B.w / 2, dgy = WASH.zoom.y1 + 18;
   ctx.fillStyle = "rgba(10, 12, 18, 0.55)";
   rr(ctx, dgx - 70, dgy - 7, 140, 14, 4); ctx.fill();
   ctx.fillStyle = mix("#7d8696", "#3a414d", nf);
@@ -1238,6 +1288,8 @@ function drawWashView() {
   }
 
   // --- the bus front
+  ctx.save();
+  washZoomXf();
   const L = 56 - nf * 15; // body lightness
   // wet reflection of the bus on the pad
   const refl = ctx.createLinearGradient(0, B.y + B.h, 0, B.y + B.h + 70);
@@ -1787,6 +1839,7 @@ function drawWashView() {
     ctx.fillStyle = mix("#3a3f48", "#1b1e24", nf);
     ctx.beginPath(); ctx.arc(wx0, wy0, 4, 0, 7); ctx.fill();
   }
+  ctx.restore();
   ctx.lineWidth = 1;
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
@@ -1938,7 +1991,7 @@ function drawWashView() {
   const n = w.g.length;
   const gAvg = w.g.reduce((a, v) => a + v, 0) / n;
   const fAvg = w.f.reduce((a, v) => a + v, 0) / n;
-  const P = { x: 679, y: 18, w: 220, h: 84 }; // top right, centred over the hose station
+  const P = { x: W + offX - 18 - 220, y: -offY + 18, w: 220, h: 84 }; // pinned to the visible top-right corner
   ctx.save();
   ctx.shadowColor = "rgba(0,0,0,0.35)";
   ctx.shadowBlur = 12;
@@ -1982,6 +2035,8 @@ function drawWashView() {
 
   // sparkles over a finished windshield
   if (w.done) {
+    ctx.save();
+    washZoomXf();
     ctx.fillStyle = "#fff";
     for (let k = 0; k < 5; k++) {
       const u = ((k * 53) % 10) / 10, v = ((k * 29) % 10) / 10;
@@ -1997,9 +2052,11 @@ function drawWashView() {
       ctx.fill();
     }
     ctx.globalAlpha = 1;
+    ctx.restore();
   }
 
-  // --- exit back to the layover
+  // --- exit back to the layover, pinned to the visible top-left corner (the hit test reads WASH.exit)
+  Ex.x = -offX + 18; Ex.y = -offY + 18;
   const eg = ctx.createLinearGradient(0, Ex.y, 0, Ex.y + Ex.h);
   eg.addColorStop(0, mix("#26394b", "#152030", nf));
   eg.addColorStop(1, mix("#1a2836", "#0e1621", nf));
@@ -2150,8 +2207,8 @@ function finalizePayment(p) {
   // Teach the crisp-change rule: the same total in more bills rates worse.
   if (p.owed > 0 && p.changeGiven === p.owed &&
       (p.changeNotes || []).length > minNotes(p.owed))
-    toast("🤏 Para üstü verildi ama bir avuç bozuk banknotla — misafir fark etti", "bad");
-  finishVisit(p, finalSat(p), true); // change in hand — walk out through the EXIT door
+    toast("🤏 Bozuk para fark edildi", "bad");
+  finishVisit(p, finalSat(p), true); // change in hand — walk out through the exit
 }
 
 function stormOut(p) {
@@ -2159,7 +2216,7 @@ function stormOut(p) {
   // — no red badge, never catchable — they simply walk out and board.
   p.unpaid = true; // used the toilet, paid nothing (the fee is lost)
   if (S.stats) S.stats.evaded = (S.stats.evaded || 0) + 1;
-  toast("Bir misafir öfkeyle gişeden çıktı — ödeme yok", "bad");
+  toast("😠 Misafir ödemeden gitti", "bad");
   finishVisit(p, clamp((p.useSat != null ? p.useSat : 60) - 20, 15, 60));
 }
 
@@ -2171,7 +2228,7 @@ function giveUpLine(p) {
   // they sprint for the boarding door.
   p.unpaid = true; // used the toilet, paid nothing (the fee is lost)
   if (S.stats) S.stats.evaded = (S.stats.evaded || 0) + 1;
-  toast("Bir misafir öfkeyle gişeden çıktı — ödeme yok", "bad");
+  toast("😠 Misafir ödemeden gitti", "bad");
   finishVisit(p, clamp((p.useSat != null ? p.useSat : 60) - 15, 15, 60));
   // Belt-and-braces: finishVisit only sprints when boardAt is reached; if the
   // guest is left walking or idling, send them for the door at full sprint.
@@ -2181,10 +2238,19 @@ function giveUpLine(p) {
   }
 }
 
+// The front guest has walked all the way up to the counter (not still approaching it).
+function atPaySpot(p) {
+  return !!p && Math.hypot(p.x - PAY_SPOT.x, p.y - PAY_SPOT.y) < 4;
+}
+// the bill only comes out once the guest stands at their pay spot, not on the walk up
+const holdsBill = p => p.state === "payC2"
+  ? Math.hypot(p.x - PAY_SPOT2.x, p.y - PAY_SPOT2.y) < 4
+  : (p.state === "payC" || p.state === "doneC") && atPaySpot(p);
+
 // You hand back change from the till (called on chip clicks).
 function giveChange(d) {
   const front = facilities.C.queue[0];
-  if (!front || front.state !== "payC") return;
+  if (!front || front.state !== "payC" || !atPaySpot(front)) return;
   if (!Array.isArray(front.changeNotes)) front.changeNotes = []; // saves from before note tracking
   front.changeNotes.push(d);
   front.changeGiven += d;
@@ -2196,8 +2262,8 @@ function giveChange(d) {
 // You splash cologne on the guest at the counter (called on bottle clicks).
 function offerCologne() {
   const front = facilities.C.queue[0];
-  if (S.bottle <= 0) { toast("🧴 Kolonya şişesi boş — gece yarısı dolacak", ""); return; }
-  if (!front || (front.state !== "payC" && front.state !== "doneC") || front.cologne) return;
+  if (S.bottle <= 0) { toast("🧴 Kolonya bitti — gece dolar", ""); return; }
+  if (!front || (front.state !== "payC" && front.state !== "doneC") || front.cologne || !atPaySpot(front)) return;
   front.cologne = true;
   front.colognePrev = front.state;
   front.state = "dripC";
@@ -2208,7 +2274,7 @@ function offerCologne() {
 
 // The tail of a visit: stats, reputation, and where the guest goes next.
 // viaDoor: the guest is still INSIDE the WC — no snap out; they take the
-// long way home, strolling to the EXIT door (the "leaveC" state below).
+// long way home, strolling to the exit (the "leaveC" state below).
 function finishVisit(p, sat, viaDoor = false) {
   if (!viaDoor && isIndoorPax(p)) { p.x = 852; p.y = 169; } // back on the outdoor side of the door
   sat = clamp(sat, 0, 100);
@@ -2225,9 +2291,8 @@ function finishVisit(p, sat, viaDoor = false) {
   p.wcUsed = false;
 
   if (viaDoor) {
-    // Settled at the counter — stroll to the EXIT door, then out (updatePax).
+    // Settled at the counter — stroll out through a side passage (updatePax).
     p.state = "leaveC";
-    p.tx = DOOR_IN.x; p.ty = DOOR_IN.y; // keep targets valid if a hard cap flips us to board
     return;
   }
 
@@ -2420,7 +2485,7 @@ function update(dt, timeDt = dt) {
             if (qi >= 0) { q.splice(qi, 1); giveUpLine(p); }
           }
         }
-        toast("⏱ Terminalde bir saat oldu — otobüs ne olursa olsun kalkıyor", "bad");
+        toast("⏱ Süre doldu, otobüs kalkıyor", "bad");
         endStop(b);
       }
     } else if (b.state === "enter") {
@@ -2500,8 +2565,8 @@ function updatePax(p, bus, dt, timeDt = dt) {
 
   if (p.state === "serveR") { p.x = 690; p.y = 169; return; }
   if (p.state === "serveT") {
-    // indoors: fresh pulls spawn at the EXIT door (stepFac); enterT only
-    // matters for saves loaded mid-entry. Then walk to your stall bay — the
+    // indoors: fresh pulls spawn below a side passage (stepFac) and walk up
+    // it (enterT). Then walk to your stall bay — the
     // slot is fixed for the whole visit (stepFac pins p.stall), so the guest
     // stays on that toilet and never drifts onto another one mid-use.
     let ti = p.stall;
@@ -2513,10 +2578,11 @@ function updatePax(p, bus, dt, timeDt = dt) {
       if (Math.hypot(p.x - p.enterT.x, p.y - p.enterT.y) < 8) p.enterT = null;
       return;
     }
-    moveToward(p, stallBay(ti).x + 26, 224, 100 * dt);
+    const sx = stallCx(ti), sy = stallSy(224);
+    moveToward(p, sx, sy, 100 * dt);
     // the door shuts only once the guest has stepped in — before that the
     // leaf stays ajar and the guest is visible walking off to their bay
-    if (Math.hypot(p.x - (stallBay(ti).x + 26), p.y - 224) < 8) p.inStall = true;
+    if (Math.hypot(p.x - sx, p.y - sy) < 8) p.inStall = true;
     return;
   }
   if (p.state === "queueC2" || p.state === "payC2") {
@@ -2549,17 +2615,20 @@ function updatePax(p, bus, dt, timeDt = dt) {
   }
   if (p.state === "scrubC") return; // caught — stepScrub drives them (real time)
   if (p.state === "leaveC") {
-    // Paid, change in hand: stroll to the EXIT door, then out to the lot.
+    // Paid, change in hand: over to the nearer side passage, down it, and out to the lot.
     // (A runaway reuses this state too — they never paid, so they dash at
     // EVADE_WALK per REAL second, so the chase stays fair at any speed tier.
     // Queue-leavers never reach this state: finishVisit snaps them outside.)
     // Everyone walks the whole way, even if their bus is already boarding —
     // the bus waits for them (allAbroad), and a runaway stays catchable.
     const bus = findBusOf(p);
-    moveToward(p, DOOR_IN.x, DOOR_IN.y, p.runaway ? EVADE_WALK * dt / speed : 100 * dt);
-    if (Math.hypot(p.x - DOOR_IN.x, p.y - DOOR_IN.y) < 8) {
+    const gx = sideGapX(p.x > W / 2), oy = sideOutY();
+    const step = p.runaway ? EVADE_WALK * dt / speed : 100 * dt;
+    if (p.x !== gx) moveToward(p, gx, SIDE_IN_Y, step);
+    else moveToward(p, gx, oy, step);
+    if (p.x === gx && Math.abs(p.y - oy) < 8) {
       p.x = 852; p.y = 169;    // step out onto the outdoor side
-      p.runaway = false;       // crossed the EXIT — the escape succeeded
+      p.runaway = false;       // crossed the exit — the escape succeeded
       if (bus && reached(p.boardAt)) {
         if (bus.state === "stop") goDoor(p, bus); // sprint the rest of the way
         else { p.state = "bus"; p.__boarded = true; }  // bus already pulled out — count as boarded
@@ -2592,7 +2661,7 @@ function queueSlot(i) {
 }
 function queueSlot2(i) {
   // the second line (exact-₺20 guests) — open floor left of the main line,
-  // walking up toward the counter and the EXIT door above it
+  // walking up toward the counter
   const y = Math.max(236, 332 - i * 20);
   const x = 462 + (i === 0 ? 0 : i % 2 ? -22 : 22);
   return { x, y };
@@ -2652,6 +2721,13 @@ function resize() {
   else                { Wdyn = W; Hdyn = H; }
   offX = (Wdyn - W) / 2;
   offY = (Hdyn - H) / 2;
+  // centered in the gap between the left view edge and the stall row, at the top
+  COUNTER_IN.hose.x = -offX + (stallOx() + offX - COUNTER_IN.hose.w) / 2;
+  COUNTER_IN.hose.y = -offY + 6;
+  const rowR = stallOx() + STALL_ROW_W * stallKx();
+  COUNTER_IN.hoseR.x = rowR + (Wdyn - offX - rowR - COUNTER_IN.hoseR.w) / 2;
+  COUNTER_IN.hoseR.y = COUNTER_IN.hose.y;
+  deskK = a > ULTRA_ASPECT ? DESK_ULTRA_K : 1;
   if (Math.abs(Wdyn - lastWdyn) + Math.abs(Hdyn - lastHdyn) > 2) {
     seedStars();
     lastWdyn = Wdyn; lastHdyn = Hdyn;
@@ -3320,23 +3396,31 @@ function drawHeldBill(cx, cy, u, color, d) {
 }
 
 function drawCounterIn() {
-  const d = COUNTER_IN.desk;
-  // the full-width wooden teller counter: a raised guest-side ledge (guests
-  // stand behind it) and your desktop running down to the bottom of the view
-  const L = -offX, R = L + Wdyn, B = H + offY;
+  const [dk, , dty] = deskXf();
+  const d = { y: dty + COUNTER_IN.desk.y * dk };
+  // the wooden teller counter: a raised guest-side ledge (guests stand behind
+  // it) and your desktop running down to the bottom of the view, stopping
+  // short of both side passages
+  const gap = Wdyn * SIDE_GAP;
+  let L = -offX + gap, R = -offX + Wdyn - gap;
+  if (dk > 1) {
+    L = Math.max(L, 480 + (DESK_ULTRA.L - 508.5) * dk);
+    R = Math.min(R, 480 + (DESK_ULTRA.R - 508.5) * dk);
+  }
+  const CW = R - L, B = H + offY;
   const top = d.y + 8;                                              // desktop starts under the ledge face
   const wood = ctx.createLinearGradient(0, top, 0, B);
   wood.addColorStop(0, "#7a5a32");
   wood.addColorStop(0.25, "#8f6b3c");
   wood.addColorStop(1, "#5e4426");
   ctx.fillStyle = wood;
-  ctx.fillRect(L, top, Wdyn, B - top);
+  ctx.fillRect(L, top, CW, B - top);
   ctx.lineWidth = 1;
   for (let y = top + 22, k = 0; y < B; y += 34, k++) {              // plank seams + grain
     ctx.fillStyle = "rgba(0, 0, 0, 0.22)";
-    ctx.fillRect(L, y, Wdyn, 1.5);
+    ctx.fillRect(L, y, CW, 1.5);
     ctx.fillStyle = "rgba(255, 228, 170, 0.07)";
-    ctx.fillRect(L, y + 1.5, Wdyn, 1);
+    ctx.fillRect(L, y + 1.5, CW, 1);
     ctx.strokeStyle = "rgba(60, 38, 16, 0.18)";
     ctx.beginPath();
     for (let g = 0; g < 3; g++) {
@@ -3350,25 +3434,32 @@ function drawCounterIn() {
   sheen.addColorStop(0, "rgba(255, 236, 190, 0.10)");
   sheen.addColorStop(1, "rgba(255, 236, 190, 0)");
   ctx.fillStyle = sheen;
-  ctx.fillRect(L, top, Wdyn, B - top);
+  ctx.fillRect(L, top, CW, B - top);
   const ls = ctx.createLinearGradient(0, top, 0, top + 18);         // the ledge's shadow on the desk
   ls.addColorStop(0, "rgba(0, 0, 0, 0.45)");
   ls.addColorStop(1, "rgba(0, 0, 0, 0)");
   ctx.fillStyle = ls;
-  ctx.fillRect(L, top, Wdyn, 18);
+  ctx.fillRect(L, top, CW, 18);
   // the raised ledge: its top surface, then the face turned toward you
   ctx.fillStyle = "#b48d55";
-  ctx.fillRect(L, d.y - 12, Wdyn, 9);                               // ledge top
+  ctx.fillRect(L, d.y - 12, CW, 9);                               // ledge top
   ctx.fillStyle = "rgba(255, 240, 200, 0.4)";
-  ctx.fillRect(L, d.y - 12, Wdyn, 2);
+  ctx.fillRect(L, d.y - 12, CW, 2);
   const face = ctx.createLinearGradient(0, d.y - 3, 0, top);
   face.addColorStop(0, "#8a6838");
   face.addColorStop(1, "#6c4f2b");
   ctx.fillStyle = face;
-  ctx.fillRect(L, d.y - 3, Wdyn, top - d.y + 3);                    // ledge face
+  ctx.fillRect(L, d.y - 3, CW, top - d.y + 3);                    // ledge face
   ctx.fillStyle = "rgba(0, 0, 0, 0.3)";
-  ctx.fillRect(L, d.y - 3, Wdyn, 1);
-  ctx.fillRect(L, top - 1, Wdyn, 1);
+  ctx.fillRect(L, d.y - 3, CW, 1);
+  ctx.fillRect(L, top - 1, CW, 1);
+  for (const [x, dir] of [[L, 1], [R, -1]]) {                      // the counter's cut ends
+    const eg = ctx.createLinearGradient(x, 0, x + dir * 10, 0);
+    eg.addColorStop(0, "rgba(0, 0, 0, 0.55)");
+    eg.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = eg;
+    ctx.fillRect(Math.min(x, x + dir * 10), d.y - 12, 10, B - d.y + 12);
+  }
   // the open cash drawer
   function drawNote(x, y, w, h, color, d) {
     ctx.fillStyle = shade(color, 0.35);                             // paper + pale margin
@@ -3400,31 +3491,6 @@ function drawCounterIn() {
     ctx.textAlign = "right";
     ctx.fillText(d, x + w - 5, y + h - 5);
   }
-  // Turkish coins: 1₺ bimetallic, 50/25 kuruş silver, 10/5 kuruş brass
-  const COINS = [
-    { r: 7,   rim: "#c9ced6", core: "#d8b25a" },
-    { r: 6.4, rim: "#c3c8d0", core: "#c3c8d0" },
-    { r: 5.8, rim: "#bfc4cc", core: "#bfc4cc" },
-    { r: 5.2, rim: "#cfa64e", core: "#cfa64e" },
-    { r: 4.6, rim: "#c99d47", core: "#c99d47" },
-  ];
-  const PILE = [[-8, 6], [6, 8], [-2, -2], [9, -3], [-9, -6], [2, 12], [0, -9]];
-  function drawCoin(x, y, c) {
-    ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
-    ctx.beginPath(); ctx.arc(x + 1, y + 1.5, c.r, 0, 7); ctx.fill();
-    ctx.fillStyle = shade(c.rim, -0.35);                            // milled edge
-    ctx.beginPath(); ctx.arc(x, y, c.r, 0, 7); ctx.fill();
-    ctx.fillStyle = c.rim;
-    ctx.beginPath(); ctx.arc(x, y, c.r - 0.8, 0, 7); ctx.fill();
-    ctx.fillStyle = c.core;
-    ctx.beginPath(); ctx.arc(x, y, c.r * 0.62, 0, 7); ctx.fill();
-    ctx.strokeStyle = shade(c.core, -0.25);
-    ctx.lineWidth = 0.6;
-    ctx.beginPath(); ctx.arc(x, y, c.r * 0.62, 0, 7); ctx.stroke();
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.55)";                  // sheen
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.arc(x, y, c.r - 1.6, Math.PI * 1.05, Math.PI * 1.55); ctx.stroke();
-  }
   function softShadow(x, y, w, h, r, blur = 10, oy = 4) {
     ctx.save();
     ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
@@ -3435,20 +3501,20 @@ function drawCounterIn() {
     ctx.restore();
   }
   function drawDrawer() {
-    softShadow(374, 372, 212, 152, 4, 14, 6);
-    const mg = ctx.createLinearGradient(374, 0, 586, 0);            // brushed-metal till body
+    softShadow(348, 372, 264, 152, 4, 14, 6);
+    const mg = ctx.createLinearGradient(348, 0, 612, 0);            // brushed-metal till body
     mg.addColorStop(0, "#2f3542");
     mg.addColorStop(0.5, "#454d5e");
     mg.addColorStop(1, "#2c323e");
     ctx.fillStyle = mg;
-    rr(ctx, 374, 372, 212, 152, 4); ctx.fill();                    // open drawer
+    rr(ctx, 348, 372, 264, 152, 4); ctx.fill();                    // open drawer
     ctx.strokeStyle = "rgba(0, 0, 0, 0.5)";
     ctx.lineWidth = 1;
-    rr(ctx, 374.5, 372.5, 211, 151, 4); ctx.stroke();
+    rr(ctx, 348.5, 372.5, 263, 151, 4); ctx.stroke();
     ctx.fillStyle = "rgba(255, 255, 255, 0.18)";
-    ctx.fillRect(376, 373, 208, 2);
+    ctx.fillRect(350, 373, 260, 2);
     ctx.fillStyle = "#12151d";
-    ctx.fillRect(380, 378, 200, 90);
+    ctx.fillRect(354, 378, 252, 134);
     for (const c of COUNTER_IN.chips) {                             // the three bill trays
       ctx.fillStyle = "#0e1118";
       rr(ctx, c.x - 4, c.y - 4, c.w + 8, c.h + 8, 3); ctx.fill();
@@ -3473,33 +3539,15 @@ function drawCounterIn() {
       ctx.textAlign = "center";
       ctx.fillText(c.label, c.x + c.w / 2, c.y + c.h / 2 + 9);
     }
-    ctx.fillStyle = "#0e1118";                                      // coin compartment
-    rr(ctx, 380, 468, 200, 44, 3); ctx.fill();
-    const cg = ctx.createLinearGradient(0, 468, 0, 512);
-    cg.addColorStop(0, "rgba(0, 0, 0, 0.5)");
-    cg.addColorStop(0.35, "rgba(0, 0, 0, 0)");
-    ctx.fillStyle = cg;
-    ctx.fillRect(380, 468, 200, 44);
-    for (let i = 1; i < 5; i++) {                                   // cup dividers
-      ctx.fillStyle = "#2a3040";
-      ctx.fillRect(380 + i * 40 - 1, 470, 2.5, 40);
-      ctx.fillStyle = "rgba(255, 255, 255, 0.1)";
-      ctx.fillRect(380 + i * 40 - 1, 470, 0.8, 40);
-    }
-    for (let i = 0; i < 5; i++) {
-      const cx = 400 + i * 40, cy = 490;
-      const n = 7 - i % 3;
-      for (let k = 0; k < n; k++) drawCoin(cx + PILE[k][0] * 0.95, cy + PILE[k][1] * 0.95, COINS[i]);
-    }
     ctx.fillStyle = "#cfd6e4";                                      // drawer pull
     rr(ctx, 466, 513, 28, 5, 2); ctx.fill();
     ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
     ctx.fillRect(468, 513.5, 24, 1);
     ctx.textAlign = "left";
   }
-  drawDrawer();
+  withDesk("drawer", drawDrawer);
   // calculator, cologne
-  function drawCounterItems() {
+  function drawCalculator() {
     softShadow(218, 396, 66, 68, 6, 8, 4);                          // calculator
     const cb = ctx.createLinearGradient(0, 396, 0, 464);
     cb.addColorStop(0, "#343b4b");
@@ -3519,13 +3567,10 @@ function drawCounterIn() {
     ctx.fillStyle = "#1e3a2c";
     ctx.font = "bold 13px monospace";
     ctx.textAlign = "right";
-    // the change still owed to the guest at the counter (000 when nobody's).
-    // While the front guest is settling (doneC) it previews the NEXT guest in
-    // line, the same way the old desk card did.
-    const f = facilities.C.queue[0];
-    const inC = p => p && (p.state === "queueC" || p.state === "payC" || p.state === "doneC" || p.state === "dripC");
-    const g = (f && f.state === "doneC" && inC(facilities.C.queue[1])) ? facilities.C.queue[1] : f;
-    ctx.fillText(String(inC(g) ? Math.max(0, g.owed - g.changeGiven) : 0).padStart(3, "0"), 273, 416);
+    // the change still owed to the guest at the counter (000 until one is standing there)
+    const g = facilities.C.queue[0];
+    const atDesk = atPaySpot(g) && (g.state === "payC" || g.state === "doneC" || g.state === "dripC");
+    ctx.fillText(String(atDesk ? Math.max(0, g.owed - g.changeGiven) : 0).padStart(3, "0"), 273, 416);
     ctx.textAlign = "left";
     for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {      // keys: dark cap with a lit top edge
       const kx = 225 + c * 18, ky = 426 + r * 12;
@@ -3537,11 +3582,11 @@ function drawCounterIn() {
       ctx.fillStyle = "rgba(255, 255, 255, 0.18)";
       ctx.fillRect(kx + 2, ky + 0.5, 11, 1);
     }
-    drawBottle();
-    drawTea();
-    drawIntercom();
   }
-  drawCounterItems();
+  withDesk("calc", drawCalculator);
+  withDesk("bottle", drawBottle);
+  withDesk("tea", drawTea);
+  withDesk("intercom", drawIntercom);
 }
 
 function drawBottle() {
@@ -3667,9 +3712,41 @@ function drawBottle() {
 
 /* Your glass of Turkish tea: a tulip glass on a white saucer with red dots,
  * a spoon leaning in. The level drops as S.tea runs from 1 to 0. */
+// Turkish coins: 1₺ bimetallic (silver center, brass ring), 50/25 kuruş silver, 10/5 kuruş brass
+const COIN_1TL = { rx: 10, rim: "#c9a24a", face: "#c6ccd4" };
+const COIN_SILVER = r => ({ rx: r, rim: "#b9bfc8", face: "#cfd4dc" });
+const COIN_BRASS = r => ({ rx: r, rim: "#b48a3c", face: "#d2ad5c" });
+function drawCoinStack(x, by, coins) {
+  const t = 2.4;                                   // coin thickness
+  ctx.fillStyle = "rgba(0, 0, 0, 0.3)";
+  ctx.beginPath(); ctx.ellipse(x + 2, by + 1.5, coins[0].rx + 3, 4.5, 0, 0, 7); ctx.fill();
+  coins.forEach((c, i) => {
+    const y = by - i * t - t, ry = c.rx * 0.38;
+    const jx = x + ((i * 7) % 3 - 1) * 0.8;        // a slightly uneven pile
+    ctx.fillStyle = shade(c.rim, -0.4);            // milled edge
+    ctx.beginPath(); ctx.ellipse(jx, y + t, c.rx, ry, 0, 0, Math.PI); ctx.fill();
+    ctx.fillRect(jx - c.rx, y, c.rx * 2, t);
+    ctx.fillStyle = shade(c.rim, -0.1);
+    ctx.fillRect(jx - c.rx, y + 0.6, c.rx * 2, 0.7);
+    ctx.fillStyle = c.rim;                         // face
+    ctx.beginPath(); ctx.ellipse(jx, y, c.rx, ry, 0, 0, 7); ctx.fill();
+    if (i === coins.length - 1) {
+      ctx.fillStyle = c.face;
+      ctx.beginPath(); ctx.ellipse(jx, y, c.rx * 0.7, ry * 0.7, 0, 0, 7); ctx.fill();
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.55)"; // sheen
+      ctx.lineWidth = 0.8;
+      ctx.beginPath(); ctx.ellipse(jx, y, c.rx - 1.2, ry - 0.6, 0, Math.PI * 1.05, Math.PI * 1.6); ctx.stroke();
+    }
+  });
+}
+
 function drawTea() {
   const cx = 690, by = 470;                      // glass center x, glass bottom y
   const f = clamp(S.tea, 0, 1);
+  // loose change on the counter behind the glass
+  drawCoinStack(cx - 22, by - 84, [COIN_SILVER(9.5), COIN_BRASS(9), COIN_SILVER(9), COIN_1TL]);
+  drawCoinStack(cx - 6, by - 78, [COIN_SILVER(9.5), COIN_SILVER(9), COIN_BRASS(8.5), COIN_SILVER(9), COIN_BRASS(9), COIN_1TL]);
+  drawCoinStack(cx + 20, by - 82, [COIN_BRASS(8), COIN_BRASS(7.5)]);
   // saucer
   ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
   ctx.beginPath(); ctx.ellipse(cx, by + 4, 30, 8, 0, 0, 7); ctx.fill();
@@ -3776,37 +3853,31 @@ function drawCounterInPrompts() {
   ctx.shadowBlur = 3;
   ctx.textAlign = "center";
   const front = facilities.C.queue[0];
-  if (front) {
+  if (atPaySpot(front)) {
     if (!front.cologne && S.bottle > 0 && (front.state === "payC" || front.state === "doneC")) {
-      const b = COUNTER_IN.bottle;
+      const b = deskRect(COUNTER_IN.bottle, "bottle");
       ctx.fillStyle = `rgba(255, 211, 107, ${pulse})`;
       ctx.font = "bold 10px system-ui, sans-serif";
       ctx.fillText("kolonya!", b.x + b.w / 2, b.y - 6);
     }
     if (front.state === "payC" && front.changeGiven < front.owed) {
-      const c = COUNTER_IN.chips[0];
+      const c = deskRect(COUNTER_IN.chips[0], "drawer");
       ctx.fillStyle = `rgba(255, 211, 107, ${pulse})`;
       ctx.font = "bold 10px system-ui, sans-serif";
-      ctx.fillText("para üstü!", c.x + 32, c.y - 8);
+      ctx.fillText("para üstü!", c.x + c.w / 2, c.y - 8);
     }
   }
   ctx.restore();
   ctx.textAlign = "left";
 }
 
-/* Red badge pinned just ABOVE the "EXIT" text inside the exit door — how many guests are
- * standing OUTSIDE the WC building, waiting for a toilet (the T line).
- * The line moves on its own (visits last 1–10 game minutes), so the badge
- * is the at-a-glance "the door is busy" signal for you behind the counter.
- * (Above, not over: a badge on the text would swallow it.) */
+/* Red badge over the right side passage — how many guests are standing
+ * OUTSIDE the WC building, waiting for a toilet (the T line). */
 function drawExitQueueBadge() {
   const n = facilities.T.queue.length;
   if (n === 0) return;
-  const ex = COUNTER_IN.exit;
   const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 200);
-  const exTop = -offY; // the doorway runs to the top of the frame (same as the door draw)
-  const cx = ex.x + ex.w / 2; // horizontally over the "EXIT" text
-  const cy = (exTop + ex.y + ex.h) / 2 - 24; // just above the text — the badge must not cover it
+  const cx = sideGapX(true), cy = 440;
   const label = String(n);           // exact count — no "9+" cap
   ctx.font = "bold 11px system-ui, sans-serif";
   ctx.textAlign = "center";
@@ -3844,11 +3915,11 @@ function hoseStroke(path) {
 }
 
 // the hose draped from its tap (ox, oy) to the nozzle at the pointer
-function drawHoseLine(ox, oy, px, py) {
+function drawHoseLine(ox, oy, px, py, bend = -60) {
   hoseStroke(o => {
     ctx.beginPath();
     ctx.moveTo(ox, oy + o);
-    ctx.quadraticCurveTo((ox + px) / 2 - 60, (oy + py) / 2 + 40 + o, px - 6, py - 6 + o);
+    ctx.quadraticCurveTo((ox + px) / 2 + bend, (oy + py) / 2 + 40 + o, px - 6, py - 6 + o);
   });
 }
 
@@ -3893,12 +3964,12 @@ function drawHoseSpray(px, py, now) {
 }
 
 /* --------------------- WC interior (behind the counter) ------------- */
-/* The cleaning-hose station: a wall faucet with a coiled hose beside the stall row,
- * on the left of the screen, closest to the stalls. Click it to pick the hose up;
+/* A cleaning-hose station: a wall faucet with a coiled hose at one end of the
+ * stall row (left, or mirrored on the right). Click it to pick that hose up;
  * hold the mouse and drag it over a stall
  * to spray (hoseApply). It pulses amber while any stall needs cleaning. */
-function drawHoseStation() {
-  const st = COUNTER_IN.hose;
+function drawHoseStation(st) {
+  const held = hoseInHand === st, m = st.right ? -1 : 1; // the right station is drawn mirrored
   const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 200);
   const needsClean = S.stallClean.some(v => v < 60);
   const fcx = st.x + st.w / 2, fcy = st.y + 30; // the wall faucet; the coil sits on the stalls' floor line
@@ -3915,8 +3986,8 @@ function drawHoseStation() {
   rr(ctx, fcx - 10, fcy - 12, 20, 5, 2.5); ctx.fill(); // handle
   const now = performance.now();
   const base = st.y + st.h - 9;
-  if (!hoseInHand) { // the coil hangs off the tap until you pick it up
-    hoseStroke(o => { ctx.beginPath(); ctx.moveTo(fcx, fcy + 19 + o); ctx.quadraticCurveTo(fcx + 14, base - 14 + o, fcx + 16, base - 16 + o); });
+  if (!held) { // the coil hangs off the tap until you pick it up
+    hoseStroke(o => { ctx.beginPath(); ctx.moveTo(fcx, fcy + 19 + o); ctx.quadraticCurveTo(fcx + 14 * m, base - 14 + o, fcx + 16 * m, base - 16 + o); });
     for (let k = 0; k < 3; k++) { // flat loops piled on the floor, bottom one first
       const cy = base - k * 6, rx = 22 - k * 3;
       hoseStroke(o => { ctx.beginPath(); ctx.ellipse(fcx, cy + o, rx, 7 - k, 0, 0, 7); });
@@ -3926,33 +3997,45 @@ function drawHoseStation() {
     ctx.fillStyle = `rgba(140, 210, 255, ${0.85 * (1 - t * 0.6)})`;
     ctx.beginPath(); ctx.ellipse(fcx, fcy + 22 + t * 22, 1.8, 2.6, 0, 0, 7); ctx.fill();
   }
-  ctx.fillStyle = hoseInHand ? `rgba(120, 225, 255, ${0.6 + 0.4 * pulse})`
+  ctx.fillStyle = held ? `rgba(120, 225, 255, ${0.6 + 0.4 * pulse})`
     : needsClean ? `rgba(255, 211, 107, ${0.5 + 0.5 * pulse})`
     : "rgba(226,235,248,0.8)";
   ctx.font = "bold 9px system-ui, sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText(hoseInHand ? "ELİNDE" : "HORTUM", fcx, st.y + 8);
+  ctx.fillText(held ? "ELİNDE" : "HORTUM", fcx, st.y + 8);
   ctx.textAlign = "left";
 }
 
 // The drawn body box of a pax at a given draw scale k (the counter room's 5x
 // close-up, or the lot's 1x) with feet anchored at p.x, p.y — a touch looser
 // than the sprite so grazing counts as in front.
-function paxBox(p, k = 5) {
+// Depth scale in the WC room: half size at the stall row's floor, full 5x at the counter.
+// The guest right at the counter (either pay spot) looms much larger — eased
+// in over the last FRONT_R px of their walk so nobody pops in size.
+const FRONT_BOOST = 0.6, FRONT_R = 25;
+function wcPaxK(y, x) {
+  const y0 = stallSy(224), t = (y - y0) / (PAY_SPOT.y - y0);
+  const k = clamp(2.5 + 2.5 * t, 2.5, 6);
+  if (x == null) return k;
+  const d = Math.min(Math.hypot(x - PAY_SPOT.x, y - PAY_SPOT.y), Math.hypot(x - PAY_SPOT2.x, y - PAY_SPOT2.y));
+  return k * (1 + FRONT_BOOST * Math.max(0, 1 - d / FRONT_R));
+}
+
+function paxBox(p, k = wcPaxK(p.y, p.x)) {
   const s = k * ((PAX_TYPES[p.type] || PAX_TYPES.m).scale);
   return { x: p.x - 5.5 * s, y: p.y - 19 * s, w: 11 * s, h: 19.5 * s };
 }
 
-// The nearest catchable runaway whose drawn body (the counter room's 5x
-// close-up, with pad) contains the point: still inside the WC, running for
-// the EXIT (leaveC). Paying, queued, paid and already-outside guests are never
+// The nearest catchable runaway whose drawn body (depth-scaled, see wcPaxK,
+// with pad) contains the point: still inside the WC, running for
+// the exit (leaveC). Paying, queued, paid and already-outside guests are never
 // targets — and nobody is while a caught guest is still scrubbing.
 function runawayAt(x, y, pad = 2) {
   if (scrub) return null;
   let best = null, bd = Infinity;
   for (const b of buses) for (const p of b.pax) {
     if (!p.runaway || p.state !== "leaveC") continue;
-    const r = paxBox(p, 5);
+    const r = paxBox(p);
     if (x < r.x - pad || x > r.x + r.w + pad || y < r.y - pad || y > r.y + r.h + pad) continue;
     const d = Math.hypot(p.x - x, p.y - y);
     if (d < bd) { bd = d; best = p; }
@@ -3967,8 +4050,8 @@ function paxInFrontOfClosedDoor(p) {
   for (let i = 0; i < WC_STALLS; i++) {
     if (!stallDoorClosed(i)) continue;
     if (facilities.T.spots[i].pax === p) continue; // the occupant stays hidden
-    const bx = stallBay(i).x; // the closed leaf rect is (bx+1, 106, 50, 140) — ends at the stall floor
-    if (b.x < bx + 51 && b.x + b.w > bx + 1 && b.y < 246 && b.y + b.h > 106) return true;
+    // the closed leaf is art x 1..51, y 106..246 in stall space — ends at the stall floor
+    if (b.x < stallSx(stallEdge(i, 51)) && b.x + b.w > stallSx(stallEdge(i, 1)) && b.y < stallSy(246) && b.y + b.h > stallSy(106)) return true;
   }
   return false;
 }
@@ -3983,11 +4066,13 @@ function drawScrub() {
   if (scrub) {
     const p = scrub.pax, t = scrub.t, pose = scrubPose();
     const working = pose.stall >= 0;
-    const s = 5 * ((PAX_TYPES[p.type] || PAX_TYPES.m).scale);
+    const dk = wcPaxK(pose.y), s = dk * ((PAX_TYPES[p.type] || PAX_TYPES.m).scale);
     // suds left on every bowl already scrubbed
+    stallSpace();
     for (let i = 0; i < WC_STALLS; i++) {
       if (t < scrub.legs[i].t1) continue;
-      const bx = stallBay(i).x;
+      const bx = stallLx(i);
+      stallWiden(i);
       for (let k = 0; k < 7; k++) {
         const u = ((i * 7 + k * 13) % 10) / 10;
         ctx.fillStyle = `rgba(245, 252, 255, ${0.6 + 0.3 * (k % 2)})`;
@@ -3995,7 +4080,9 @@ function drawScrub() {
         ctx.arc(bx + 12 + u * 28, 206 - (k % 3) * 5 + Math.sin(t * 6 + k + i) * 1.5, 2.5 + (k % 3), 0, 7);
         ctx.fill();
       }
+      ctx.restore();
     }
+    ctx.restore();
     // the guest: a fast scrubbing shimmy at a bowl, a bobbing run between them
     const wob = working ? Math.sin(t * 42) : 0;
     const bob = working ? 0 : Math.abs(Math.sin(t * 26)) * 6;
@@ -4021,7 +4108,7 @@ function drawScrub() {
     ctx.beginPath(); ctx.ellipse(kx, ky - 22, 12, 3, 0, 0, 7); ctx.fill();
     ctx.strokeStyle = "#9aa4b2"; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.arc(kx, ky - 22, 11, Math.PI, 0); ctx.stroke();
-    drawPax({ ...p, x, y }, 5);
+    drawPax({ ...p, x, y }, dk);
     // the mop: handle from the hand down to a head swishing over the floor
     const hx = x + dir * 3.8 * s, hy = y - 7 * s;
     const mx = x + dir * 9 * s + wob * 14, my = pose.y - 2;
@@ -4207,36 +4294,62 @@ function drawStallGrime(i, bx, cx, dirty) {
 }
 
 function drawWCInterior() {
-  // warm back wall — spans the full view (a wider room in wide windows); it
-  // ends where the EXIT door ends, so the floor starts right at its base
-  ctx.fillStyle = "#5d584c";
-  ctx.fillRect(-offX, -offY, Wdyn, 72 + offY);
-  ctx.fillStyle = "#494438";
-  ctx.fillRect(-offX, 66, Wdyn, 6); // baseboard
-  ctx.strokeStyle = "rgba(255,255,255,0.05)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(-offX, 60); ctx.lineTo(Wdyn, 60);
-  ctx.stroke();
   // floor
   ctx.fillStyle = "#262b36";
-  ctx.fillRect(-offX, 72, Wdyn, H + 2 * offY - 72);
-  ctx.strokeStyle = "rgba(255,255,255,0.05)";
+  ctx.fillRect(-offX, -offY, Wdyn, H + 2 * offY);
+  const yWall = stallSy(246); // where the back wall meets the floor
+  // back wall: flat at one depth, so its tiles are uniform
+  ctx.fillStyle = "#454d60";
+  ctx.fillRect(-offX, -offY, Wdyn, yWall + offY);
+  ctx.strokeStyle = "rgba(255,255,255,0.06)";
   ctx.lineWidth = 1;
   ctx.beginPath();
-  for (let x = -offX; x <= Wdyn; x += 48) { ctx.moveTo(x, 72); ctx.lineTo(x, H + 2 * offY); }
-  for (let y = 72; y <= H + 2 * offY; y += 48) { ctx.moveTo(-offX, y); ctx.lineTo(Wdyn, y); }
+  for (let y = yWall; y >= -offY; y -= 14) { ctx.moveTo(-offX, y); ctx.lineTo(Wdyn - offX, y); }
+  for (let x = Wdyn / 2 - offX - Math.ceil(Wdyn / 28) * 14; x <= Wdyn - offX; x += 14) { ctx.moveTo(x, -offY); ctx.lineTo(x, yWall); }
   ctx.stroke();
-  // the two stall rows — five bays on the left, five mirrored on the right
+  ctx.fillStyle = "#1c202a"; // skirting where wall meets floor
+  ctx.fillRect(-offX, yWall - 3, Wdyn, 3);
+  ctx.strokeStyle = "rgba(255,255,255,0.05)";
+  // tiles share the guests' depth scale (wcPaxK): 48 px at the counter, shrinking
+  // linearly toward a horizon above the stall row where the scale would hit 0
+  {
+    const TILE = 48, y0 = stallSy(224), yRef = PAY_SPOT.y;
+    const yh = 2 * y0 - yRef, dRef = yRef - yh, vx = Wdyn / 2 - offX;
+    const yTop = yWall, yBot = H + offY, r = 1 + TILE / dRef;
+    ctx.beginPath();
+    for (let d = dRef; yh + d <= yBot; d *= r) { ctx.moveTo(-offX, yh + d); ctx.lineTo(Wdyn - offX, yh + d); }
+    for (let d = dRef / r; yh + d >= yTop; d /= r) { ctx.moveTo(-offX, yh + d); ctx.lineTo(Wdyn - offX, yh + d); }
+    const sTop = (yTop - yh) / dRef, sBot = (yBot - yh) / dRef;
+    const n = Math.ceil(Wdyn / 2 / (TILE * sTop)) + 1;
+    for (let i = -n; i <= n; i++) {
+      const u = (i + 0.5) * TILE;
+      ctx.moveTo(vx + u * sTop, yTop); ctx.lineTo(vx + u * sBot, yBot);
+    }
+    ctx.stroke();
+  }
+  // the stall row across the top of the room (drawn in stall space)
+  stallSpace();
   ctx.fillStyle = "#3d465e";
-  rr(ctx, 68, 84, 324, 162, 6); ctx.fill();
-  rr(ctx, 568, 84, 324, 162, 6); ctx.fill();
+  rr(ctx, 0, 84, 324, 162, 6); ctx.fill();
+  rr(ctx, 320 + STALL_AISLE, 84, 324, 162, 6); ctx.fill();
   for (let i = 0; i < WC_STALLS; i++) {
-    const bx = stallBay(i).x;
+    const bx = stallLx(i);
     const s = facilities.T.spots[i];
     const dirty = 1 - S.stallClean[i] / 100;
-    ctx.fillStyle = "#171c28";
-    ctx.fillRect(bx, 108, 52, 138); // dark opening
+    stallWiden(i);
+    // inside the cubicle: its own tiled back wall in shadow, then a strip of floor
+    ctx.fillStyle = "#2c3343";
+    ctx.fillRect(bx, 108, 52, 120);
+    ctx.fillStyle = "#1d212b";
+    ctx.fillRect(bx, 228, 52, 18);
+    ctx.fillStyle = "#14171f";
+    ctx.fillRect(bx, 226, 52, 2);
+    ctx.strokeStyle = "rgba(255,255,255,0.05)"; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let y = 118; y < 226; y += 12) { ctx.moveTo(bx, y); ctx.lineTo(bx + 52, y); }
+    for (let x = bx + 6.5; x < bx + 52; x += 13) { ctx.moveTo(x, 108); ctx.lineTo(x, 226); }
+    ctx.moveTo(bx, 237); ctx.lineTo(bx + 52, 237);
+    ctx.stroke();
     // this stall's cleanliness bar — pinned to the top of each toilet
     ctx.fillStyle = "#0d1120";
     rr(ctx, bx + 6, 94, 40, 8, 2); ctx.fill();
@@ -4333,80 +4446,59 @@ function drawWCInterior() {
       ctx.fillStyle = "rgba(255,255,255,0.18)";
       ctx.fillRect(bx + 44, 108, 2, 138); // its edge
     }
+    ctx.restore();
   }
-  drawHoseStation(); // beside the stall row
-  // EXIT door (top center of the back wall)
-  const ex = COUNTER_IN.exit;
-  const exTop = -offY; // the frame runs to the top of the wall — no gap above the door
-  const exMidY = (exTop + ex.y + ex.h) / 2;
-  const exBot = ex.y + ex.h;
-  const exCx = ex.x + ex.w / 2;
-  // brushed-steel frame
-  const frame = ctx.createLinearGradient(ex.x, 0, ex.x + ex.w, 0);
-  frame.addColorStop(0, "#6f7682");
-  frame.addColorStop(0.5, "#a9b0bb");
-  frame.addColorStop(1, "#5d636e");
-  ctx.fillStyle = "rgba(0,0,0,0.3)";
-  ctx.fillRect(ex.x - 3, exTop, ex.w + 6, exBot - exTop); // shadow on the wall
-  ctx.fillStyle = frame;
-  ctx.fillRect(ex.x, exTop, ex.w, exBot - exTop);
-  // door leaf
-  const lx = ex.x + 5, lw = ex.w - 10, ly = exTop + 4, lh = exBot - 2 - ly;
-  const leaf = ctx.createLinearGradient(lx, 0, lx + lw, 0);
-  leaf.addColorStop(0, "#6b4428");
-  leaf.addColorStop(0.45, "#7d5232");
-  leaf.addColorStop(1, "#553420");
-  ctx.fillStyle = leaf;
-  ctx.fillRect(lx, ly, lw, lh);
-  // recessed panels
-  ctx.strokeStyle = "rgba(0,0,0,0.35)";
-  ctx.lineWidth = 1;
-  ctx.strokeRect(lx + 5.5, ly + 5.5, lw - 11, lh * 0.42);
-  ctx.strokeRect(lx + 5.5, ly + lh * 0.42 + 9.5, lw - 11, lh * 0.58 - 15);
-  ctx.strokeStyle = "rgba(255,220,180,0.12)";
-  ctx.strokeRect(lx + 6.5, ly + 6.5, lw - 11, lh * 0.42);
-  ctx.strokeRect(lx + 6.5, ly + lh * 0.42 + 10.5, lw - 11, lh * 0.58 - 15);
-  // illuminated green exit sign on the leaf
-  ctx.font = "bold 12px system-ui, sans-serif";
-  const sw = ctx.measureText("ÇIKIŞ").width + 14, sh = 17;
-  ctx.save();
-  ctx.shadowColor = "rgba(80, 255, 140, 0.7)";
-  ctx.shadowBlur = 10;
-  ctx.fillStyle = "#1e9e4f";
-  rr(ctx, exCx - sw / 2, exMidY - sh / 2, sw, sh, 3); ctx.fill();
   ctx.restore();
-  ctx.strokeStyle = "rgba(0,0,0,0.45)";
-  rr(ctx, exCx - sw / 2, exMidY - sh / 2, sw, sh, 3); ctx.stroke();
-  ctx.fillStyle = "#f2fff5";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle"; // dead-center of the door (exMidY) — not baseline-dependent
-  ctx.fillText("ÇIKIŞ", exCx, exMidY + 0.5);
-  ctx.textAlign = "left";
-  ctx.textBaseline = "alphabetic"; // restore for the rest of the scene
-  // the guests (drawn 5x — the room is a close-up)
-  for (const b of buses) for (const p of b.pax) if (isIndoorPax(p) && p.state !== "scrubC") drawPax(p, 5);
+  drawHoseStation(COUNTER_IN.hose); // either side of the stall row
+  drawHoseStation(COUNTER_IN.hoseR);
+  // the guests — scaled by depth (wcPaxK)
+  // (whoever's turn it is at the counter is held back and drawn on top of everyone)
+  const atCounter = p => p.state === "payC" || p.state === "doneC" || p.state === "dripC" || p.state === "payC2";
+  for (const b of buses) for (const p of b.pax)
+    if (isIndoorPax(p) && p.state !== "scrubC" && !atCounter(p)) drawPax(p, wcPaxK(p.y, p.x));
   // the stall doors close while someone is inside — drawn AFTER the guests so
   // the closed leaf hides the person (and the grime) from the counter side
+  // Drawn in screen space (not the stretched stall space) so corners, the
+  // handle and the lamp keep their shape however wide the cabin gets.
   for (let i = 0; i < WC_STALLS; i++) {
     if (!stallDoorClosed(i)) continue; // free + walk-in stalls show their ajar leaf above
-    const bx = stallBay(i).x;
-    ctx.fillStyle = "#46506b";
-    // The leaf is painted AFTER the counter (so it hides the occupant); it
-    // spans the full opening (y 106–246), which ends well above the counter top.
-    rr(ctx, bx + 1, 106, 50, 140, 3); ctx.fill();
-    ctx.strokeStyle = "rgba(0,0,0,0.4)";
-    ctx.lineWidth = 1.5;
-    rr(ctx, bx + 1, 106, 50, 140, 3); ctx.stroke();
-    ctx.lineWidth = 1;
+    const x0 = stallSx(stallEdge(i, 1)), x1 = stallSx(stallEdge(i, 51));
+    const y0 = stallSy(106), y1 = stallSy(246);
+    const w = x1 - x0, h = y1 - y0, k = STALL_K;
+    const leaf = ctx.createLinearGradient(x0, 0, x1, 0);
+    leaf.addColorStop(0, "#505b78"); leaf.addColorStop(1, "#3f4862");
+    ctx.fillStyle = leaf;
+    rr(ctx, x0, y0, w, h, 4); ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,0.45)";
+    ctx.lineWidth = 2;
+    rr(ctx, x0, y0, w, h, 4); ctx.stroke();
+    // two recessed panels
+    const px = x0 + 8 * k, pw = w - 16 * k;
+    for (const [py, ph] of [[y0 + 18 * k, 50 * k], [y0 + 76 * k, 54 * k]]) {
+      ctx.fillStyle = "rgba(0,0,0,0.14)";
+      rr(ctx, px, py, pw, ph, 3); ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.08)";
+      ctx.lineWidth = 1;
+      rr(ctx, px + 0.5, py + 0.5, pw - 1, ph - 1, 3); ctx.stroke();
+    }
+    // hinges on the right, a lever handle on the left
+    ctx.fillStyle = "#8d96a6";
+    ctx.fillRect(x1 - 4, y0 + 14 * k, 3, 10 * k);
+    ctx.fillRect(x1 - 4, y1 - 24 * k, 3, 10 * k);
     ctx.fillStyle = "#cfd6e4";
-    ctx.beginPath(); ctx.arc(bx + 9, 178, 2.5, 0, 7); ctx.fill(); // handle
-    ctx.fillStyle = "#ff6b6b";                                    // "in use" lamp
-    ctx.beginPath(); ctx.arc(bx + 26, 118, 3, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(x0 + 7 * k, y0 + 72 * k, 3.2, 0, 7); ctx.fill();
+    rr(ctx, x0 + 7 * k - 1.5, y0 + 72 * k - 1.5, 12, 3, 1.5); ctx.fill();
+    // "in use" lamp
+    ctx.fillStyle = "rgba(255,107,107,0.25)";
+    ctx.beginPath(); ctx.arc((x0 + x1) / 2, y0 + 9 * k, 7, 0, 7); ctx.fill();
+    ctx.fillStyle = "#ff6b6b";
+    ctx.beginPath(); ctx.arc((x0 + x1) / 2, y0 + 9 * k, 4, 0, 7); ctx.fill();
   }
   // guests passing IN FRONT of a closed door draw above the leaf — the stall's
   // own occupant is excluded, so they stay hidden behind their door
   for (const b of buses) for (const p of b.pax)
-    if (isIndoorPax(p) && p.state !== "scrubC" && paxInFrontOfClosedDoor(p)) drawPax(p, 5);
+    if (isIndoorPax(p) && p.state !== "scrubC" && !atCounter(p) && paxInFrontOfClosedDoor(p)) drawPax(p, wcPaxK(p.y, p.x));
+  for (const b of buses) for (const p of b.pax) if (atCounter(p)) drawPax(p, wcPaxK(p.y, p.x));
   // the counter (first-person view) is painted over the guests, so whoever
   // stands at the pay spot is seen behind its ledge, not on top of it
   drawCounterIn();
@@ -4416,18 +4508,19 @@ function drawWCInterior() {
   drawScrub();
   // wavy stink lines rise only from the stalls that are actually dirty
   const stinkT = performance.now() / 1000;
+  stallSpace();
   ctx.lineCap = "round";
   for (let i = 0; i < WC_STALLS; i++) {
     const sc = S.stallClean[i];
     if (sc >= 45) continue;
     const k = (45 - sc) / 45;
-    const bx = stallBay(i).x;
+    const bx = stallLx(i);
     const n = 1 + Math.round(k * 2);
     ctx.lineWidth = 2;
     for (let w = 0; w < n; w++) {
       const ph = ((stinkT * 0.45 + w / n + i * 0.37) % 1);
       const x0 = bx + 14 + w * 12;
-      const y0 = 90 - ph * 30;
+      const y0 = 190 - ph * 30;
       ctx.strokeStyle = `rgba(150, 190, 90, ${k * 0.8 * Math.sin(ph * Math.PI)})`;
       ctx.beginPath();
       for (let s2 = 0; s2 <= 10; s2++) {
@@ -4438,13 +4531,14 @@ function drawWCInterior() {
       ctx.stroke();
     }
   }
+  ctx.restore();
   ctx.lineCap = "butt";
   ctx.lineWidth = 1;
   // the cleaning hose in hand: drapes from its faucet to the pointer; holding
   // the mouse sprays the stall under it (hoseApply throttles the actual work)
   if (hoseInHand) {
-    const st = COUNTER_IN.hose;
-    drawHoseLine(st.x + st.w / 2, st.y + 49, pointer.x, pointer.y); // from the faucet spout
+    const st = hoseInHand;
+    drawHoseLine(st.x + st.w / 2, st.y + 49, pointer.x, pointer.y, st.right ? 60 : -60); // from the faucet spout
     if (pointerDown) {
       const si = stallAt(pointer.x, pointer.y);
       if (si >= 0) {
@@ -4471,7 +4565,7 @@ function drawWCInterior() {
     ctx.fillStyle = `rgba(160, 235, 255, ${1 - age / 1200})`;
     ctx.font = "14px system-ui, sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText("✨", stallBay(i).x + 26, 91);
+    ctx.fillText("✨", stallCx(i), stallSy(100));
     ctx.textAlign = "left";
   }
   // the waiting-for-a-toilet badge — drawn last so guests and stall doors never cover it
@@ -4811,6 +4905,8 @@ function drawCar(c) {
 const paxAnim = new WeakMap();
 // states where the guest is dealing with you face to face, whatever way they last walked
 const PAX_FACE_STATES = new Set(["serveR", "payC", "doneC", "payC2", "dripC"]);
+// queued guests turn to face you once they've stopped walking to their slot
+const PAX_LINE_STATES = new Set(["queueC", "queueC2", "waitT", "waitR"]);
 function paxGait(p) {
   const now = performance.now();
   let a = paxAnim.get(p);
@@ -4838,7 +4934,7 @@ function drawPax(p, k = 1) {
   const x = p.x, y = p.y;
   const s = k * ((PAX_TYPES[p.type] || PAX_TYPES.m).scale); // body size — kids are small
   const g = paxGait(p);
-  const faceOn = PAX_FACE_STATES.has(p.state);
+  const faceOn = PAX_FACE_STATES.has(p.state) || (PAX_LINE_STATES.has(p.state) && g.hold <= 0);
   // side-on travel draws a profile, mirrored so it always faces +x locally
   const side = g.side && !faceOn;
   const amp = g.amp, dir = side ? 1 : g.dir, sw = Math.sin(g.ph);
@@ -4898,7 +4994,7 @@ function drawPax(p, k = 1) {
   const shY = y - 10.6 * s + bob;
   let reach = null;
   if (p.state === "serveR") reach = { x: x + 5.2 * s, y: y - 8 * s };
-  else if (p.state === "payC" || p.state === "doneC" || p.state === "payC2") reach = { x: x + 4.6 * s, y: y - 7.2 * s };
+  else if (holdsBill(p)) reach = { x: x + 4.6 * s, y: y - 7.2 * s };
   else if (p.state === "dripC") reach = { x: x + 3.8 * s, y: y - 15 * s };
   const armW = (isW ? 1.6 : 1.9) * s;
   const arm = (i, back) => {
@@ -5061,8 +5157,10 @@ function drawPax(p, k = 1) {
     ctx.fillStyle = "#ffd36b";
     ctx.beginPath(); ctx.arc(x + 6 * s, y - 8 * s, 2.5 * s, 0, 7); ctx.fill();
   }
-  if (p.state === "payC" || p.state === "doneC" || p.state === "payC2") {
-    drawHeldBill(x + 5 * s, y - 6.5 * s, 0.3 * s, BILL_COLORS[p.bill] || "#c9c2a8", p.bill); // handing the bill
+  if (holdsBill(p)) {
+    // held higher over the ultra-wide view's taller ledge so it stays visible
+    const billY = S.view === "wc" && deskK > 1 ? y - 9.5 * s : y - 6.5 * s;
+    drawHeldBill(x + 5 * s, billY, 0.3 * s, BILL_COLORS[p.bill] || "#c9c2a8", p.bill); // handing the bill
   }
   if (p.state === "dripC") {
     const f = clamp(1 - p.dripT / 0.8, 0, 1);
@@ -5163,14 +5261,14 @@ function showIntro(first) {
     <p>⏱ Otobüsler yaklaşık <strong>30 dakika</strong> mola verir — terminalde en fazla bir saat kalabilirler. Kalkış vakti gelince <strong>WC ödeme sırasındaki</strong> misafirlere ödemeyi bitirmeleri için <strong>5–10 dakika</strong> tanınır; sıra hâlâ duruyorsa <strong>ödemeden sırayı terk edip</strong> otobüse binerler ve otobüs kalkar.</p>
     <p>🕐 Zaman <strong>sıkıştırılmıştır</strong> — 1× hızda bir oyun saati gerçekte 6 dakika sürer, yani bir oyun günü yaklaşık 2,4 gerçek saattir. Otobüsler, yemekler ve sıralar oyun içi temposunu korur.</p>
     <p>🚻 Tuvalet <strong>₺20</strong>; ücret ziyaretten <em>sonra</em> gişede ödenir — ve gişe <strong>sensin</strong>. <strong>İçeri girmek için WC binasına ${act}</strong>: içinde biri varken <strong>her kabinin kapısı kapanır</strong> (bir ziyaret oyun içinde 1–10 dakika sürer) ve <strong>her kabinin kendi temizliği vardır</strong> — kirli kabin ziyaretin puanını düşürür, misafirler hep <strong>en temiz boş kabini</strong> seçer (çok pis olanı kimse kullanmaz).</p>
-    <p>💳 İçeride işini bitiren her misafir gişedeki sıraya girer ve sana bir banknot uzatır. Doğru para üstünü vermek için <strong>açık kasa çekmecesindeki gözlere ${act}</strong> (₺10 / ₺20 / ₺50) — ve <strong>misafirler banknotları sayar</strong>: aynı tutarı daha az banknotla vermek daha iyi puan alır (₺30'u 10+20 olarak vermek şıktır, 10+10+10 bir avuç kâğıttır; ₺80 için 10+20+50, 10×8'den iyidir). <strong>Tam ₺20</strong> veren misafirlerin sana ihtiyacı yok: <strong>kendi ikinci sıralarında</strong> durur, kendileri öder ve ÇIKIŞ kapısına yönelirler — para üstü yok, kolonya yok, tıklama yok. Eksik ya da hiç verilmeyen para üstü diğer misafirleri mutsuz eder.</p>
-    <p>💨 Gişede 500 ml'lik bir şişe <strong>limon kolonyası</strong> durur. Öndeki misafir öderken ellerine biraz dökmek için <strong>şişeye ${act}</strong>. Para üstü eline geçer geçmez ÇIKIŞ kapısına yönelir (tam ₺20 sırası kendi kendine öder — kolonya ana sıranın öndeki misafiri içindir), o yüzden erken dök. Şişe gece yarısı dolar.</p>
+    <p>💳 İçeride işini bitiren her misafir gişedeki sıraya girer ve sana bir banknot uzatır. Doğru para üstünü vermek için <strong>açık kasa çekmecesindeki gözlere ${act}</strong> (₺10 / ₺20 / ₺50) — ve <strong>misafirler banknotları sayar</strong>: aynı tutarı daha az banknotla vermek daha iyi puan alır (₺30'u 10+20 olarak vermek şıktır, 10+10+10 bir avuç kâğıttır; ₺80 için 10+20+50, 10×8'den iyidir). <strong>Tam ₺20</strong> veren misafirlerin sana ihtiyacı yok: <strong>kendi ikinci sıralarında</strong> durur, kendileri öder ve yan geçitten çıkarlar — para üstü yok, kolonya yok, tıklama yok. Eksik ya da hiç verilmeyen para üstü diğer misafirleri mutsuz eder.</p>
+    <p>💨 Gişede 500 ml'lik bir şişe <strong>limon kolonyası</strong> durur. Öndeki misafir öderken ellerine biraz dökmek için <strong>şişeye ${act}</strong>. Para üstü eline geçer geçmez yan geçitten çıkar (tam ₺20 sırası kendi kendine öder — kolonya ana sıranın öndeki misafiri içindir), o yüzden erken dök. Şişe gece yarısı dolar.</p>
     <p>🍵 <strong>Çayın</strong> gişede durur ve yaklaşık 30 oyun dakikasında biter. Taze bir bardak istemek için gişenin sağ ucundaki <strong>interkoma ${act}</strong> — 2 oyun dakikası içinde gelir.</p>
-    <p>🚪 Dışarı çıkmak için <strong>ÇIKIŞ kapısına</strong> ${act}${touch ? "" : " — ya da <strong>E</strong> tuşuna bas"}. Üst çubuktaki 🚻 / 🚪 düğmesi de aynı işi yapar.</p>
+    <p>🚪 Dışarı çıkmak için üst çubuktaki <strong>🚪</strong> düğmesine ${act}${touch ? "" : " — ya da <strong>E</strong> tuşuna bas"}. Misafirler gişenin iki yanındaki geçitlerden girip çıkar.</p>
     <p>🧻 <strong>Her kabin her kullanımda biraz daha kirlenir</strong> (her kabinin üstündeki çubuğu izle). Eski anında temizlik artık yok: kabinlerin yanındaki <strong>hortumu al</strong> ve <strong>${touch ? "parmağını basılı tutup" : "fareyi basılı tutup"} bir kabinin üzerinde sürükle</strong>, su sıkıp temizle — ama <strong>kapısı kapalı</strong> (içinde biri olan) bir kabine su sıkılamaz.</p>
     <p>🚿 Otobüsler tozlu gelir. Önüne geçmek için <strong>park etmiş bir otobüse ${act}</strong>: <strong>uzun saplı fırçayı al ve ön camın üzerinde sürükle</strong>, köpükle; sonra <strong>temiz su hortumunu al ve köpüğü durula</strong>. <strong>Bırakmak</strong> için alete yeniden ${act}. Pırıl pırıl bir ön cam şoförün minnetini kazanır.</p>
     <p>💢 İlgilenilmeyen misafirler ödemeden <strong>öfkeyle çıkıp gider</strong>, ★ memnun misafirler ise <strong>itibarını</strong> yükseltir → otobüsler çok daha sık uğrar ve daha kalabalık gelir. Yoğun ve itibarı yüksek bir terminalde aynı anda birkaç otobüs olur — boşalan bir park yeri 30 dakika içinde dolar, asla boş kalmaz.</p>
-    <p>🚨 Her misafir <strong>₺20</strong>'yi ödemez. <strong>Ödeme sırasını terk eden</strong> misafirler (sabırları tükendiği ya da otobüsleri kalktığı için) sadece bir <strong>bildirim</strong> olarak görünür — onlara tıklanamaz. Ama bazı misafirler (yaklaşık 100'de 3) <strong>kabinde işini bitirip ödemeden ÇIKIŞ'a koşar</strong>; bunlar <strong>kırmızı rozetle</strong> işaretlenir. Yakalamak için <strong>ÇIKIŞ kapısına varmadan onlara ${act}</strong>: bir paspas kapıp 3 saniye boyunca <strong>bütün tuvaletleri ovarlar</strong> — ve her kabin <strong>pırıl pırıl</strong> olur. Kaçak kapıdan çıktıysa gitmiştir.</p>
+    <p>🚨 Her misafir <strong>₺20</strong>'yi ödemez. <strong>Ödeme sırasını terk eden</strong> misafirler (sabırları tükendiği ya da otobüsleri kalktığı için) sadece bir <strong>bildirim</strong> olarak görünür — onlara tıklanamaz. Ama bazı misafirler (yaklaşık 100'de 3) <strong>kabinde işini bitirip ödemeden yan geçide koşar</strong>; bunlar <strong>kırmızı rozetle</strong> işaretlenir. Yakalamak için <strong>binadan çıkmadan onlara ${act}</strong>: bir paspas kapıp 3 saniye boyunca <strong>bütün tuvaletleri ovarlar</strong> — ve her kabin <strong>pırıl pırıl</strong> olur. Kaçak binadan çıktıysa gitmiştir.</p>
     <p><b style="color:var(--good)">Kâr yok, geliştirme yok</b> — para sadece ritüelin bir parçası. ${touch ? "⏸ düğmesi oyunu duraklatır · 1× düğmesi hız kademesini değiştirir (1×, 10×, 100×, 200×)." : "Boşluk tuşu duraklatır · 1–4 tuşları hız kademesini seçer (1×, 10×, 100×, 200×)."}</p>`;
   $("modalBody").scrollTop = 0;
   $("modalBtn").textContent = first ? "Dükkânı aç!" : "İşe dön";
@@ -5279,10 +5377,13 @@ function init() {
         && x >= z.cx - 36 - 2 && x <= z.cx + 36 + 2 && y >= LOT_NOSE - 2 && y <= z.cy + z.len / 2 + 2);
     } else if (S.view === "wash") {
       hot = hit(WASH.brush) || hit(WASH.hose) || hit(WASH.exit);
-      canvas.style.cursor = hot ? "pointer" : (hit(WASH.wind) ? "crosshair" : "default");
+      const bp = washToBus(x, y), Wn = WASH.wind;
+      const onGlass = bp.x >= Wn.x && bp.x <= Wn.x + Wn.w && bp.y >= Wn.y && bp.y <= Wn.y + Wn.h;
+      canvas.style.cursor = hot ? "pointer" : (onGlass ? "crosshair" : "default");
       return;
     } else {
-      hot = COUNTER_IN.chips.some(c => hit(chipHit(c))) || hit(COUNTER_IN.bottle) || hit(COUNTER_IN.intercom) || hit(COUNTER_IN.exit) || hit(COUNTER_IN.hose)
+      hot = COUNTER_IN.chips.some(c => hit(deskRect(chipHit(c), "drawer"))) || hit(deskRect(COUNTER_IN.bottle, "bottle"))
+        || hit(deskRect(COUNTER_IN.intercom, "intercom")) || hit(COUNTER_IN.hose) || hit(COUNTER_IN.hoseR)
         || !!runawayAt(x, y, 2);
     }
     canvas.style.cursor = hot ? "pointer" : (S.view === "wc" && hoseInHand && stallAt(x, y) >= 0 ? "crosshair" : "default");
@@ -5337,15 +5438,15 @@ function init() {
       if (hit(WASH.hose)) { w.tool = w.tool === "hose" ? "none" : "hose"; return; }
       return;
     }
-    // inside the counter room: the hose station, till chips, cologne bottle, tea intercom, EXIT door
-    if (hit(COUNTER_IN.hose)) { hoseInHand = !hoseInHand; return; } // tap picks up / puts down the hose
-    const chip = COUNTER_IN.chips.find(c => hit(chipHit(c)));
+    // inside the counter room: the hose station, till chips, cologne bottle, tea intercom
+    for (const st of [COUNTER_IN.hose, COUNTER_IN.hoseR]) // tap picks up / puts down that station's hose
+      if (hit(st)) { hoseInHand = hoseInHand === st ? null : st; return; }
+    const chip = COUNTER_IN.chips.find(c => hit(deskRect(chipHit(c), "drawer")));
     if (chip) { giveChange(chip.d); save(); return; }
-    if (hit(COUNTER_IN.bottle)) { offerCologne(); save(); return; }
-    if (hit(COUNTER_IN.intercom)) { orderTea(); save(); return; }
+    if (hit(deskRect(COUNTER_IN.bottle, "bottle"))) { offerCologne(); save(); return; }
+    if (hit(deskRect(COUNTER_IN.intercom, "intercom"))) { orderTea(); save(); return; }
     const p = runawayAt(x, y, isMouse ? 2 : 8);
-    if (p && catchRunaway(p)) return; // a runaway bound for the EXIT — catch them
-    if (hit(COUNTER_IN.exit)) { setView("out"); }
+    if (p && catchRunaway(p)) return; // a runaway bound for the side passage — catch them
   }
   // test/automation hook (used by the node harness; safe to ignore)
   window.__Layover = {
@@ -5357,11 +5458,11 @@ function init() {
     setView, view: () => S.view,
     openWash, washApply,
     wash: () => { const b = bus(); return b ? b.wash : null; },
-    hose: () => ({ inHand: hoseInHand, apply: hoseApply, stallClean: S.stallClean, bay: stallBay, at: stallAt }),
+    hose: () => ({ inHand: !!hoseInHand, apply: hoseApply, stallClean: S.stallClean, bay: stallBay, at: stallAt }),
     scrub: () => scrub,
     catchRunaway, fleeCounter, stormOut, giveUpLine, runawayAt,
     evaders: () => buses.flatMap(b => b.pax).filter(p => p.unpaid),   // every guest who used the WC and never paid
-    runaways: () => buses.flatMap(b => b.pax).filter(p => p.runaway), // running for the EXIT right now: the catchable ones
+    runaways: () => buses.flatMap(b => b.pax).filter(p => p.runaway), // running for the exit right now: the catchable ones
   };
   window.addEventListener("keydown", e => {
     if (e.code === "Space") { e.preventDefault(); paused = !paused; }
