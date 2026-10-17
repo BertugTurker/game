@@ -7,6 +7,8 @@
 <title>Mola Yeri — Otobüs Mola Tesisi Simülatörü</title>
 <meta name="description" content="Her tur otobüsünün güvendiği mola yerini işlet: aç misafirleri doyur, ₺20'lik tuvalet gişesine bak — kolonya, para üstü, hortumla kabin temizliği. Gişeye girip parayı almak için WC binasına tıkla. Kâr yok, geliştirme yok.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚌</text></svg>">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -51,5 +53,8 @@
 </div>
 
 <script src="game.js"></script>
+<script>
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+</script>
 </body>
 </html>
