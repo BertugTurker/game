@@ -39,6 +39,7 @@ html, body {
 
 /* ---------- Top bar ---------- */
 #topbar {
+  container: topbar / inline-size; /* lets descendant rules react to the bar's own width */
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -113,8 +114,7 @@ html, body {
   border-radius: 6px;
   transition: width 0.4s;
 }
-#repNum { color: var(--dim); font-size: 12px; }
-.stat.rep { width: 170px; } /* fixed — the bar + number must not resize the top bar as rep changes */
+#repNum { color: var(--dim); font-size: 12px; display: inline-block; width: 18px; }
 
 button {
   font: inherit;
@@ -130,7 +130,7 @@ button:hover:not(:disabled) { background: #2a3552; }
 button:active:not(:disabled) { transform: translateY(1px); }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
 
-button.icon { width: 30px; height: 30px; padding: 0 6px; font-size: 14px; }
+button.icon { width: 30px; height: 30px; padding: 0 2px; font-size: 14px; }
 #btnSpeed { width: 60px; } /* the speed label (100×/200×) needs the extra room */
 
 /* ---------- Stage / canvas ---------- */
@@ -235,6 +235,7 @@ button.icon { width: 30px; height: 30px; padding: 0 6px; font-size: 14px; }
   padding: 26px 30px;
   max-width: 520px;
   width: 100%;
+  max-height: 100%; /* fits inside #modal's padding; tall content scrolls in #modalBody */
   box-shadow: 0 20px 60px rgba(0,0,0,0.5);
   display: flex;
   flex-direction: column;
@@ -275,12 +276,16 @@ button.icon { width: 30px; height: 30px; padding: 0 6px; font-size: 14px; }
   .stat { padding: 0 8px; font-size: 12px; border-radius: 8px; }
   .stat .bar { width: 60px; height: 6px; }
   #repNum { font-size: 11px; }
-  button.icon { padding: 0 6px; font-size: 13px; }
+  button.icon { padding: 0 2px; font-size: 13px; }
 }
 /* …and a little bigger again where the input is a fat finger */
 @media (max-width: 900px) and (pointer: coarse) {
-  button.icon { padding: 0 6px; font-size: 14px; }
+  button.icon { padding: 0 2px; font-size: 14px; }
   .stat { padding: 0 9px; }
+}
+/* The rep pill's progress bar is the first thing dropped when the topbar itself gets tight */
+@container topbar (max-width: 685px) {
+  .stat.rep .bar { display: none; }
 }
 @media (max-width: 600px) {
   #modal { padding: 12px; }
