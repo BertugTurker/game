@@ -18,7 +18,7 @@ html, body {
   color: var(--ink);
   font-family: ui-rounded, "SF Pro Rounded", "Segoe UI", system-ui, -apple-system, sans-serif;
   min-height: 100vh;
-  touch-action: manipulation;  /* no double-tap zoom; pinch zoom stays (a11y) */
+  touch-action: none;          /* prevent double-tap zoom and gestures */
   overscroll-behavior: none;   /* no pull-to-refresh / rubber-banding over the game */
 }
 
@@ -28,30 +28,13 @@ html, body {
   padding: 14px;
   user-select: none;
   -webkit-user-select: none;
-  /* Top bar takes what it needs; the stage gets exactly the rest of the
-     viewport (dvh tracks the phone's URL bar), so the scene can be as large
-     as the screen allows. */
-  display: grid;
-  grid-template-rows: auto 1fr;
+  display: flex;
+  flex-direction: column;
   height: 100vh;
   height: 100dvh;
 }
 
-/* ---------- Top bar ---------- */
-#topbar {
-  container: topbar / inline-size; /* lets descendant rules react to the bar's own width */
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 10px 14px;
-  background: var(--panel);
-  border: 1px solid #2a3450;
-  border-radius: 14px 14px 0 0;
-  border-bottom: none;
-}
-
+/* ---------- Brand inside menu ---------- */
 .brand {
   font-weight: 800;
   letter-spacing: 1px;
@@ -81,7 +64,6 @@ html, body {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
 }
 
 .stat {
@@ -98,7 +80,7 @@ html, body {
   white-space: nowrap;
 }
 
-.stat#statServed { color: var(--accent); font-weight: 700; }
+.stat#statServed { color: var(--accent); font-weight: 700; width: auto; }
 
 .stat .bar {
   width: 90px;
@@ -124,31 +106,123 @@ button {
   border-radius: 10px;
   padding: 7px 12px;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
   transition: transform 0.06s, background 0.15s, border-color 0.15s;
 }
 button:hover:not(:disabled) { background: #2a3552; }
-button:active:not(:disabled) { transform: translateY(1px); }
+button:active:not(:disabled) {
+  transform: translateY(1px);
+  background: #323f60;
+  border-color: #4a5d8c;
+}
 button:disabled { opacity: 0.45; cursor: not-allowed; }
 
-button.icon { width: 30px; height: 30px; padding: 0 2px; font-size: 14px; }
-#btnSpeed { width: 60px; } /* the speed label (100×/200×) needs the extra room */
+button.icon { width: 34px; height: 34px; padding: 0 2px; font-size: 15px; }
 
 /* ---------- Stage / canvas ---------- */
 #stage {
   position: relative;
+  flex: 1;
   border: 1px solid #2a3450;
-  border-top: none;
-  border-radius: 0 0 14px 14px;
+  border-radius: 14px;
   overflow: hidden;
   background: #000;
   line-height: 0;
-  min-height: 0;            /* let the grid row shrink instead of forcing a page scroll */
+  min-height: 0;
   display: grid;
   place-items: center;      /* center the 16:9 scene in whatever space is left */
-  /* Query container for the canvas below. Its size comes from the grid row
-     (never from the canvas), so the canvas can reference it without any
-     sizing feedback loop. */
   container-type: size;
+}
+
+/* ---------- Burger menu (highest z-index in project) ---------- */
+#btnBurger {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1000;
+  width: 40px;
+  height: 40px;
+  font-size: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(26, 32, 48, 0.88);
+  border: 1px solid #33406a;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+  backdrop-filter: blur(4px);
+}
+#btnBurger:hover {
+  background: #2a3552;
+}
+
+#burgerBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(6, 9, 16, 0.65);
+  backdrop-filter: blur(3px);
+  z-index: 1001;
+}
+#burgerBackdrop.hidden { display: none; }
+
+#burgerMenu {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(340px, 90vw);
+  background: var(--panel);
+  border-left: 1px solid #33406a;
+  box-shadow: -8px 0 30px rgba(0, 0, 0, 0.7);
+  z-index: 1002;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 18px;
+  gap: 16px;
+  overflow-y: auto;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+#burgerMenu.hidden {
+  display: none;
+}
+
+.burgerHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #2a3450;
+}
+.burgerBody {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.burgerSectionTitle {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--dim);
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+}
+.burgerSection .hud {
+  display: flex;
+  gap: 8px;
+}
+.burgerSection .stat {
+  justify-content: space-between;
+  width: 100%;
+}
+.burgerControls {
+  display: flex;
+  gap: 8px;
+}
+.burgerControls button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  padding: 10px 14px;
+  font-weight: 600;
 }
 /* Display size as a pure function of the *stage box*, never of the backing
    buffer (game.js sizes the buffer from the display size for sharpness — with
@@ -163,8 +237,7 @@ button.icon { width: 30px; height: 30px; padding: 0 2px; font-size: 14px; }
   width: auto;
   height: auto;
   max-width: 100%;
-  max-height: calc(100vh - 112px);
-  max-height: calc(100dvh - 112px);
+  max-height: 100%;
   min-width: 0;                   /* buffer pixels must not force the track wider/taller */
   min-height: 0;
   margin: 0 auto;
@@ -246,7 +319,43 @@ button.icon { width: 30px; height: 30px; padding: 0 2px; font-size: 14px; }
   max-height: calc(100% - 40px);
 }
 #modalBox h1 { margin: 0 0 12px; font-size: 22px; flex-shrink: 0; }
-#modalBody { color: var(--dim); font-size: 14px; line-height: 1.6; flex: 1; overflow-y: auto; overflow-x: hidden; }
+#modalBody {
+  color: var(--dim);
+  font-size: 14px;
+  line-height: 1.6;
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 6px 10px 10px 2px;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  /* Scroll shadows: brighter glowing edge indicators appear at top/bottom when scrollable */
+  background:
+    linear-gradient(var(--panel) 25%, rgba(26, 32, 48, 0)),
+    linear-gradient(rgba(26, 32, 48, 0), var(--panel) 75%) 0 100%,
+    radial-gradient(farthest-side at 50% 0, rgba(139, 180, 255, 0.45), rgba(0, 0, 0, 0)),
+    radial-gradient(farthest-side at 50% 100%, rgba(139, 180, 255, 0.5), rgba(0, 0, 0, 0)) 0 100%;
+  background-repeat: no-repeat;
+  background-size: 100% 20px, 100% 20px, 100% 10px, 100% 10px;
+  background-attachment: local, local, scroll, scroll;
+  /* Modern CSS scrollbar styling */
+  scrollbar-width: thin;
+  scrollbar-color: #3d4d75 rgba(13, 17, 32, 0.4);
+}
+#modalBody::-webkit-scrollbar {
+  width: 6px;
+}
+#modalBody::-webkit-scrollbar-track {
+  background: rgba(13, 17, 32, 0.4);
+  border-radius: 999px;
+}
+#modalBody::-webkit-scrollbar-thumb {
+  background: #3d4d75;
+  border-radius: 999px;
+}
+#modalBody::-webkit-scrollbar-thumb:hover {
+  background: #506599;
+}
 #modalBody strong { color: var(--ink); }
 #modalBody .big { font-size: 17px; color: var(--ink); }
 #modalBody table { width: 100%; margin: 10px 0; border-collapse: collapse; }
@@ -268,24 +377,11 @@ button.icon { width: 30px; height: 30px; padding: 0 2px; font-size: 14px; }
 
 /* ---------- Small screens (phones, narrow windows) ---------- */
 @media (max-width: 900px) {
-  #app { padding: 14px; }
-  #topbar { padding: 6px 8px; gap: 6px; }
-  .brand { font-size: 14px; letter-spacing: 0.5px; }
-  .brand .sub { display: none; } /* the version badge stays — always visible */
-  .hud { gap: 5px; }
+  #app { padding: 8px; }
+  .brand { font-size: 15px; letter-spacing: 0.5px; }
   .stat { padding: 0 8px; font-size: 12px; border-radius: 8px; }
-  .stat .bar { width: 60px; height: 6px; }
+  .stat .bar { width: 100%; height: 6px; }
   #repNum { font-size: 11px; }
-  button.icon { padding: 0 2px; font-size: 13px; }
-}
-/* …and a little bigger again where the input is a fat finger */
-@media (max-width: 900px) and (pointer: coarse) {
-  button.icon { padding: 0 2px; font-size: 14px; }
-  .stat { padding: 0 9px; }
-}
-/* The rep pill's progress bar is the first thing dropped when the topbar itself gets tight */
-@container topbar (max-width: 685px) {
-  .stat.rep .bar { display: none; }
 }
 @media (max-width: 600px) {
   #modal { padding: 12px; }

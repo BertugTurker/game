@@ -80,6 +80,7 @@ const COUNTER_IN = {
   intercom: { x: 790, y: 394, w: 44, h: 62 }, // tea intercom at the right end of the counter (click to order a fresh tea)
   hose:   { x: 18, y: 238, w: 60, h: 96 },   // faucet + coiled hose left of the stall row (x/y track the view — see resize)
   hoseR:  { x: 882, y: 238, w: 60, h: 96, right: true }, // its mirror right of the stall row
+  exit:   { x: 18, y: 478, w: 96, h: 44 },  // exit back to outside, pinned to bottom-left (see resize)
 };
 // The open passages either side of the counter, 10% of the visible width each.
 const SIDE_GAP = 0.1;
@@ -2727,6 +2728,8 @@ function resize() {
   const rowR = stallOx() + STALL_ROW_W * stallKx();
   COUNTER_IN.hoseR.x = rowR + (Wdyn - offX - rowR - COUNTER_IN.hoseR.w) / 2;
   COUNTER_IN.hoseR.y = COUNTER_IN.hose.y;
+  COUNTER_IN.exit.x = -offX + 18;
+  COUNTER_IN.exit.y = H + offY - COUNTER_IN.exit.h - 18;
   deskK = a > ULTRA_ASPECT ? DESK_ULTRA_K : 1;
   if (Math.abs(Wdyn - lastWdyn) + Math.abs(Hdyn - lastHdyn) > 2) {
     seedStars();
@@ -3871,36 +3874,57 @@ function drawCounterInPrompts() {
   ctx.textAlign = "left";
 }
 
-/* Red badge over the right side passage — how many guests are standing
- * OUTSIDE the WC building, waiting for a toilet (the T line). */
-function drawExitQueueBadge() {
-  const n = facilities.T.queue.length;
-  if (n === 0) return;
+/* WC exit door button at bottom-left of the counter room and its queue badge */
+function drawWcExitDoor() {
+  const Ex = COUNTER_IN.exit;
+  Ex.x = -offX + 18;
+  Ex.y = H + offY - Ex.h - 18;
+  const nf = nightFactor(S.time);
   const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 200);
-  const cx = sideGapX(true), cy = 440;
-  const label = String(n);           // exact count — no "9+" cap
-  ctx.font = "bold 11px system-ui, sans-serif";
+
+  const eg = ctx.createLinearGradient(0, Ex.y, 0, Ex.y + Ex.h);
+  eg.addColorStop(0, mix("#26394b", "#152030", nf));
+  eg.addColorStop(1, mix("#1a2836", "#0e1621", nf));
+  ctx.fillStyle = eg;
+  rr(ctx, Ex.x, Ex.y, Ex.w, Ex.h, 10); ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = `rgba(120, 225, 255, ${0.35 + 0.3 * pulse})`;
+  rr(ctx, Ex.x, Ex.y, Ex.w, Ex.h, 10); ctx.stroke();
+  ctx.fillStyle = "rgba(226,235,248,0.9)";
+  ctx.font = "bold 12px system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  const H = 18;
-  const Pw = Math.max(20, ctx.measureText(label).width + 10);
-  // pulsing halo — the nudge itself
-  const pad = 3 + 7 * pulse;
-  ctx.fillStyle = `rgba(255, 80, 80, ${0.28 * pulse})`;
-  rr(ctx, cx - (Pw + 2 * pad) / 2, cy - (H + 2 * pad) / 2, Pw + 2 * pad, H + 2 * pad, (H + 2 * pad) / 2);
-  ctx.fill();
-  // red badge with the waiting count
-  ctx.fillStyle = "#e33";
-  rr(ctx, cx - Pw / 2, cy - H / 2, Pw, H, H / 2); ctx.fill();
-  ctx.lineWidth = 1.5;
-  ctx.strokeStyle = "rgba(0, 0, 0, 0.35)";
-  rr(ctx, cx - Pw / 2, cy - H / 2, Pw, H, H / 2); ctx.stroke();
-  ctx.lineWidth = 1;
-  ctx.fillStyle = "#fff";
-  ctx.fillText(label, cx, cy + 0.5);
-  // restore text state for the rest of the scene
+  ctx.fillText("🚪 ÇIKIŞ (E)", Ex.x + Ex.w / 2, Ex.y + Ex.h / 2 + 1);
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
+
+  // Red badge on top right of the exit button: how many guests are waiting outside (the T line)
+  const n = facilities.T.queue.length;
+  if (n > 0) {
+    const cx = Ex.x + Ex.w, cy = Ex.y;
+    const label = String(n); // exact count
+    ctx.font = "bold 11px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const bH = 18;
+    const Pw = Math.max(20, ctx.measureText(label).width + 10);
+    // pulsing halo
+    const pad = 3 + 7 * pulse;
+    ctx.fillStyle = `rgba(255, 80, 80, ${0.28 * pulse})`;
+    rr(ctx, cx - (Pw + 2 * pad) / 2, cy - (bH + 2 * pad) / 2, Pw + 2 * pad, bH + 2 * pad, (bH + 2 * pad) / 2);
+    ctx.fill();
+    // red badge
+    ctx.fillStyle = "#e33";
+    rr(ctx, cx - Pw / 2, cy - bH / 2, Pw, bH, bH / 2); ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.35)";
+    rr(ctx, cx - Pw / 2, cy - bH / 2, Pw, bH, bH / 2); ctx.stroke();
+    ctx.lineWidth = 1;
+    ctx.fillStyle = "#fff";
+    ctx.fillText(label, cx, cy + 0.5);
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+  }
 }
 
 /* --------------------- shared garden-hose drawing ------------------- */
@@ -4568,8 +4592,8 @@ function drawWCInterior() {
     ctx.fillText("✨", stallCx(i), stallSy(100));
     ctx.textAlign = "left";
   }
-  // the waiting-for-a-toilet badge — drawn last so guests and stall doors never cover it
-  drawExitQueueBadge();
+  // exit door button + waiting-for-toilet queue badge — drawn last so nothing covers it
+  drawWcExitDoor();
 }
 
 // Outdoor nudge for the WC building: red badge + pulsing hint.
@@ -5211,8 +5235,6 @@ function updateHUD() {
   $("statClock").textContent = `Gün ${S.day} · ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
   $("repFill").style.width = S.rep + "%";
   $("repNum").textContent = Math.round(S.rep);
-  $("btnWc").textContent = S.view === "out" ? "🚻" : "🚪";
-  $("btnWc").title = S.view === "wc" ? "Dışarı çık" : S.view === "wash" ? "Dışarı dön" : "WC gişesine gir";
   $("btnPause").textContent = paused ? "▶" : "⏸";
   $("btnSpeed").textContent = speed + "×";
 }
@@ -5304,15 +5326,37 @@ function init() {
   const hadSave = load();
   rebuildFacilities();
 
-  $("btnWc").onclick = () => {
-    setView(S.view === "out" ? "wc" : "out"); // from the wash view the button also steps back out
+  const burgerMenu = $("burgerMenu");
+  const burgerBackdrop = $("burgerBackdrop");
+  const openBurger = () => {
+    burgerMenu.classList.remove("hidden");
+    burgerBackdrop.classList.remove("hidden");
   };
-  $("btnPause").onclick = () => { paused = !paused; };
+  const closeBurger = () => {
+    burgerMenu.classList.add("hidden");
+    burgerBackdrop.classList.add("hidden");
+  };
+  $("btnBurger").onclick = () => {
+    if (burgerMenu.classList.contains("hidden")) openBurger();
+    else closeBurger();
+  };
+  $("btnBurgerClose").onclick = closeBurger;
+  burgerBackdrop.onclick = closeBurger;
+
+  $("btnPause").onclick = () => {
+    paused = !paused;
+    updateHUD();
+  };
   $("btnSpeed").onclick = () => {
     const i = SPEEDS.indexOf(speed);
     speed = i >= 0 ? SPEEDS[(i + 1) % SPEEDS.length] : 1;
+    updateHUD();
   };
-  $("btnHelp").onclick = () => { paused = true; showIntro(false); };
+  $("btnHelp").onclick = () => {
+    closeBurger();
+    paused = true;
+    showIntro(false);
+  };
   $("btnReset").onclick = () => {
     if (confirm("Bütün oyun sıfırlansın mı? Kayıtlı oyunun silinecek.")) {
       // Stop saving FIRST: location.reload() fires beforeunload, which calls
@@ -5381,8 +5425,10 @@ function init() {
       const onGlass = bp.x >= Wn.x && bp.x <= Wn.x + Wn.w && bp.y >= Wn.y && bp.y <= Wn.y + Wn.h;
       canvas.style.cursor = hot ? "pointer" : (onGlass ? "crosshair" : "default");
       return;
+    } else if (hoseInHand) {
+      hot = hit(COUNTER_IN.hose) || hit(COUNTER_IN.hoseR) || hit(COUNTER_IN.exit);
     } else {
-      hot = COUNTER_IN.chips.some(c => hit(deskRect(chipHit(c), "drawer"))) || hit(deskRect(COUNTER_IN.bottle, "bottle"))
+      hot = hit(COUNTER_IN.exit) || COUNTER_IN.chips.some(c => hit(deskRect(chipHit(c), "drawer"))) || hit(deskRect(COUNTER_IN.bottle, "bottle"))
         || hit(deskRect(COUNTER_IN.intercom, "intercom")) || hit(COUNTER_IN.hose) || hit(COUNTER_IN.hoseR)
         || !!runawayAt(x, y, 2);
     }
@@ -5406,6 +5452,15 @@ function init() {
   });
   canvas.addEventListener("pointercancel", releasePointer);
   window.addEventListener("blur", releasePointer);
+  canvas.addEventListener("dblclick", (e) => e.preventDefault());
+  let lastTap = 0;
+  canvas.addEventListener("touchend", (e) => {
+    const now = performance.now();
+    if (now - lastTap < 350) {
+      e.preventDefault();
+    }
+    lastTap = now;
+  }, { passive: false });
 
   // One settled press: routed per view (the former click handler). Fingers are
   // imprecise, so on touch the hit padding grows with the render scale until
@@ -5438,9 +5493,15 @@ function init() {
       if (hit(WASH.hose)) { w.tool = w.tool === "hose" ? "none" : "hose"; return; }
       return;
     }
-    // inside the counter room: the hose station, till chips, cologne bottle, tea intercom
+    // inside the counter room: exit button, the hose station, till chips, cologne bottle, tea intercom
+    if (hit(COUNTER_IN.exit)) {
+      if (hoseInHand) hoseInHand = null;
+      setView("out");
+      return;
+    }
     for (const st of [COUNTER_IN.hose, COUNTER_IN.hoseR]) // tap picks up / puts down that station's hose
       if (hit(st)) { hoseInHand = hoseInHand === st ? null : st; return; }
+    if (hoseInHand) return; // while holding the hose, other desk/counter interactions and runaway catching are blocked
     const chip = COUNTER_IN.chips.find(c => hit(deskRect(chipHit(c), "drawer")));
     if (chip) { giveChange(chip.d); save(); return; }
     if (hit(deskRect(COUNTER_IN.bottle, "bottle"))) { offerCologne(); save(); return; }
@@ -5470,6 +5531,10 @@ function init() {
     const tier = "1234".indexOf(e.key);
     if (tier >= 0) speed = SPEEDS[tier];
     if ((e.key === "e" || e.key === "E" || e.key === "Escape") && !modalOpen) {
+      if (e.key === "Escape" && !burgerMenu.classList.contains("hidden")) {
+        closeBurger();
+        return;
+      }
       // any interior view (counter room, car wash) steps back outside; from
       // outside the key keeps its original counter-room shortcut
       setView(S.view === "out" ? "wc" : "out");

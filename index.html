@@ -2,7 +2,7 @@
 <html lang="tr">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#10141f">
 <title>Mola Yeri — Otobüs Mola Tesisi Simülatörü</title>
 <meta name="description" content="Her tur otobüsünün güvendiği mola yerini işlet: aç misafirleri doyur, ₺20'lik tuvalet gişesine bak — kolonya, para üstü, hortumla kabin temizliği. Gişeye girip parayı almak için WC binasına tıkla. Kâr yok, geliştirme yok.">
@@ -13,25 +13,40 @@
 </head>
 <body>
 <div id="app">
-  <header id="topbar">
-    <div class="brand">🚌 MOLA YERİ <span class="ver">v0.004</span></div>
-    <div class="hud">
-      <div class="stat" id="statServed" title="Bugün hizmet verilen misafir">👥 0</div>
-      <div class="stat" id="statClock" title="Gün ve saat">Gün 1 · 08:00</div>
-      <div class="stat rep" title="İtibar — itibar yükseldikçe daha çok otobüs uğrar">
-        ★ <div class="bar"><div id="repFill"></div></div><span id="repNum">50</span>
-      </div>
-      <button id="btnWc" class="icon" title="WC gişesine gir (E)">🚻</button>
-      <button id="btnPause" class="icon" title="Duraklat (Boşluk)">⏸</button>
-      <button id="btnSpeed" class="icon" title="Oyun hızı (1/10/100/200)">1×</button>
-      <button id="btnHelp" class="icon" title="Nasıl oynanır">?</button>
-      <button id="btnReset" class="icon" title="Oyunu sıfırla">↺</button>
-    </div>
-  </header>
-
   <div id="stage">
     <canvas id="game" width="960" height="540"></canvas>
     <div id="toasts"></div>
+
+    <!-- Burger menu button and drawer -->
+    <button id="btnBurger" class="icon" aria-label="Menü" title="Menüyü Aç/Kapat">☰</button>
+    <div id="burgerBackdrop" class="hidden"></div>
+    <div id="burgerMenu" class="hidden">
+      <div class="burgerHeader">
+        <div class="brand">🚌 MOLA YERİ <span class="ver">v0.004</span></div>
+        <button id="btnBurgerClose" class="icon" title="Kapat">✕</button>
+      </div>
+      <div class="burgerBody">
+        <div class="burgerSection">
+          <div class="burgerSectionTitle">DURUM</div>
+          <div class="hud">
+            <div class="stat" id="statServed" title="Bugün hizmet verilen misafir">👥 0</div>
+            <div class="stat" id="statClock" title="Gün ve saat">Gün 1 · 08:00</div>
+            <div class="stat rep" title="İtibar — itibar yükseldikçe daha çok otobüs uğrar">
+              ★ <div class="bar"><div id="repFill"></div></div><span id="repNum">50</span>
+            </div>
+          </div>
+        </div>
+        <div class="burgerSection">
+          <div class="burgerSectionTitle">KONTROLLER</div>
+          <div class="burgerControls">
+            <button id="btnPause" title="Duraklat (Boşluk)">⏸</button>
+            <button id="btnSpeed" title="Oyun hızı (1/10/100/200)">1×</button>
+            <button id="btnReset" title="Oyunu sıfırla">↺</button>
+            <button id="btnHelp" title="Nasıl oynanır">?</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
