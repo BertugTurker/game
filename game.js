@@ -1992,7 +1992,7 @@ function drawWashView() {
   const n = w.g.length;
   const gAvg = w.g.reduce((a, v) => a + v, 0) / n;
   const fAvg = w.f.reduce((a, v) => a + v, 0) / n;
-  const P = { x: W + offX - 18 - 220, y: -offY + 18, w: 220, h: 84 }; // pinned to the visible top-right corner
+  const P = { x: -offX + 18, y: -offY + 18, w: 220, h: 84 }; // pinned to the visible top-left corner
   ctx.save();
   ctx.shadowColor = "rgba(0,0,0,0.35)";
   ctx.shadowBlur = 12;
@@ -2056,8 +2056,8 @@ function drawWashView() {
     ctx.restore();
   }
 
-  // --- exit back to the layover, pinned to the visible top-left corner (the hit test reads WASH.exit)
-  Ex.x = -offX + 18; Ex.y = -offY + 18;
+  // --- exit back to the layover, pinned to the visible bottom-right corner (the hit test reads WASH.exit)
+  Ex.x = W + offX - Ex.w - 18; Ex.y = H + offY - Ex.h - 18;
   const eg = ctx.createLinearGradient(0, Ex.y, 0, Ex.y + Ex.h);
   eg.addColorStop(0, mix("#26394b", "#152030", nf));
   eg.addColorStop(1, mix("#1a2836", "#0e1621", nf));
@@ -2728,7 +2728,7 @@ function resize() {
   const rowR = stallOx() + STALL_ROW_W * stallKx();
   COUNTER_IN.hoseR.x = rowR + (Wdyn - offX - rowR - COUNTER_IN.hoseR.w) / 2;
   COUNTER_IN.hoseR.y = COUNTER_IN.hose.y;
-  COUNTER_IN.exit.x = -offX + 18;
+  COUNTER_IN.exit.x = W + offX - COUNTER_IN.exit.w - 18;
   COUNTER_IN.exit.y = H + offY - COUNTER_IN.exit.h - 18;
   deskK = a > ULTRA_ASPECT ? DESK_ULTRA_K : 1;
   if (Math.abs(Wdyn - lastWdyn) + Math.abs(Hdyn - lastHdyn) > 2) {
@@ -3874,10 +3874,10 @@ function drawCounterInPrompts() {
   ctx.textAlign = "left";
 }
 
-/* WC exit door button at bottom-left of the counter room and its queue badge */
+/* WC exit door button at bottom-right of the counter room and its queue badge */
 function drawWcExitDoor() {
   const Ex = COUNTER_IN.exit;
-  Ex.x = -offX + 18;
+  Ex.x = W + offX - Ex.w - 18;
   Ex.y = H + offY - Ex.h - 18;
   const nf = nightFactor(S.time);
   const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 200);
