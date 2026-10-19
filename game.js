@@ -84,6 +84,7 @@ const COUNTER_IN = {
   desk:   { x: 96, y: 352, w: 768, h: 188 },  // the wooden counter — 10% of the view stays open on each side (the entrances)
   intercom: { x: 790, y: 394, w: 44, h: 62 }, // tea intercom at the right end of the counter (click to order a fresh tea)
   hose:   { x: 18, y: 238, w: 60, h: 96 },   // faucet + coiled hose left of the stall row (x/y track the view — see resize)
+  bucket: { x: 18, y: 340, w: 60, h: 96 },   // bucket + brush on the floor left of the stall row (x/y track the view — see resize)
   exit:   { x: 18, y: 478, w: 96, h: 44 },  // exit back to outside, pinned to bottom-left (see resize)
 };
 // The open passages either side of the counter, 10% of the visible width each.
@@ -3532,6 +3533,8 @@ function resize() {
   // centered in the gap between the left view edge and the stall row, at the top
   COUNTER_IN.hose.x = -offX + (stallOx() + offX - COUNTER_IN.hose.w) / 2;
   COUNTER_IN.hose.y = -offY + 6;
+  COUNTER_IN.bucket.x = -offX + (stallOx() + offX - COUNTER_IN.bucket.w) / 2;
+  COUNTER_IN.bucket.y = -offY + 48;
   COUNTER_IN.exit.x = W + offX - COUNTER_IN.exit.w - 18;
   COUNTER_IN.exit.y = H + offY - COUNTER_IN.exit.h - 18;
   deskK = a > ULTRA_ASPECT ? DESK_ULTRA_K : 1;
@@ -4433,9 +4436,9 @@ function drawHeldBill(cx, cy, u, color, d) {
   ctx.fillStyle = "rgba(170, 175, 185, 0.85)";                      // security thread
   ctx.fillRect(x + 9 * u, y + 0.7 * u, 0.35 * u, h - 1.4 * u);
   ctx.fillStyle = shade(color, -0.55);                              // denomination
-  ctx.font = `bold ${(2.4 * u).toFixed(1)}px system-ui, sans-serif`;
+  ctx.font = `bold ${(3 * u).toFixed(1)}px system-ui, sans-serif`;
   ctx.textAlign = "right";
-  ctx.fillText(d, x + w - 1 * u, y + 2.7 * u);
+  ctx.fillText(d, x + w - 1 * u, y + 3 * u);
   ctx.textAlign = "left";
   ctx.restore();
 }
@@ -5473,7 +5476,7 @@ function drawAlaturka(i, bx, dirty) {
 }
 
 function toolStations() {
-  return [COUNTER_IN.hose];
+  return cleaningTool() === CONFIG.cleaningTools.hose ? [COUNTER_IN.hose] : [COUNTER_IN.bucket];
 }
 
 // A bucket cleaning station (hand brush or mop) at one end of the stall row —
@@ -5786,7 +5789,7 @@ function drawWCInterior() {
       const x = p.x, y = p.y;
       const s = k * ((PAX_TYPES[p.type] || PAX_TYPES.m).scale);
       const billY = S.view === "wc" && deskK > 1 ? y - 9.5 * s : y - 6.5 * s;
-      drawHeldBill(x + 5 * s, billY, 0.3 * s, BILL_COLORS[p.bill] || "#c9c2a8", p.bill);
+      drawHeldBill(x + 5 * s, billY, 0.6 * s, BILL_COLORS[p.bill] || "#c9c2a8", p.bill);
     }
   }
   // the caught runaway scrubs in front of everything (drawn from the sequence
