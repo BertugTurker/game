@@ -7,7 +7,7 @@
    Click the WC building to step behind the counter: each stall's door
    closes while it's in use, and every stall carries its own dirt — take
    the ₺20 bill, splash Turkish cologne, make change, and keep the stalls
-   clean with the hose by the stalls (hold & drag it over a free stall).
+   clean with the tool by the stalls (hold & drag it over a free stall).
    Guests paying an exact ₺20 (no change due) need nothing from you: they
    queue in their own second line, pay on their own, and walk back out.
    Cleanliness is the whole business: the cleaner the stall a guest used,
@@ -21,7 +21,14 @@
    Press E (or the 🚪 button) to come back outside.
    Click a parked bus to step up to its front and wash the windshield:
    long-handled brush first (soap), then the fresh-water hose (rinse).
-   No profit, no upgrades — money is just part of the ritual.
+   Progression: every paid service goes into one company cash balance
+   (applyTransaction is the only place it changes). A new company starts
+   with two alaturka toilets and a hand brush — no cologne, no calculator.
+   CONFIG.wcTracks holds the WC's separate upgrade tracks (stall count,
+   toilet style up to full automation, cleaning tool, cologne, calculator);
+   CONFIG also holds the car-wash tiers, maintenance and the terminal network. G is the one authoritative state; bindTerminal points
+   S / buses / facilities at a terminal, and advanceSimulation steps every
+   owned terminal on the shared clock, seen or not.
    ===================================================================== */
 
 /* ----------------------------- Config ------------------------------ */
@@ -49,14 +56,12 @@ const SVC_TIME_R  = 5.4;                   // real seconds per diner guest serve
 const TOILET_STAY = [6, 60];               // a toilet visit lasts 1–10 in-game minutes (6 s of timeDt per game min)
 const SVC_TIME_T  = (TOILET_STAY[0] + TOILET_STAY[1]) / 2; // mean visit length — queue patience & save restore
 const SAT_BASE    = 60;                    // baseline satisfaction per service
-const WC_PRICE    = 20;                    // price of a toilet visit, in Turkish lira
 const WC_EVADE    = 0.03;                  // share of finished toilet visits that skip the fee and run for the exit (~3 in 100 — everyone else queues)
 const EVADE_WALK  = 132;                   // a runaway's dash, in px per REAL second — catchable at any speed tier
 const SCRUB_TIME  = 3;                     // real seconds a caught runaway spends scrubbing every toilet
 const WC_NEEDED   = 72;                    // bladder level at which a guest heads for the WC
 const WC_TOO_DIRTY  = 25;                   // a stall below this is too filthy to use: guests take the cleanest free stall, and if every FREE stall sits below it the T line stands and waits
 const BLADDER_RISE = 85;                   // bladder fill per game hour — the most time-pressed need
-const BOTTLE_MAX  = 500;                   // ml of cologne in the counter bottle
 const TEA_HOURS   = 0.5;                   // game hours to sip a glass of tea down to empty (~30 game minutes)
 const TEA_DELIVERY = [1 / 60, 2 / 60];     // game hours for a tea ordered on the intercom to arrive (1–2 game minutes)
 const BILL_POOL   = [20, 20, 50, 50, 50, 100, 100]; // bills guests hand over
@@ -79,7 +84,6 @@ const COUNTER_IN = {
   desk:   { x: 96, y: 352, w: 768, h: 188 },  // the wooden counter — 10% of the view stays open on each side (the entrances)
   intercom: { x: 790, y: 394, w: 44, h: 62 }, // tea intercom at the right end of the counter (click to order a fresh tea)
   hose:   { x: 18, y: 238, w: 60, h: 96 },   // faucet + coiled hose left of the stall row (x/y track the view — see resize)
-  hoseR:  { x: 882, y: 238, w: 60, h: 96, right: true }, // its mirror right of the stall row
   exit:   { x: 18, y: 478, w: 96, h: 44 },  // exit back to outside, pinned to bottom-left (see resize)
 };
 // The open passages either side of the counter, 10% of the visible width each.
@@ -138,9 +142,142 @@ const washToBus = (x, y) => {
 };
 
 const DEST_A = "İstanbul", DEST_B = "Trabzon";
-const SAVE_KEY = "layover-lane-v6";
+
+// Every balance value of the progression game lives here — prices, tiers,
+// starting values, save keys. Provisional numbers: tune here, nowhere else.
+const CONFIG = {
+  save: {
+    key: "layover-lane-v7",
+    version: 7,
+    // read (oldest last) to migrate a pre-progression game; never written or
+    // deleted by migration, so they double as a backup of the old save
+    legacyKeys: ["layover-lane-v6", "layover-lane-v5", "layover-lane-v3"],
+    corruptPrefix: "layover-lane-corrupt-", // + timestamp: unreadable data is parked here before anything can overwrite it
+  },
+  economy: {
+    startCash: 500,     // a brand-new company
+    migratedCash: 0,    // pre-progression saves had no money at all
+    ledgerMax: 200,     // recent transactions kept in the save (totals are kept forever)
+    toiletFee: 20,      // what a toilet visit costs the guest
+    teaPrice: 20,       // what a glass of tea ordered on the intercom costs you
+  },
+  // The profile a terminal starts from. "classic" is the pre-progression game
+  // (10 stalls, hose, cologne, calculator, manual car wash) — legacy saves
+  // migrate onto it. wc: the starting level of every WC upgrade track.
+  profiles: {
+    classic: { rep: 50, wc: { count: 5, style: 2, tool: 4, cologne: 1, calc: 1, tea: 1 }, carWash: { unlocked: true, tier: 1 } },
+    starter: { rep: 10, wc: { count: 1, style: 1, tool: 1, cologne: 0, calc: 0, tea: 0 }, carWash: { unlocked: false, tier: 1 } },
+    gerede:  { rep: 25, wc: { count: 2, style: 2, tool: 1, cologne: 1, calc: 1, tea: 0 }, carWash: { unlocked: false, tier: 1 } },
+    tosya:   { rep: 30, wc: { count: 3, style: 2, tool: 3, cologne: 1, calc: 1, tea: 0 }, carWash: { unlocked: true,  tier: 1 } },
+    samsun:  { rep: 35, wc: { count: 5, style: 2, tool: 4, cologne: 2, calc: 1, tea: 1 }, carWash: { unlocked: true,  tier: 2 } },
+  },
+  newGameProfile: "starter",
+  firstBusLead: 120,  // px before its bay's turn-in where the opening bus appears: it is pulling in ~1 real s after play starts
+  // The WC's independent upgrade tracks, each bought one level at a time per
+  // terminal. Level 0 (cologne, calc) means "not owned yet".
+  //   count:   stalls — how many of the ten bays are built (the rest boarded up)
+  //   style:   the fixture — dirtUse: grime one visit leaves (min, max);
+  //            satBonus: added to every toilet rating; auto*: see below
+  //   tool:    what hangs at the cleaning stations (CONFIG.cleaningTools)
+  //   cologne: ml — the counter bottle (refilled at midnight); sat: rating bonus per splash
+  //   calc:    the counter calculator that shows the change still owed
+  wcTracks: {
+    count: { title: "KABİN SAYISI", levels: [
+      { level: 1, name: "2 kabin", icon: "🚪",  cost: 0,    stalls: 2, minServed: 0 },
+      { level: 2, name: "4 kabin", icon: "🚪",  cost: 800,  stalls: 4, minServed: 50 },
+      { level: 3, name: "6 kabin", icon: "🚪",  cost: 1600, stalls: 6, minServed: 150 },
+      { level: 4, name: "8 kabin", icon: "🚪",  cost: 3000, stalls: 8, minServed: 300 },
+      { level: 5, name: "10 kabin", icon: "🚪", cost: 5000, stalls: 10, minServed: 500 },
+    ] },
+    style: { title: "TUVALETLER", levels: [
+      { level: 1, name: "İlkel alaturka tuvaletler", icon: "🕳️", cost: 0,     style: "alaturka", dirtUse: [10, 20], satBonus: -6, minServed: 0 },
+      { level: 2, name: "Modern klozetler", icon: "🚽",          cost: 1000,  style: "modern",   dirtUse: [8, 16],  satBonus: 0, minServed: 75 },
+      { level: 3, name: "Yarı otomatik tuvaletler", icon: "⚙️",  cost: 10000, style: "modern",   dirtUse: [8, 16],  satBonus: 0, auto: "semi", autoCleanPerHour: 60, autoCleanPerVisit: 8, upkeep: 300, opCost: 150, minServed: 250 },
+      { level: 4, name: "Tam otomatik tuvaletler", icon: "🤖",   cost: 25000, style: "modern",   dirtUse: [8, 16],  satBonus: 0, auto: "full", autoCleanPerHour: 120, autoCleanPerVisit: 14, autoChangeSec: 3, upkeep: 450, opCost: 250, minServed: 500 },
+    ] },
+    tool: { title: "TEMİZLİK EKİPMANI", levels: [
+      { level: 1, name: "Küçük el fırçası", icon: "🪥",  cost: 0,    tool: "handBrush" },
+      { level: 2, name: "Uzun saplı fırça", icon: "🧹", cost: 300,  tool: "longBrush" },
+      { level: 3, name: "Paspas seti", icon: "🪣",       cost: 600,  tool: "mop" },
+      { level: 4, name: "Hortum", icon: "🚿",            cost: 3000, tool: "hose" },
+    ] },
+    cologne: { title: "KOLONYA", levels: [
+      { level: 0, name: "Kolonya yok", icon: "🚫",           cost: 0,    ml: 0,    sat: 0 },
+      { level: 1, name: "Limon kolonyası", icon: "🍋",       cost: 300,  ml: 500,  sat: 8 },
+      { level: 2, name: "Büyük şişe kolonya", icon: "🧴",    cost: 900,  ml: 1000, sat: 8 },
+      { level: 3, name: "Lüks lavanta kolonyası", icon: "🪻", cost: 2000, ml: 1000, sat: 12 },
+    ] },
+    calc: { title: "HESAP MAKİNESİ", levels: [
+      { level: 0, name: "Hesap makinesi yok", icon: "🧠", cost: 0 },
+      { level: 1, name: "Hesap makinesi", icon: "🧮",     cost: 250 },
+    ] },
+    tea: { title: "ÇAY", levels: [
+      { level: 0, name: "Çay yok", icon: "🚫", cost: 0 },
+      { level: 1, name: "Çay saati", icon: "🍵", cost: 1000 },
+    ] },
+  },
+  // Hand cleaning, held & dragged over a free stall. perSec: cleanliness per
+  // REAL second of scrubbing (any speed tier); reach: px around the pointer.
+  // The hose's 33.3/s is the original +5 per 150 ms.
+  cleaningTools: {
+    handBrush: { name: "Küçük el fırçası", label: "FIRÇA",  perSec: 8,       reach: 8 },
+    longBrush: { name: "Uzun saplı fırça", label: "FIRÇA",  perSec: 12,      reach: 11 },
+    mop:       { name: "Paspas seti",      label: "PASPAS", perSec: 16,      reach: 14 },
+    hose:      { name: "Hortum",           label: "HORTUM", perSec: 100 / 3, reach: 18 },
+  },
+  // Automated tiers (toilet auto / car-wash auto above) add: autoCleanPerHour —
+  // cleanliness a free built stall regains per game hour; autoCleanPerVisit —
+  // the self-clean cycle after every visit (vs dirtUse); autoChangeSec — the
+  // counter hands back crisp change on its own after this long (sim seconds);
+  // autoWashSec — sim seconds for the gantry to wash a parked bus (semi: one
+  // bus at a time, full: every parked bus); upkeep — the daily maintenance
+  // bill; opCost — running cost charged at every midnight.
+  // (Sim seconds: 360 per game hour, as SECONDS_PER_HOUR.)
+  maintenance: {
+    intervalHours: 24,      // routine maintenance is due once per simulated day
+    wearPerHour: 1.5,       // condition lost per game hour while automation runs
+    overdueWearPerHour: 4,  // …and once maintenance is overdue
+    failBase: 0.002,        // breakdown chance per system per game hour at full condition
+    failWorn: 0.04,         // added at condition 0 (scales with wear²)
+    overdueFailMult: 3,     // neglect multiplies the risk
+    failRep: 2,             // reputation lost when a system breaks down
+    repairCost: { toilet: 800, wash: 1000 },
+    warnCondition: 40,
+  },
+  // Car wash. tier 1 is the unlock itself — cash only, no reputation gate —
+  // and plays exactly like the original wash. fee: paid by the bus line when a
+  // windshield is finished. reach: tool radius (px); soap: suds per brush pass;
+  // rinse: grime removed per hose pass = rinse[0] + rinse[1] × suds; cd: ms
+  // before the same cell can be worked again; rep / sat: reputation and the
+  // bus's satisfaction bonus for a finished wash.
+  carWashTiers: [
+    { tier: 1, name: "Elle yıkama", icon: "🧽",              cost: 8000,  fee: 50, reach: 18, soap: 0.45, rinse: [0.15, 0.6], cd: 80, rep: 2, sat: 5 },
+    { tier: 2, name: "Gelişmiş yıkama ekipmanı", icon: "🫧", cost: 5000,  fee: 60, reach: 26, soap: 0.6,  rinse: [0.2, 0.7],  cd: 70, rep: 3, sat: 7 },
+    { tier: 3, name: "İleri yıkama ekipmanı", icon: "💦",    cost: 12000, fee: 75, reach: 36, soap: 0.8,  rinse: [0.3, 0.8],  cd: 60, rep: 4, sat: 9 },
+    { tier: 4, name: "Yarı otomatik yıkama", icon: "⚙️",     cost: 20000, fee: 75, reach: 36, soap: 0.8,  rinse: [0.3, 0.8],  cd: 60, rep: 4, sat: 9, auto: "semi", autoWashSec: 60, upkeep: 300, opCost: 150 },
+    { tier: 5, name: "Tam otomatik yıkama", icon: "🤖",      cost: 40000, fee: 75, reach: 36, soap: 0.8,  rinse: [0.3, 0.8],  cd: 60, rep: 4, sat: 9, auto: "full", autoWashSec: 30, upkeep: 500, opCost: 300 },
+  ],
+  // The road network. price: acquisition cost; profile: the facilities it
+  // comes with; devCost: multiplier on its toilet / car-wash upgrade prices;
+  // map: real lon/lat (label: which side of the node its text goes); requires: every
+  // condition must hold — minRep (some owned terminal at least this
+  // reputation), minOwned (terminals owned), minToiletStyle (some owned
+  // terminal's toilets at least this style level).
+  terminals: [
+    { id: "bolu",   name: "Bolu Dağı Mola Yeri", short: "BOLU DAĞI", price: 0, start: true, profile: "starter", devCost: 1,    km: { a: 265, b: 800 }, map: { lon: 31.4, lat: 40.78, label: "down" } },
+    { id: "gerede", name: "Gerede Mola Yeri", short: "GEREDE", price: 15000, profile: "gerede", devCost: 1.2,  km: { a: 310, b: 755 }, map: { lon: 32.2, lat: 40.81, label: "up" }, requires: { minRep: 40 } },
+    { id: "tosya",  name: "Tosya Dinlenme Tesisi", short: "TOSYA", price: 40000, profile: "tosya", devCost: 1.4, km: { a: 480, b: 585 }, map: { lon: 34.03, lat: 41.02, label: "down" }, requires: { minRep: 60, minOwned: 2 } },
+    { id: "samsun", name: "Samsun Sahil Tesisi", short: "SAMSUN", price: 90000, profile: "samsun", devCost: 1.6,  km: { a: 735, b: 330 }, map: { lon: 36.3, lat: 41.27, label: "up" }, requires: { minRep: 75, minOwned: 3, minToiletStyle: 3 } },
+  ],
+  mapEnds: { from: { lon: 28.95, lat: 41.03 }, to: { lon: 39.72, lat: 41.0 } }, // İstanbul and Trabzon
+  // The D100 / D010 road east: [lon, lat] waypoints; a string is a terminal id.
+  mapRoute: [[29.43, 40.8], [29.92, 40.76], [30.4, 40.75], [31.16, 40.84], "bolu", "gerede", [32.88, 40.81], [33.63, 40.92], "tosya",
+    [34.8, 40.97], [35.47, 40.87], [35.66, 40.97], "samsun", [36.85, 41.2], [37.28, 41.1], [37.88, 40.96], [38.39, 40.9], [38.82, 40.98], [39.3, 41.0]],
+};
+const SAVE_KEY = CONFIG.save.key;
 
 /* ---------------------------- Small utils --------------------------- */
+const fmtTL = n => "₺" + Math.round(n).toLocaleString("tr-TR");
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const rand  = (a, b) => a + Math.random() * (b - a);
 const randInt = (a, b) => Math.floor(rand(a, b + 1));
@@ -152,14 +289,14 @@ const frac = v => v - Math.floor(v);
 // the help copy all adapt. Mouse/keyboard desktops keep the original feel.
 const coarseQ = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
 
-// Deadlines (stopEnd, boardAt, nextBusAt...) are stored as plain S.time + x,
+// Deadlines (stopEnd, boardAt, nextBusAt...) are stored as plain G.clock.time + x,
 // so they can sit on the other side of the midnight 24->0 wrap (e.g. 24.4).
 // True if the target is now or in the past, cyclically.
 // Double %24 normalizes the difference so a deadline just ahead of midnight
 // (t >= 24) does NOT read as "reached" on the next day. (All targets are set
 // < 12h ahead, so this is unambiguous.)
 function reached(t) {
-  const e = ((S.time - t) % 24 + 24) % 24;
+  const e = ((G.clock.time - t) % 24 + 24) % 24;
   return e < 12;
 }
 
@@ -175,10 +312,17 @@ function rr(ctx, x, y, w, h, r) {
 }
 
 /* ------------------------------ State ------------------------------- */
-let S = freshState();
-let buses = [];
+// G is the one authoritative game state (and the save): the shared clock, the
+// company (one cash balance for every terminal), and the terminals, each owning
+// its own reputation, facilities, buses and guests. The sim and render code
+// work on S / buses / facilities, which bindTerminal points at one terminal.
+let G = null;
+let S = null;            // bound: G.terminals[id].sim
+let buses = [];          // bound: G.terminals[id].buses
+let facilities = emptyFacilities(); // bound: runtime[id].facilities
+let runtime = {};        // per terminal, never saved: { facilities } (rebuilt from guest states on load)
+let boundId = null;
 let cars = [];           // ambient traffic in the far lane
-let facilities = { R: { spots: [], queue: [] }, T: { spots: [], queue: [] }, C: { queue: [], queue2: [] } };
 let paused = false;
 // Speed tiers: the whole simulation (game clock, guest needs, walks, animations)
 // runs this many times faster. At 1x, 1 game hour = 6 real minutes (a game day
@@ -190,10 +334,11 @@ let pointer = { x: W / 2, y: 200 }; // last pointer position in canvas coords �
 let pointerDown = false;
 // The WC cleaning hose: in-hand flag plus per-stall spray pacing. Session aid,
 // never saved — picking it up again costs the player, not their save file.
-let hoseInHand = null; // the hose station (COUNTER_IN.hose / hoseR) whose hose is in hand
+let toolInHand = null; // the hose station (COUNTER_IN.hose) whose hose is in hand
 let hoseCd = new Array(WC_STALLS).fill(0);      // last spray timestamp per stall (performance.now)
 let hoseGleam = new Array(WC_STALLS).fill(0);   // per stall: when it last hit 100 (sparkle burst)
 let lastHoseToast = 0;
+let cashFloats = [];         // "+₺20" / "−₺1.000" pops over the active terminal: { amount, t0 }
 let lastDirtyToast = 0;      // throttle for the "too filthy to use" toasts
 let lastEvadeToast = 0;      // throttle for the "trying to escape" toasts
 // The caught runaway's cleaning sequence: { pax, t, from, foam } — t counts
@@ -206,14 +351,76 @@ let scrubDoneAt = 0;         // performance.now when the last sequence finished 
 let downClient = null;       // where the press started (CSS px) — the tap-vs-drag threshold
 let activePointer = null;    // the pointerId driving a press (pointer capture) — one at a time
 
-function freshState() {
+function emptyFacilities() {
+  return { R: { spots: [], queue: [] }, T: { spots: [], queue: [] }, C: { queue: [], queue2: [] } };
+}
+
+function freshGame(profile = CONFIG.newGameProfile) {
+  const start = CONFIG.terminals.find(t => t.start);
+  const g = {
+    version: CONFIG.save.version,
+    clock: { day: 1, time: 8, lastSave: 0 }, // time in game hours, 0..24
+    company: { cash: CONFIG.economy.startCash, nextTxId: 1, ledger: [], totals: {} },
+    activeTerminal: start.id,
+    terminals: {},
+    flags: { firstBusDone: false },
+    migratedFrom: null,      // save version this game was migrated from (null = born on v7)
+  };
+  g.terminals[start.id] = freshTerminal(start.id, profile);
+  return g;
+}
+
+function freshTerminal(id, profileName) {
+  const prof = CONFIG.profiles[profileName];
   return {
-    day: 1,
-    time: 8,                 // hours, 0..24
-    rep: 50,                 // 0..100
+    id,
+    owned: true,
+    wc: Object.assign({}, prof.wc),
+    carWash: { unlocked: prof.carWash.unlocked, tier: prof.carWash.tier },
+    maintenance: { condition: 100, lastAt: null, nextDueAt: null, failures: [], tickAt: null, dueNotified: false },
+    sim: Object.assign(freshSim(prof.rep), { bottle: wcLevel("cologne", prof.wc.cologne).ml }),
+    buses: [],
+  };
+}
+
+const ownedTerminals = () => Object.values(G.terminals).filter(t => t.owned);
+
+function bindTerminal(id) {
+  const t = G.terminals[id];
+  if (!runtime[id]) runtime[id] = { facilities: emptyFacilities() };
+  boundId = id;
+  S = t.sim;
+  buses = t.buses;
+  facilities = runtime[id].facilities;
+}
+
+// What the bound terminal has built. Bays come into service from the aisle
+// outward (4,5 first), so a small WC sits centered under the stall lights.
+const STALL_ORDER = [4, 5, 3, 6, 2, 7, 1, 8, 0, 9];
+const STALL_RANK = STALL_ORDER.reduce((r, bay, k) => { r[bay] = k; return r; }, []);
+const term = () => G.terminals[boundId];
+const wcLevel = (track, level) => CONFIG.wcTracks[track].levels.find(x => x.level === level);
+// The installed level of a WC track at terminal t (the bound one by default).
+const wcDef = (track, t = term()) => wcLevel(track, t.wc[track]);
+const toiletDef = () => wcDef("style");
+const stallCount = () => wcDef("count").stalls;
+const stallActive = i => STALL_RANK[i] < stallCount();
+const activeStalls = () => STALL_ORDER.slice(0, stallCount()).sort((a, b) => a - b);
+const cleaningTool = () => CONFIG.cleaningTools[wcDef("tool").tool];
+const hasCologne = () => term().wc.cologne > 0;
+const hasCalc = () => term().wc.calc > 0;
+const hasTea = () => term().wc.tea > 0;
+const bottleMax = () => wcDef("cologne").ml;
+const carWashOpen = () => term().carWash.unlocked;
+const washDef = () => CONFIG.carWashTiers.find(x => x.tier === term().carWash.tier);
+const avgClean = () => activeStalls().reduce((a, i) => a + S.stallClean[i], 0) / stallCount();
+
+function freshSim(rep = 50) {
+  return {
+    rep,                     // 0..100 — this terminal's own reputation
     cleanliness: 100,        // DERIVED average of stallClean (outdoor HUD, legacy fallbacks)
     stallClean: [100, 100, 100, 100, 100, 100, 100, 100, 100, 100], // per-stall cleanliness 0..100 — each toilet dirties on its own
-    bottle: BOTTLE_MAX,      // ml of cologne left in the counter bottle
+    bottle: 0,              // ml of cologne left in the counter bottle (filled to its track level)
     tea: 1,                  // tea left in your glass, 0..1 (1 = full)
     teaOrder: null,          // game hours until the tea ordered on the intercom arrives (null = none ordered)
     view: "out",             // "out" = the layover, "wc" = inside the WC counter room, "wash" = the bus front
@@ -221,13 +428,23 @@ function freshState() {
     nextBusAt: 9.5,
     slotVacantSince: BAY_SLOTS.map(() => null), // per stall: game-hour it became vacant (null = filled or never used)
     nextBusId: 1,
-    lastSave: 0,
-    stats: freshDayStats(50),
+    stats: freshDayStats(rep),
+    history: [],             // the last HISTORY_DAYS finished days: stats + { day, repEnd }
   };
 }
+const HISTORY_DAYS = 7; // finished days kept per terminal
+
+// Saved stats are numbers only (they end up in the day summary's HTML).
+function sanitizeStats(raw, rep) {
+  const out = freshDayStats(rep);
+  if (raw && typeof raw === "object") for (const k of Object.keys(out)) out[k] = finiteOr(raw[k], out[k]);
+  return out;
+}
+
 function freshDayStats(rep) {
   return {
     buses: 0, served: 0, satSum: 0, satN: 0, cologne: 0, washes: 0,
+    revenue: 0, expenses: 0, // ₺ booked to this terminal today (see applyTransaction)
     evaded: 0, caught: 0,    // toilet fees: never paid (ran, left the queue, or cut short by the bus) / runaways caught (they scrubbed every toilet)
     repStart: rep == null ? S.rep : rep,
   };
@@ -235,99 +452,580 @@ function freshDayStats(rep) {
 
 /* --------------------------- Save & load ---------------------------- */
 let resetting = false;   // while set, save() is a no-op (see btnReset)
+let saveBlocked = null;  // reason string: unreadable data could not be backed up, so never overwrite it
 function save() {
-  if (resetting) return;
+  if (resetting || saveBlocked || !G) return;
   try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 6, S, buses }));
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ v: CONFIG.save.version, G }));
   } catch (e) { /* private mode etc. */ }
 }
-function load() {
-  try {
-    let raw = localStorage.getItem(SAVE_KEY);
-    let data = raw && JSON.parse(raw);
-    if (!data || (data.v !== 3 && data.v !== 4 && data.v !== 5 && data.v !== 6)) {
-      raw = localStorage.getItem("layover-lane-v5") || localStorage.getItem("layover-lane-v3");
-      if (!raw) return false;
-      data = JSON.parse(raw);
-      if (data.v !== 3 && data.v !== 4 && data.v !== 5) return false;
-    }
-    S = Object.assign(freshState(), data.S);
-    S.stats = Object.assign(freshDayStats(), data.S.stats);
-    // v6 saves predate per-stall cleanliness, and older saves carry the old
-    // 8-stall count — if the array is missing or the count no longer matches,
-    // inherit the old shared value so an old game keeps its dirt instead of
-    // skipping ahead to spotless
-    // Check data.S (the save), not S: after Object.assign above, S.stallClean
-    // always exists from freshState(), which would hide a genuinely missing key.
-    if (!Array.isArray(data.S.stallClean) || data.S.stallClean.length !== WC_STALLS)
-      S.stallClean = Array(WC_STALLS).fill(clamp(data.S.cleanliness == null ? 100 : data.S.cleanliness, 0, 100));
-    else
-      S.stallClean = data.S.stallClean.map(v => clamp(v, 0, 100));
-    S.cleanliness = S.stallClean.reduce((a, v) => a + v, 0) / WC_STALLS; // re-derive the HUD average
-    buses = data.buses || [];
-    for (const b of buses) { if (b.state === "stop" && !BAY_SLOTS[b.slot]) b.slot = 0; migrateBus(b); }
-    // older saves predate the man/woman/kid looks — give untyped guests one
-    for (const b of buses) for (const p of b.pax) {
-      if (!p.type) p.type = rollPaxType();
-      if (!p.skin) p.skin = pick(SKIN_TONES);
-      if (!p.hair) p.hair = pick(HAIR_TONES);
-      // saves from the bastinado era: a `fled` guest still walking to the exit
-      // is a runaway; anyone else is just an unpaid guest
-      if (p.runaway == null) p.runaway = !!p.fled && p.state === "leaveC";
-      delete p.fled; delete p.punishRed;
-    }
-    delete S.stats.busts;
-    if (S.view !== "out" && S.view !== "wc" && S.view !== "wash") S.view = "out";
-    // a guest saved mid-scrub restarts the cleaning sequence (inside the WC,
-    // so it plays where it can be seen); a second one can't exist — demote it
-    const scrubbers = buses.flatMap(b => b.pax).filter(p => p.state === "scrubC");
-    scrubbers.forEach((p, i) => { if (i) { p.state = "leaveC"; p.runaway = false; } });
-    if (scrubbers.length) { startScrub(scrubbers[0]); S.view = "wc"; }
-    // stall de-dup: first claim wins, later claimants demoted to drive
-    const taken = new Set();
-    for (const b of buses) if ((b.state === "stop" || b.state === "enter") && b.slot != null) {
-      if (taken.has(b.slot)) { b.slot = null; b.state = "drive"; b.stoppedOnce = true; } else taken.add(b.slot);
-    }
-    // v3 outdoor pax were placed in the old apron band — teleport to their bus door
-    if (data.v === 3) for (const b of buses) for (const p of b.pax)
-      if (p.state === "walk" || p.state === "free" || p.state === "board") {
-        const d = doorPos(b); p.x = d.x; p.y = d.y; p.tx = d.x; p.ty = d.y;
-        p.state = "free"; p.idleT = rand(0.5, 2);
-      }
-    rebuildFacilities();
-    // the windshield grid changed shape across versions (v3/v4: 6×3, v5: 6×4,
-    // v6: 30×20) — resample any saved wash onto the current grid, taking the
-    // nearest old cell, so old saves keep their grime
-    const wn = WASH.wind.cols * WASH.wind.rows;
-    const oldGrid = { 18: [6, 3], 24: [6, 4] }; // saved array length -> [cols, rows]
-    for (const b of buses) {
-      if (!b.wash || (b.wash.g.length === wn && b.wash.f.length === wn)) continue;
-      if (b.washDone || b.wash.done) {
-        b.wash = { g: new Array(wn).fill(0), f: new Array(wn).fill(0), tool: b.wash.tool, done: true, cd: new Array(wn).fill(0) };
-        continue;
-      }
-      const [oc, orw] = oldGrid[b.wash.g.length] || [6, 3];
-      const og = b.wash.g, of = b.wash.f || [];
-      const g = new Array(wn), f = new Array(wn);
-      for (let r = 0; r < WASH.wind.rows; r++) for (let c = 0; c < WASH.wind.cols; c++) {
-        const j = Math.min(og.length - 1,
-          Math.min(orw - 1, Math.floor(r * orw / WASH.wind.rows)) * oc +
-          Math.min(oc - 1, Math.floor(c * oc / WASH.wind.cols)));
-        g[r * WASH.wind.cols + c] = og[j] == null ? 1 : og[j];
-        f[r * WASH.wind.cols + c] = of[j] == null ? 0 : of[j];
-      }
-      b.wash = { g, f, tool: b.wash.tool, done: false, cd: new Array(wn).fill(0) };
-    }
-    // apply cooldowns are a per-session pacing aid, not state
-    for (const b of buses) if (b.wash) b.wash.cd = new Array(b.wash.g.length).fill(0);
-    // a saved mid-wash view needs a bus that is actually parked
-    if (S.view === "wash") {
-      const wb = buses.find(x => x.id === S.washBus);
-      if (!wb || wb.state !== "stop") { S.view = "out"; S.washBus = null; }
-    }
-    return true;
-  } catch (e) { return false; }
+
+// The deliberate new game. Stop saving FIRST: location.reload() fires
+// beforeunload, which calls save() and would write the state back. Every key
+// load() reads goes — a surviving legacy key would be migrated straight back.
+function resetGame() {
+  resetting = true;
+  for (const key of [SAVE_KEY, ...CONFIG.save.legacyKeys]) {
+    try { localStorage.removeItem(key); } catch (e) { /* private mode etc. */ }
+  }
+  location.reload();
 }
+
+// Reads the save into G. Never throws, and always leaves a playable game.
+// status: "new" (nothing saved), "loaded", "migrated" (a pre-v7 game was
+// carried over), or "recovered" (unreadable data was parked under a backup
+// key — notes say what happened).
+function load() {
+  const notes = [];
+  const read = key => { try { return localStorage.getItem(key); } catch (e) { return null; } };
+  const raw = read(SAVE_KEY);
+  if (raw != null) {
+    try {
+      const terminalNotes = adoptGame(restoreGame(JSON.parse(raw)), CONFIG.save.version);
+      if (!terminalNotes.length) return { status: "loaded", notes };
+      notes.push(...terminalNotes, parkCorrupt(raw));
+      return { status: "recovered", notes };
+    } catch (e) {
+      G = null;
+      notes.push(`Kayıt okunamadı (${e.message}).`, parkCorrupt(raw));
+    }
+  }
+  for (const key of CONFIG.save.legacyKeys) {
+    const lraw = read(key);
+    if (lraw == null) continue;
+    try {
+      const data = JSON.parse(lraw);
+      const terminalNotes = adoptGame(migrateLegacy(data), data.v);
+      notes.push(...terminalNotes);
+      return { status: notes.length ? "recovered" : "migrated", from: data.v, notes };
+    } catch (e) {
+      G = null;
+      notes.push(`Eski kayıt (${key}) aktarılamadı (${e.message}); dokunulmadan bırakıldı.`);
+    }
+  }
+  adoptGame(freshGame());
+  return { status: notes.length ? "recovered" : "new", notes };
+}
+
+// Copies unreadable save data aside before anything can overwrite it. If even
+// that fails, saving is switched off for the session rather than lose it.
+function parkCorrupt(raw) {
+  const key = CONFIG.save.corruptPrefix + Date.now();
+  try {
+    localStorage.setItem(key, raw);
+    return `Bozuk veri "${key}" anahtarına yedeklendi.`;
+  } catch (e) {
+    saveBlocked = "backup failed";
+    return "Bozuk veri yedeklenemedi — üzerine yazılmasın diye bu oturumda kayıt kapalı.";
+  }
+}
+
+const finiteOr = (v, d) => (typeof v === "number" && Number.isFinite(v) ? v : d);
+
+function sanitizeClock(c) {
+  c = c && typeof c === "object" ? c : {};
+  const time = finiteOr(c.time, 8);
+  return {
+    day: Math.max(1, Math.floor(finiteOr(c.day, 1))),
+    time: time >= 0 && time < 24 ? time : 8,
+    lastSave: finiteOr(c.lastSave, 0),
+  };
+}
+
+// The old combined toilet tiers (1–6) as WC track levels. Those games all had
+// the calculator, so they keep it.
+const OLD_TOILET_TIERS = {
+  1: { count: 1, style: 1, tool: 1, cologne: 0, calc: 1 },
+  2: { count: 2, style: 2, tool: 1, cologne: 1, calc: 1 },
+  3: { count: 3, style: 2, tool: 1, cologne: 1, calc: 1 },
+  4: { count: 5, style: 2, tool: 4, cologne: 1, calc: 1 },
+  5: { count: 5, style: 3, tool: 4, cologne: 1, calc: 1 },
+  6: { count: 5, style: 4, tool: 4, cologne: 1, calc: 1 },
+};
+
+// A terminal's progression fields, defaulted from its profile when missing or invalid.
+function sanitizeTerminalMeta(t, src, profileName) {
+  const prof = CONFIG.profiles[profileName];
+  const tierIn = (v, table, d) => (Number.isInteger(v) && table.some(x => x.tier === v) ? v : d);
+  src = src && typeof src === "object" ? src : {};
+  t.owned = src.owned !== false;
+  // saves from before the separate WC tracks stored one combined toilet tier
+  const oldTier = src.toilet && OLD_TOILET_TIERS[src.toilet.tier];
+  const wc = src.wc && typeof src.wc === "object" ? src.wc : oldTier || prof.wc;
+  t.wc = {};
+  for (const [track, def] of Object.entries(CONFIG.wcTracks))
+    t.wc[track] = Number.isInteger(wc[track]) && def.levels.some(x => x.level === wc[track]) ? wc[track] : prof.wc[track];
+  const cw = src.carWash && typeof src.carWash === "object" ? src.carWash : prof.carWash;
+  t.carWash = { unlocked: !!cw.unlocked, tier: tierIn(cw.tier, CONFIG.carWashTiers, prof.carWash.tier) };
+  const m = src.maintenance && typeof src.maintenance === "object" ? src.maintenance : {};
+  t.maintenance = {
+    condition: clamp(finiteOr(m.condition, 100), 0, 100),
+    lastAt: m.lastAt == null ? null : finiteOr(m.lastAt, null),
+    nextDueAt: m.nextDueAt == null ? null : finiteOr(m.nextDueAt, null),
+    failures: Array.isArray(m.failures) ? m.failures.filter(f => f && (f.system === "toilet" || f.system === "wash")).map(f => ({ system: f.system, at: finiteOr(f.at, 0) })) : [],
+    tickAt: m.tickAt == null ? null : finiteOr(m.tickAt, null),
+    dueNotified: !!m.dueNotified,
+  };
+  t.sim = src.sim;     // raw — merged and repaired by fixupTerminal
+  t.buses = src.buses;
+}
+
+// v7 save -> G (data level only; adoptGame repairs each terminal's sim).
+function restoreGame(data) {
+  if (!data || typeof data !== "object") throw new Error("geçersiz biçim");
+  if (data.v !== CONFIG.save.version) throw new Error(`bilinmeyen kayıt sürümü ${data.v}`);
+  const src = data.G;
+  if (!src || typeof src !== "object" || !src.terminals || typeof src.terminals !== "object") throw new Error("terminal verisi yok");
+  const co = src.company;
+  if (!co || typeof co !== "object" || !Number.isFinite(co.cash)) throw new Error("şirket kasası okunamadı");
+  const g = freshGame();
+  g.clock = sanitizeClock(src.clock);
+  const ledger = Array.isArray(co.ledger) ? co.ledger.filter(x => x && Number.isFinite(x.amount) && Number.isInteger(x.id)) : [];
+  const totals = {};
+  if (co.totals && typeof co.totals === "object") for (const [k, v] of Object.entries(co.totals)) if (Number.isFinite(v)) totals[k] = v;
+  g.company = {
+    cash: co.cash,
+    ledger,
+    totals,
+    // never reuse a transaction id, even if the stored counter went missing
+    nextTxId: Math.max(Number.isInteger(co.nextTxId) ? co.nextTxId : 1, ...ledger.map(x => x.id + 1)),
+  };
+  g.flags = Object.assign(g.flags, src.flags && typeof src.flags === "object" ? src.flags : {});
+  g.migratedFrom = Number.isInteger(src.migratedFrom) ? src.migratedFrom : null;
+  g.terminals = {};
+  for (const def of CONFIG.terminals) { // ids no longer in CONFIG are dropped
+    const st = src.terminals[def.id];
+    if (!st || typeof st !== "object" || st.owned === false) continue; // only owned terminals are ever stored
+    const t = { id: def.id };
+    sanitizeTerminalMeta(t, st, def.profile || CONFIG.newGameProfile);
+    g.terminals[def.id] = t;
+  }
+  const owned = Object.values(g.terminals).filter(t => t.owned);
+  if (!owned.length) throw new Error("sahip olunan terminal yok");
+  g.activeTerminal = g.terminals[src.activeTerminal] && g.terminals[src.activeTerminal].owned ? src.activeTerminal : owned[0].id;
+  // the old company store's mop kits become the mop level of the cleaning
+  // track — where one was assigned, or at the active terminal if it sat in the store
+  const mop = CONFIG.wcTracks.tool.levels.find(x => x.tool === "mop").level;
+  for (const e of Array.isArray(src.equipment) ? src.equipment : []) {
+    if (!e || e.type !== "mop") continue;
+    const t = g.terminals[e.terminal] || g.terminals[g.activeTerminal];
+    t.wc.tool = Math.max(t.wc.tool, mop);
+  }
+  return g;
+}
+
+// A pre-progression save ({v:3..6, S, buses}) becomes one owned terminal on
+// the classic profile, which matches what that game had: 10 stalls, hose,
+// cologne, manual car wash. Rep, clock, buses and guests carry over as they are.
+function migrateLegacy(data) {
+  if (!data || ![3, 4, 5, 6].includes(data.v) || !data.S || typeof data.S !== "object") throw new Error("eski kayıt biçimi değil");
+  const g = freshGame("classic");
+  g.company.cash = CONFIG.economy.migratedCash;
+  g.migratedFrom = data.v;
+  g.flags.firstBusDone = true; // an old game already had its buses — no new-game opening
+  g.clock = sanitizeClock({ day: data.S.day, time: data.S.time, lastSave: data.S.lastSave });
+  const t = g.terminals[g.activeTerminal];
+  t.sim = data.S;
+  t.buses = data.buses;
+  return g;
+}
+
+// Make g the live game. With v (the version the data came from), every owned
+// terminal's raw sim is repaired first; a terminal whose data cannot be
+// repaired restarts empty (progression kept) and is reported in the notes.
+function adoptGame(g, v = null) {
+  G = g;
+  runtime = {};
+  const notes = [];
+  for (const t of ownedTerminals()) {
+    if (v == null) { bindTerminal(t.id); rebuildFacilities(); continue; }
+    try { fixupTerminal(t, v); }
+    catch (e) {
+      t.sim = Object.assign(freshSim(finiteOr(t.sim && t.sim.rep, CONFIG.profiles.classic.rep)), { bottle: wcDef("cologne", t).ml });
+      t.buses = [];
+      bindTerminal(t.id);
+      rebuildFacilities();
+      notes.push(`${terminalName(t.id)} durumu okunamadı ve sıfırlandı (${e.message}).`);
+    }
+    if (t.id !== g.activeTerminal) { t.sim.view = "out"; t.sim.washBus = null; }
+  }
+  bindTerminal(G.activeTerminal);
+  return notes;
+}
+
+const terminalName = id => (CONFIG.terminals.find(d => d.id === id) || { name: id }).name;
+
+// Repairs one terminal's saved sim + buses in place (bound while it runs).
+// v is the save version the data came from; the per-version fix-ups below
+// are the pre-v7 loader's, unchanged.
+function fixupTerminal(t, v) {
+  const raw = t.sim && typeof t.sim === "object" ? t.sim : {};
+  t.sim = Object.assign(freshSim(), raw);
+  delete t.sim.time; delete t.sim.day; delete t.sim.lastSave; // the clock is G.clock
+  t.sim.rep = clamp(finiteOr(raw.rep, 50), 0, 100);
+  t.sim.stats = sanitizeStats(raw.stats, t.sim.rep);
+  t.sim.history = (Array.isArray(raw.history) ? raw.history : []).filter(h => h && typeof h === "object")
+    .slice(-HISTORY_DAYS).map(h => Object.assign(sanitizeStats(h, 50), { day: Math.max(1, Math.floor(finiteOr(h.day, 1))), repEnd: clamp(finiteOr(h.repEnd, 50), 0, 100) }));
+  if (!Array.isArray(t.sim.slotVacantSince) || t.sim.slotVacantSince.length !== BAY_SLOTS.length)
+    t.sim.slotVacantSince = BAY_SLOTS.map(() => null);
+  t.sim.nextBusAt = finiteOr(raw.nextBusAt, G.clock.time + 0.25);
+  { const ml = wcLevel("cologne", t.wc.cologne).ml; t.sim.bottle = clamp(finiteOr(raw.bottle, ml), 0, ml); }
+  t.sim.tea = clamp(finiteOr(raw.tea, 1), 0, 1);
+  t.buses = Array.isArray(t.buses) ? t.buses.filter(b => b && typeof b === "object" && Array.isArray(b.pax)) : [];
+  // bus ids are per terminal: the next one must not collide with a saved bus
+  t.sim.nextBusId = Math.max(Number.isInteger(raw.nextBusId) ? raw.nextBusId : 1, ...t.buses.map(b => (Number.isInteger(b.id) ? b.id : 0) + 1));
+  bindTerminal(t.id);
+  // v6 saves predate per-stall cleanliness, and older saves carry the old
+  // 8-stall count — if the array is missing or the count no longer matches,
+  // inherit the old shared value so an old game keeps its dirt instead of
+  // skipping ahead to spotless
+  // Check raw (the save), not S: after Object.assign above, S.stallClean
+  // always exists from freshSim(), which would hide a genuinely missing key.
+  if (!Array.isArray(raw.stallClean) || raw.stallClean.length !== WC_STALLS)
+    S.stallClean = Array(WC_STALLS).fill(clamp(finiteOr(raw.cleanliness, 100), 0, 100));
+  else
+    S.stallClean = raw.stallClean.map(x => clamp(finiteOr(x, 100), 0, 100));
+  S.cleanliness = avgClean(); // re-derive the HUD average
+  for (const b of buses) { if (b.state === "stop" && !BAY_SLOTS[b.slot]) b.slot = 0; migrateBus(b); }
+  // older saves predate the man/woman/kid looks — give untyped guests one
+  for (const b of buses) for (const p of b.pax) {
+    if (!p.type) p.type = rollPaxType();
+    if (!p.skin) p.skin = pick(SKIN_TONES);
+    if (!p.hair) p.hair = pick(HAIR_TONES);
+    // saves from the bastinado era: a `fled` guest still walking to the exit
+    // is a runaway; anyone else is just an unpaid guest
+    if (p.runaway == null) p.runaway = !!p.fled && p.state === "leaveC";
+    delete p.fled; delete p.punishRed;
+  }
+  delete S.stats.busts;
+  if (S.view !== "out" && S.view !== "wc" && S.view !== "wash") S.view = "out";
+  // a guest saved mid-scrub restarts the cleaning sequence (inside the WC,
+  // so it plays where it can be seen); a second one can't exist — demote it
+  const scrubbers = buses.flatMap(b => b.pax).filter(p => p.state === "scrubC");
+  scrubbers.forEach((p, i) => { if (i) { p.state = "leaveC"; p.runaway = false; } });
+  if (scrubbers.length) {
+    if (t.id === G.activeTerminal) { startScrub(scrubbers[0]); S.view = "wc"; }
+    else { scrubbers[0].state = "leaveC"; scrubbers[0].runaway = false; } // the scrub is a foreground show
+  }
+  // stall de-dup: first claim wins, later claimants demoted to drive
+  const taken = new Set();
+  for (const b of buses) if ((b.state === "stop" || b.state === "enter") && b.slot != null) {
+    if (taken.has(b.slot)) { b.slot = null; b.state = "drive"; b.stoppedOnce = true; } else taken.add(b.slot);
+  }
+  // v3 outdoor pax were placed in the old apron band — teleport to their bus door
+  if (v === 3) for (const b of buses) for (const p of b.pax)
+    if (p.state === "walk" || p.state === "free" || p.state === "board") {
+      const d = doorPos(b); p.x = d.x; p.y = d.y; p.tx = d.x; p.ty = d.y;
+      p.state = "free"; p.idleT = rand(0.5, 2);
+    }
+  rebuildFacilities();
+  // the windshield grid changed shape across versions (v3/v4: 6×3, v5: 6×4,
+  // v6: 30×20) — resample any saved wash onto the current grid, taking the
+  // nearest old cell, so old saves keep their grime
+  const wn = WASH.wind.cols * WASH.wind.rows;
+  const oldGrid = { 18: [6, 3], 24: [6, 4] }; // saved array length -> [cols, rows]
+  for (const b of buses) {
+    if (b.wash && (!Array.isArray(b.wash.g) || !Array.isArray(b.wash.f))) b.wash = null; // unreadable — rebuilt dusty on demand
+    if (!b.wash || (b.wash.g.length === wn && b.wash.f.length === wn)) continue;
+    if (b.washDone || b.wash.done) {
+      b.wash = { g: new Array(wn).fill(0), f: new Array(wn).fill(0), tool: b.wash.tool, done: true, cd: new Array(wn).fill(0) };
+      continue;
+    }
+    const [oc, orw] = oldGrid[b.wash.g.length] || [6, 3];
+    const og = b.wash.g, of = b.wash.f || [];
+    const g = new Array(wn), f = new Array(wn);
+    for (let r = 0; r < WASH.wind.rows; r++) for (let c = 0; c < WASH.wind.cols; c++) {
+      const j = Math.min(og.length - 1,
+        Math.min(orw - 1, Math.floor(r * orw / WASH.wind.rows)) * oc +
+        Math.min(oc - 1, Math.floor(c * oc / WASH.wind.cols)));
+      g[r * WASH.wind.cols + c] = og[j] == null ? 1 : og[j];
+      f[r * WASH.wind.cols + c] = of[j] == null ? 0 : of[j];
+    }
+    b.wash = { g, f, tool: b.wash.tool, done: false, cd: new Array(wn).fill(0) };
+  }
+  // apply cooldowns are a per-session pacing aid, not state
+  for (const b of buses) if (b.wash) b.wash.cd = new Array(b.wash.g.length).fill(0);
+  // a saved mid-wash view needs a bus that is actually parked
+  if (S.view === "wash") {
+    const wb = buses.find(x => x.id === S.washBus);
+    if (!wb || wb.state !== "stop") { S.view = "out"; S.washBus = null; }
+  }
+}
+/* ----------------------------- Economy ------------------------------ */
+// The only place company cash changes. amount > 0 is income, < 0 an expense.
+// An expense the company can't cover is refused (null) unless mandatory — a
+// loss that already happened in the world, like change handed back by mistake.
+// Each applied transaction gets a unique id, a ledger line, a per-kind total
+// and its terminal's daily revenue / expenses.
+function applyTransaction(kind, amount, terminalId = null, note = "", mandatory = false) {
+  if (!Number.isFinite(amount) || amount === 0) return null;
+  const co = G.company;
+  if (amount < 0 && co.cash + amount < 0 && !mandatory) return null;
+  const tx = { id: co.nextTxId++, kind, amount, terminal: terminalId, day: G.clock.day, time: G.clock.time, note };
+  co.cash += amount;
+  co.totals[kind] = (co.totals[kind] || 0) + amount;
+  co.ledger.push(tx);
+  if (co.ledger.length > CONFIG.economy.ledgerMax) co.ledger.splice(0, co.ledger.length - CONFIG.economy.ledgerMax);
+  const t = terminalId && G.terminals[terminalId];
+  if (t) { if (amount > 0) t.sim.stats.revenue += amount; else t.sim.stats.expenses -= amount; }
+  if (terminalId === G.activeTerminal) cashFloats.push({ amount, t0: performance.now() });
+  return tx;
+}
+
+// A completed, paid toilet visit: the fee is booked once per visit (feePaid is
+// reset when the guest joins a payment line). Change handed back beyond what
+// was owed is booked as a loss.
+function collectPayment(p) {
+  if (p.feePaid) return;
+  p.feePaid = true;
+  applyTransaction("toiletFee", CONFIG.economy.toiletFee, boundId, "WC");
+  const over = (p.changeGiven || 0) - Math.max(0, p.owed || 0);
+  if (over > 0) applyTransaction("changeLoss", -over, boundId, "fazla para üstü", true);
+}
+
+const fail = reason => ({ ok: false, reason });
+const termDef = id => CONFIG.terminals.find(d => d.id === id);
+// A tier's price at a given terminal: the base cost × the terminal's development cost.
+const tierCost = (id, def) => Math.round(def.cost * ((termDef(id) || {}).devCost || 1) / 10) * 10;
+const ownedTerminal = id => (G.terminals[id] && G.terminals[id].owned ? G.terminals[id] : null);
+
+// Can terminal `id` buy level `level` of WC track `track` right now? { ok, reason, def }
+function wcUpgradeStatus(id, track, level) {
+  const t = ownedTerminal(id);
+  if (!t) return fail("Bu terminal senin değil");
+  if (!CONFIG.wcTracks[track]) return fail("Bilinmeyen yükseltme");
+  const def = wcLevel(track, level);
+  if (!def) return fail("Böyle bir seviye yok");
+  if (level <= t.wc[track]) return { ok: false, reason: "Sahipsin", def, owned: true };
+  if (level !== t.wc[track] + 1) return { ok: false, reason: `Önce: ${wcLevel(track, level - 1).name}`, def };
+  const minServed = def.minServed || 0;
+  if (S.stats.served < minServed) return { ok: false, reason: `${minServed - S.stats.served} misafir daha hizmet gerek`, def };
+  const cost = tierCost(id, def);
+  if (G.company.cash < cost) return { ok: false, reason: `${fmtTL(cost - G.company.cash)} eksik`, def, cost };
+  return { ok: true, def, cost };
+}
+
+// Can terminal `id` buy car-wash tier `tier`? Tier 1 is the unlock: it needs
+// cash and nothing else — reputation is deliberately not a requirement.
+function carWashStatus(id, tier) {
+  const t = ownedTerminal(id);
+  if (!t) return fail("Bu terminal senin değil");
+  const def = CONFIG.carWashTiers.find(x => x.tier === tier);
+  if (!def) return fail("Böyle bir seviye yok");
+  const have = t.carWash.unlocked ? t.carWash.tier : 0;
+  if (tier <= have) return { ok: false, reason: "Sahipsin", def, owned: true };
+  if (tier !== have + 1) return { ok: false, reason: `Önce: ${CONFIG.carWashTiers.find(x => x.tier === tier - 1).name}`, def };
+  const cost = tierCost(id, def);
+  if (G.company.cash < cost) return { ok: false, reason: `${fmtTL(cost - G.company.cash)} eksik`, def, cost };
+  return { ok: true, def, cost };
+}
+
+// Buy the next level of a track (a CONFIG.wcTracks key or "carWash"):
+// validated first, then charged and applied together.
+function purchaseUpgrade(id, track, tier) {
+  if (track === "carWash") {
+    const st = carWashStatus(id, tier);
+    if (!st.ok) return st;
+    const tx = applyTransaction("facility", -st.cost, id, st.def.name);
+    if (!tx) return fail("Yetersiz kasa");
+    G.terminals[id].carWash = { unlocked: true, tier: st.def.tier };
+    scheduleMaintenance(G.terminals[id]);
+    save();
+    return { ok: true, tx };
+  }
+  const st = wcUpgradeStatus(id, track, tier);
+  if (!st.ok) return st;
+  const tx = applyTransaction("facility", -st.cost, id, st.def.name);
+  if (!tx) return fail("Yetersiz kasa");
+  const t = G.terminals[id], from = wcDef(track, t);
+  const built = STALL_ORDER.slice(0, wcDef("count", t).stalls);
+  t.wc[track] = st.def.level;
+  // new bays open spotless; a new fixture replaces (and cleans) every built one
+  if (track === "count") for (const i of STALL_ORDER.slice(from.stalls, st.def.stalls)) t.sim.stallClean[i] = 100;
+  if (track === "style") for (const i of built) t.sim.stallClean[i] = 100;
+  if (track === "cologne") t.sim.bottle = st.def.ml; // the new bottle arrives full
+  if (track === "tea") t.sim.tea = 1; // the new glass arrives full
+  if (track === "tool" && id === G.activeTerminal) toolInHand = null; // the stations get their new tool
+  const now = STALL_ORDER.slice(0, wcDef("count", t).stalls);
+  t.sim.cleanliness = now.reduce((a, i) => a + t.sim.stallClean[i], 0) / now.length;
+  scheduleMaintenance(t);
+  save();
+  return { ok: true, tx };
+}
+
+/* -------------------------- Terminal network -------------------------- */
+// Each requirement of a terminal, and whether the company meets it now.
+function terminalRequirements(id) {
+  const r = (termDef(id) || {}).requires || {}, own = ownedTerminals(), out = [];
+  if (r.minRep != null) {
+    const best = Math.max(0, ...own.map(t => t.sim.rep));
+    out.push({ text: `Bir terminalinde itibar ${r.minRep}+ (en iyisi: ${Math.round(best)})`, met: best >= r.minRep });
+  }
+  if (r.minOwned != null) out.push({ text: `En az ${r.minOwned} terminal (şimdi: ${own.length})`, met: own.length >= r.minOwned });
+  if (r.minToiletStyle != null) {
+    const best = Math.max(...own.map(t => t.wc.style));
+    out.push({ text: `Bir terminalde ${wcLevel("style", r.minToiletStyle).name} ya da daha iyisi`, met: best >= r.minToiletStyle });
+  }
+  return out;
+}
+
+// Can the company buy terminal `id` now? { ok, reason, def, reqs }
+function terminalStatus(id) {
+  const def = termDef(id);
+  if (!def) return fail("Böyle bir terminal yok");
+  if (ownedTerminal(id)) return { ok: false, reason: "Sahipsin", def, owned: true, reqs: [] };
+  const reqs = terminalRequirements(id), unmet = reqs.find(x => !x.met);
+  if (unmet) return { ok: false, reason: `Şart: ${unmet.text}`, def, reqs };
+  if (G.company.cash < def.price) return { ok: false, reason: `${fmtTL(def.price - G.company.cash)} eksik`, def, reqs };
+  return { ok: true, def, reqs };
+}
+
+// Buy a terminal: validated first; then charged once and initialized from its
+// profile. Every other terminal is left exactly as it was.
+function unlockTerminal(id) {
+  const st = terminalStatus(id);
+  if (!st.ok) return st;
+  const tx = applyTransaction("terminal", -st.def.price, id, st.def.name);
+  if (!tx) return fail("Yetersiz kasa");
+  const t = freshTerminal(id, st.def.profile);
+  t.sim.nextBusAt = G.clock.time + 0.1; // its first bus is already on the way
+  G.terminals[id] = t;
+  const prev = boundId;
+  bindTerminal(id);
+  rebuildFacilities();
+  scheduleMaintenance(t);
+  bindTerminal(prev);
+  toast(`🎉 ${st.def.name} artık senin`, "good");
+  save();
+  return { ok: true, tx };
+}
+
+// Show another owned terminal. Only the binding changes — every terminal keeps
+// running in the shared scheduler, so nothing is paused, replayed or duplicated.
+function switchTerminal(id) {
+  if (!ownedTerminal(id)) return fail("Bu terminal senin değil");
+  if (id === G.activeTerminal) return fail("Zaten buradasın");
+  if (scrub) finishScrub();     // the caught runaway's show ends with the visit
+  setView("out");               // tools go back on their stations
+  S.view = "out"; S.washBus = null;
+  G.activeTerminal = id;
+  bindTerminal(id);
+  S.view = "out"; S.washBus = null;
+  cashFloats = [];
+  viewFade = 1;
+  save();
+  return { ok: true };
+}
+
+/* -------------------- Automation & maintenance -------------------- */
+// Absolute game hours since day 1, 00:00 — maintenance deadlines never wrap.
+const absNow = () => (G.clock.day - 1) * 24 + G.clock.time;
+const tierOfToilet = t => wcDef("style", t);
+// "2 kabin · İlkel alaturka tuvaletler · Küçük el fırçası" for a wc levels object
+const wcSummary = wc => ["count", "style", "tool", "cologne", "calc"]
+  .filter(k => wc[k] > 0).map(k => wcLevel(k, wc[k]).name).join(" · ");
+const tierOfWash = t => (t.carWash.unlocked ? CONFIG.carWashTiers.find(x => x.tier === t.carWash.tier) : null);
+const SYSTEM_NAMES = { toilet: "Otomatik tuvaletler", wash: "Otomatik yıkama" };
+
+// The automated systems a terminal has installed (working or not).
+function autoSystems(t) {
+  const out = [];
+  if (tierOfToilet(t).auto) out.push("toilet");
+  const w = tierOfWash(t);
+  if (w && w.auto) out.push("wash");
+  return out;
+}
+const systemFailed = (t, sys) => t.maintenance.failures.some(f => f.system === sys);
+const autoRunning = sys => autoSystems(term()).includes(sys) && !systemFailed(term(), sys);
+const maintenanceCost = t => (tierOfToilet(t).upkeep || 0) + ((tierOfWash(t) || {}).upkeep || 0);
+const operatingCost = t => (tierOfToilet(t).opCost || 0) + ((tierOfWash(t) || {}).opCost || 0);
+const maintenanceDue = t => t.maintenance.nextDueAt != null && absNow() >= t.maintenance.nextDueAt;
+const needsAttention = t => autoSystems(t).length > 0 && (maintenanceDue(t) || t.maintenance.failures.length > 0);
+
+// The first automated system starts the maintenance schedule; later
+// upgrades keep the running one.
+function scheduleMaintenance(t) {
+  const m = t.maintenance;
+  if (!autoSystems(t).length || m.nextDueAt != null) return;
+  m.condition = 100;
+  m.lastAt = absNow();
+  m.nextDueAt = absNow() + CONFIG.maintenance.intervalHours;
+  m.tickAt = Math.floor(absNow()) + 1;
+  m.dueNotified = false;
+}
+
+function breakDown(t, sys) {
+  t.maintenance.failures.push({ system: sys, at: absNow() });
+  t.sim.rep = clamp(t.sim.rep - CONFIG.maintenance.failRep, 0, 100);
+  toast(`⚠️ ${SYSTEM_NAMES[sys]} arızalandı — onarılana kadar elle çalış`, "bad", true);
+}
+
+// Hourly, on the game clock (so every speed tier and a hidden-tab catch-up
+// see the same schedule): wear, the breakdown roll, the due notice.
+function maintenanceTick() {
+  const t = term(), m = t.maintenance, sys = autoSystems(t), M = CONFIG.maintenance;
+  if (!sys.length) return;
+  if (m.tickAt == null) m.tickAt = Math.floor(absNow()) + 1;
+  while (absNow() >= m.tickAt) {
+    const overdue = m.nextDueAt != null && m.tickAt >= m.nextDueAt;
+    m.condition = clamp(m.condition - (overdue ? M.overdueWearPerHour : M.wearPerHour), 0, 100);
+    for (const s of sys) {
+      if (systemFailed(t, s)) continue;
+      const p = (M.failBase + M.failWorn * ((100 - m.condition) / 100) ** 2) * (overdue ? M.overdueFailMult : 1);
+      if (Math.random() < p) breakDown(t, s);
+    }
+    m.tickAt += 1;
+  }
+  if (maintenanceDue(t) && !m.dueNotified) {
+    m.dueNotified = true;
+    toast(`🔧 Günlük bakım zamanı (${fmtTL(maintenanceCost(t))})`, "bad", true);
+  }
+}
+
+function maintenanceStatus(id) {
+  const t = ownedTerminal(id);
+  if (!t) return fail("Bu terminal senin değil");
+  if (!autoSystems(t).length) return fail("Bakım gerektiren otomasyon yok");
+  if (!maintenanceDue(t) && t.maintenance.condition >= 100) return fail("Bakım gerekmiyor");
+  const cost = maintenanceCost(t);
+  if (G.company.cash < cost) return { ok: false, reason: `${fmtTL(cost - G.company.cash)} eksik`, cost };
+  return { ok: true, cost };
+}
+
+// Routine maintenance: restores condition and books the next deadline.
+function performMaintenance(id) {
+  const st = maintenanceStatus(id);
+  if (!st.ok) return st;
+  if (!applyTransaction("maintenance", -st.cost, id, "günlük bakım")) return fail("Yetersiz kasa");
+  const m = G.terminals[id].maintenance;
+  m.condition = 100;
+  m.lastAt = absNow();
+  m.nextDueAt = absNow() + CONFIG.maintenance.intervalHours;
+  m.dueNotified = false;
+  save();
+  return { ok: true };
+}
+
+function repairStatus(id, sys) {
+  const t = ownedTerminal(id);
+  if (!t) return fail("Bu terminal senin değil");
+  if (!systemFailed(t, sys)) return fail("Arıza yok");
+  const cost = CONFIG.maintenance.repairCost[sys];
+  if (G.company.cash < cost) return { ok: false, reason: `${fmtTL(cost - G.company.cash)} eksik`, cost };
+  return { ok: true, cost };
+}
+
+// Clears a breakdown; the system runs again at its current condition.
+function repairFailure(id, sys) {
+  const st = repairStatus(id, sys);
+  if (!st.ok) return st;
+  if (!applyTransaction("repair", -st.cost, id, SYSTEM_NAMES[sys])) return fail("Yetersiz kasa");
+  const m = G.terminals[id].maintenance;
+  m.failures = m.failures.filter(f => f.system !== sys);
+  save();
+  return { ok: true };
+}
+
 // Buses saved before v4 used a left-edge + baseY model (horizontal only).
 // Convert to the center + angle model; a v3 bus could never be mid-turn.
 function migrateBus(b) {
@@ -346,7 +1044,7 @@ function migrateBus(b) {
   }
 }
 function rebuildFacilities() {
-  facilities = { R: { spots: [], queue: [] }, T: { spots: [], queue: [] }, C: { queue: [], queue2: [] } };
+  facilities = runtime[boundId].facilities = emptyFacilities();
   // In-visit guests occupy spots, not queue slots (live pull does queue.shift();
   // completeService never re-adds). Restore them to the free spots, in saved
   // order, capacity-capped — instead of ghosting them back into the queue.
@@ -355,14 +1053,14 @@ function rebuildFacilities() {
   const rSpots = Array(rStalls).fill(null), tSpots = Array(tStalls).fill(null);
   // prefer the stall/seat the guest was using (p.stall); if that slot went
   // away, take the first free one — capacity-capped either way.
-  const nextFree = (arr, pref) => {
-    if (pref >= 0 && pref < arr.length && !arr[pref]) return pref;
-    for (let i = 0; i < arr.length; i++) if (!arr[i]) return i;
+  const nextFree = (arr, pref, ok = () => true) => {
+    if (pref >= 0 && pref < arr.length && !arr[pref] && ok(pref)) return pref;
+    for (let i = 0; i < arr.length; i++) if (!arr[i] && ok(i)) return i;
     return -1;
   };
   for (const p of buses.flatMap(b => b.pax)) {
     if (p.state === "serveR") { const s = nextFree(rSpots, p.stall); if (s >= 0) { rSpots[s] = { pax: p, t: SVC_TIME_R }; p.stall = s; } continue; }
-    if (p.state === "serveT") { const s = nextFree(tSpots, p.stall); if (s >= 0) { tSpots[s] = { pax: p, t: rand(TOILET_STAY[0], TOILET_STAY[1]) }; p.stall = s; } continue; }
+    if (p.state === "serveT") { const s = nextFree(tSpots, p.stall, stallActive); if (s >= 0) { tSpots[s] = { pax: p, t: rand(TOILET_STAY[0], TOILET_STAY[1]) }; p.stall = s; } continue; }
     const inC2 = p.state === "queueC2" || p.state === "payC2";
     const F = p.state === "waitR" ? facilities.R : p.state === "waitT" ? facilities.T
       : (p.state === "queueC" || p.state === "payC" || p.state === "doneC" || p.state === "dripC" || inC2) ? facilities.C
@@ -404,7 +1102,7 @@ function rollPaxType() {
 }
 
 // How long a stall may sit empty before the next bus is pulled in ahead of
-// schedule (the backstop in update()). At rep 0 that's 2 h — the terminal may
+// schedule (the backstop in stepTerminal()). At rep 0 that's 2 h — the terminal may
 // be quiet, but a bus still visits at least every other hour. At rep 100 it's
 // 30 min: a busy terminal's stalls never sit empty for longer than that.
 function maxGap() {
@@ -421,7 +1119,10 @@ function busInterval() {
   return clamp(rand(0.6, 1) * lerp(2, 0.25, S.rep / 100), 0.1, 2);
 }
 
-function spawnBus(reserved = null) {
+// opening: the new game's first bus appears on the lane just short of the
+// first bay's turn-in instead of off-screen, so it pulls in ~1 real second
+// after play starts.
+function spawnBus(reserved = null, opening = false) {
   const roll = Math.random();
   const kind = roll < 0.68 ? "small" : roll < 0.9 ? "mid" : "big";
   const def = BUS_KINDS[kind];
@@ -433,7 +1134,8 @@ function spawnBus(reserved = null) {
     id: S.nextBusId++,
     kind, len: def.len, hue,
     from: DEST_A, to: DEST_B,
-    cx: -offX - def.len / 2 - rand(20, 160), // off the canvas edge, not the core edge
+    cx: opening ? enterGeom({ len: def.len }, 0).x0 - CONFIG.firstBusLead
+      : -offX - def.len / 2 - rand(20, 160), // off the canvas edge, not the core edge
     cy: LANE_Y - 45,
     ang: 0,
     state: "drive",
@@ -449,6 +1151,15 @@ function spawnBus(reserved = null) {
   };
   buses.push(b);
   toast(`🚌 ${DEST_A}'dan ${n} yolcu`, "");
+}
+
+// A brand-new company's opening bus, once — the flag is saved, so a reload never replays it.
+function openingBus() {
+  if (G.flags.firstBusDone || boundId !== G.activeTerminal || buses.length) return;
+  G.flags.firstBusDone = true;
+  spawnBus(null, true);
+  S.nextBusAt = G.clock.time + busInterval();
+  save();
 }
 
 function makePax() {
@@ -551,15 +1262,15 @@ function finishEnter(b) {
   b.cx = g.tx; b.cy = g.ty; b.ang = -Math.PI / 2;
   b.v = 0; b.brake = false; b.blink = false; b.mv = null;
   b.state = "stop";
-  b.stopStart = S.time;
+  b.stopStart = G.clock.time;
   if (S.slotVacantSince) S.slotVacantSince[b.slot] = null; // stall filled
   // Planned layover: ~31 min (25–36 in-game minutes) from the moment the bus
   // is fully in. Time runs 1:1 with the real world, so the whole terminal stay
   // (roll-in + layover + whatever tail) is budgeted against the 1-hour hard cap
-  // in update(): a stop with no WC line averages ~33 min total, and even the
+  // in stepTerminal(): a stop with no WC line averages ~33 min total, and even the
   // shared 5–10 min counter-line deadline plus the sprint home stays under the
   // hour — the cap is a backstop that only triggers on a very unlucky stop.
-  b.stopEnd = S.time + rand(0.42, 0.60);
+  b.stopEnd = G.clock.time + rand(0.42, 0.60);
   for (const p of b.pax) {
     p.offAt = b.stopStart + Math.random() * (b.stopEnd - b.stopStart) * 0.55;
     // Start for the door 6–12 in-game min before stopEnd. In a 1:1 world the
@@ -622,7 +1333,7 @@ function guaranteeWc(b) {
 }
 
 function endStop(b) {
-  if (b.slot != null && S.slotVacantSince) S.slotVacantSince[b.slot] = S.time; // stall vacant — backstop clock starts
+  if (b.slot != null && S.slotVacantSince) S.slotVacantSince[b.slot] = G.clock.time; // stall vacant — backstop clock starts
   b.slot = null;
   b.state = "exit";
   b.mv = { s: 0, sx: b.cx, sy: b.cy };
@@ -644,7 +1355,7 @@ function endStop(b) {
     sum += s;
   }
   const rawAvg = sum / b.pax.length;
-  const avg = b.washDone ? clamp(rawAvg + 5, 0, 100) : rawAvg; // a sparkling bus rides off happier
+  const avg = b.washDone ? clamp(rawAvg + (b.washSat != null ? b.washSat : 5), 0, 100) : rawAvg; // a sparkling bus rides off happier
   const delta = clamp((avg - 50) * 0.15 * (b.pax.length / 12), -6, 6);
   S.rep = clamp(S.rep + delta, 0, 100);
   S.stats.buses++;
@@ -700,9 +1411,10 @@ function driveTarget(b) {
   return vT;
 }
 
-// The cleanest stall in the whole row, occupied or not — the bar that
-// makes a guest give up on the WC entirely (every single stall below it).
-const bestStallClean = () => Math.max(...S.stallClean);
+// The cleanest built stall, occupied or not — the bar that makes a guest
+// give up on the WC entirely (every single stall below it).
+const bestStallClean = () => Math.max(...activeStalls().map(i => S.stallClean[i]));
+const hasFreeStall = () => activeStalls().some(i => !facilities.T.spots[i]);
 
 // The cleanest stall that is actually FREE right now, -1 when the row is
 // fully occupied. Guests hold their LINE to this: an occupied clean stall
@@ -710,7 +1422,7 @@ const bestStallClean = () => Math.max(...S.stallClean);
 // stands until a clean stall frees up (or the hose fixes a filthy one).
 function bestFreeStallClean() {
   let best = -1;
-  for (let i = 0; i < WC_STALLS; i++)
+  for (const i of activeStalls())
     if (!facilities.T.spots[i]) best = Math.max(best, S.stallClean[i]);
   return best;
 }
@@ -723,7 +1435,7 @@ function evaluate(p, bus) {
       // Not refused for good: every evaluate rechecks, so once the hose has
       // done its work the same guest (still full) heads for the clean WC.
       p.want = null;
-      if (performance.now() - lastDirtyToast > 2500) {
+      if (onScreen() && performance.now() - lastDirtyToast > 2500) {
         lastDirtyToast = performance.now();
         toast("😖 Tuvalet pis, misafir gitti", "bad");
       }
@@ -743,7 +1455,7 @@ function tryJoin(fac, p, bus) {
   if (f.queue.includes(p)) return;
   f.queue.push(p);
   p.state = fac === "R" ? "waitR" : "waitT";
-  const stalls = fac === "R" ? DINER_SEATS : WC_STALLS;
+  const stalls = fac === "R" ? DINER_SEATS : stallCount();
   const svc = fac === "R" ? SVC_TIME_R : SVC_TIME_T;
   p.patience = (f.queue.length) * (svc / stalls) + 8;
   p.waitReal = 0;
@@ -769,7 +1481,7 @@ function updateFacilities(dt, timeDt = dt) {
   // toilets do NOT recover on their own — grime only leaves via the hose (or a
   // caught runaway's scrub); S.cleanliness stays the derived average
   // (outdoor HUD, legacy code paths)
-  S.cleanliness = S.stallClean.reduce((a, v) => a + v, 0) / WC_STALLS;
+  S.cleanliness = avgClean();
 }
 
 function stepFac(name, timeDt, stalls, svcTime) {
@@ -783,7 +1495,7 @@ function stepFac(name, timeDt, stalls, svcTime) {
     // A line that has free toilets to claim but not a single one clean
     // loses patience twice as fast — nobody enjoys waiting for a toilet
     // that smells. (A fully occupied row is just a busy row: normal drain.)
-    if (name === "T" && facilities.T.spots.some(s => !s) && bestFreeStallClean() < WC_TOO_DIRTY)
+    if (name === "T" && hasFreeStall() && bestFreeStallClean() < WC_TOO_DIRTY)
       p.patience -= timeDt * drain;
     if (reached(p.boardAt)) { f.queue.splice(i, 1); goDoor(p, findBusOf(p)); continue; }
     if (p.patience <= 0) {
@@ -800,7 +1512,7 @@ function stepFac(name, timeDt, stalls, svcTime) {
   // stall; diner seats fill from the front.
   while (f.queue.length) {
     const free = [];
-    for (let i = 0; i < stalls; i++) if (!f.spots[i]) free.push(i);
+    for (let i = 0; i < stalls; i++) if (!f.spots[i] && (name !== "T" || stallActive(i))) free.push(i);
     if (!free.length) break;
     // No guest steps into a toilet that filthy: if every OPEN stall is below
     // the bar, the whole line stands (and loses patience) until the hose
@@ -863,9 +1575,10 @@ function completeService(name, p) {
   // The whole cleanliness range counts, in both directions: a spotless stall
   // delights (up to +25 over baseline) and every notch of dirt drags the
   // rating down — that satisfaction feeds reputation in finishVisit.
-  p.useSat = clamp(SAT_BASE + (sc - 50) * 0.5, 0, 100);
+  p.useSat = clamp(SAT_BASE + (sc - 50) * 0.5 + toiletDef().satBonus, 0, 100);
   p.wcUsed = true; // a toilet rating — finishVisit weighs it 2× in reputation
-  if (si >= 0 && sc > 15) S.stallClean[si] = Math.max(0, sc - rand(8, 16));
+  if (si >= 0 && sc > 15) S.stallClean[si] = Math.max(0, sc - rand(...toiletDef().dirtUse));
+  autoCleanAfterVisit(si);
   p.waitTotal = p.waitReal; // their queue time, folded into the final rating
   p.waitReal = 0;
   p.sat = null;
@@ -894,7 +1607,7 @@ function fleeCounter(p) {
   p.runaway = true;
   if (S.stats) S.stats.evaded = (S.stats.evaded || 0) + 1;
   const now = performance.now();
-  if (now - lastEvadeToast > 2000) {
+  if (onScreen() && now - lastEvadeToast > 2000) {
     lastEvadeToast = now;
     toast("🏃 Misafir ödemeden kaçıyor!", "bad");
   }
@@ -948,16 +1661,19 @@ function stallDoorClosed(i) {
   return !!(s && s.pax && s.pax.inStall);
 }
 
-// One spray application from the held hose: every stall the fan reaches takes
-// a tick of cleaning, throttled by a short per-stall cooldown in REAL time
-// (like the car-wash tools — the hose works the same at any speed tier).
-// A stall whose door is closed (someone inside) can't be sprayed.
-function hoseApply(x, y) {
-  if (S.view !== "wc" || !hoseInHand) return;
-  const R = 18;
+// One application of the cleaning tool in hand (hand brush, mop or hose):
+// every built stall its reach touches takes a tick of cleaning, throttled by
+// a short per-stall cooldown in REAL time (like the car-wash tools — cleaning
+// works the same at any speed tier). A stall whose door is closed (someone
+// inside) can't be cleaned.
+function cleanApply(x, y) {
+  if (S.view !== "wc" || !toolInHand) return;
+  const tool = cleaningTool();
+  const R = tool.reach;
   const now = performance.now();
   let touched = false;
   for (let i = 0; i < WC_STALLS; i++) {
+    if (!stallActive(i)) continue;
     const r = stallBay(i);
     if (x + R < r.x || x - R > r.x + r.w || y + R < r.y || y - R > r.y + r.h) continue;
     if (stallDoorClosed(i)) continue; // door shut (occupant in) — the spray bounces
@@ -965,13 +1681,13 @@ function hoseApply(x, y) {
     hoseCd[i] = now + 150;
     touched = true;
     const before = S.stallClean[i];
-    S.stallClean[i] = Math.min(100, before + 5);
+    S.stallClean[i] = Math.min(100, before + tool.perSec * 0.15);
     if (before < 100 && S.stallClean[i] >= 100) {
       hoseGleam[i] = now; // sparkle burst on hitting 100
-      if (now - lastHoseToast > 1500) { lastHoseToast = now; toast("🚿 Kabin pırıl pırıl!", "good"); }
+      if (now - lastHoseToast > 1500) { lastHoseToast = now; toast(`${tool === CONFIG.cleaningTools.hose ? "🚿" : "🧽"} Kabin pırıl pırıl!`, "good"); }
     }
   }
-  if (touched) S.cleanliness = S.stallClean.reduce((a, v) => a + v, 0) / WC_STALLS;
+  if (touched) S.cleanliness = avgClean();
 }
 
 /* ---------------------- Player actions (counter) -------------------- */
@@ -983,7 +1699,7 @@ function setView(v) {
   S.view = v;
   viewFade = 1;
   if (from === "wash") S.washBus = null; // we step back out; the bus keeps its washed state
-  if (v !== "wc") hoseInHand = null;    // leaving the counter room — the hose goes back on its faucet
+  if (v !== "wc") toolInHand = null;    // leaving the counter room — the hose goes back on its faucet
   save();
 }
 
@@ -1013,6 +1729,7 @@ function ensureWash(b) {
 
 // Step up to the front of a parked bus and open the car wash view.
 function openWash(b) {
+  if (!carWashOpen()) return;
   ensureWash(b);
   S.washBus = b.id;
   setView("wash");
@@ -1032,7 +1749,8 @@ function washApply(x, y) {
   ({ x, y } = washToBus(x, y));
   // 600 cells of 8.4px would never all be reached one-cell-per-stroke — the
   // tool works every cell a 36px pad / spray fan around the pointer crosses
-  const R = 18 / WASH.zoom.s;
+  const wd = washDef();
+  const R = wd.reach / WASH.zoom.s;
   if (x + R < wx || x - R > wx + ww || y + R < wy || y - R > wy + wh) return;
   const cww = ww / cols, rhh = wh / rows;
   const c0 = Math.max(0, Math.floor((x - R - wx) / cww));
@@ -1045,29 +1763,33 @@ function washApply(x, y) {
     for (let c = c0; c <= c1; c++) {
       const i = r * cols + c;
       if ((w.cd[i] || 0) > now) continue;
-      w.cd[i] = now + 80;
+      w.cd[i] = now + wd.cd;
       if (w.tool === "brush") {
-        w.f[i] = Math.min(1, w.f[i] + 0.45); // suds up
+        w.f[i] = Math.min(1, w.f[i] + wd.soap); // suds up
       } else {
         const foam = w.f[i];                  // rinse: the suds do the real work
         w.f[i] *= 0.15;
-        w.g[i] = Math.max(0, w.g[i] - (0.15 + 0.6 * foam));
+        w.g[i] = Math.max(0, w.g[i] - (wd.rinse[0] + wd.rinse[1] * foam));
       }
     }
   }
   if (w.g.every(v => v < 0.1)) finishWash(b);
 }
 
-function finishWash(b) {
+// The windshield is spotless: the bus line pays the wash fee — once per bus
+// (w.done guards it) — and the driver remembers how good the job was.
+function finishWash(b, persist = true) {
   const w = ensureWash(b);
   if (w.done) return;
+  const wd = washDef();
   w.done = true;
   w.f = w.f.map(() => 0); // spotless — no residual suds where the final rinse didn't reach
   b.washDone = true;
+  b.washSat = wd.sat;
   S.stats.washes++;
-  S.rep = clamp(S.rep + 2, 0, 100);
-  toast("✨ Ön cam pırıl pırıl!", "good");
-  save();
+  S.rep = clamp(S.rep + wd.rep, 0, 100);
+  applyTransaction("carWashFee", wd.fee, boundId, wd.name);
+  if (persist) { toast("✨ Ön cam pırıl pırıl!", "good"); save(); } // the gantry works quietly; the regular autosave keeps it
 }
 
 /* ------------------- Runaways & the caught-guest scrub --------------- */
@@ -1090,15 +1812,15 @@ function catchRunaway(p) {
 // of both rows. 40% of the time is spent running between bowls (split by
 // distance), the rest scrubbing — an equal dwell at every stall.
 function startScrub(p) {
-  const pts = [];
-  for (let i = 0; i < WC_STALLS; i++) pts.push({ x: stallCx(i), y: stallSy(230) });
+  const bays = activeStalls();
+  const pts = bays.map(i => ({ x: stallCx(i), y: stallSy(230) }));
   let prev = { x: p.x, y: p.y }, total = 0;
   const dist = pts.map(q => { const d = Math.hypot(q.x - prev.x, q.y - prev.y); prev = q; total += d; return d; });
-  const travel = SCRUB_TIME * 0.4, dwell = SCRUB_TIME * 0.6 / WC_STALLS;
+  const travel = SCRUB_TIME * 0.4, dwell = SCRUB_TIME * 0.6 / bays.length;
   let t = 0;
   prev = { x: p.x, y: p.y };
   const legs = pts.map((q, i) => {
-    const leg = { a: prev, b: q, t0: t, t1: t + travel * dist[i] / (total || 1) };
+    const leg = { a: prev, b: q, stall: bays[i], t0: t, t1: t + travel * dist[i] / (total || 1) };
     leg.t2 = t = leg.t1 + dwell;
     prev = q;
     return leg;
@@ -1164,7 +1886,7 @@ function drawWashView() {
   const hsh = n => frac(Math.sin(n * 127.1 + 11.3) * 43758.5453); // stable per-index noise
 
   // --- sky (the same palette as the layover — the view change feels like a dolly)
-  const [top, bot] = skyColors(S.time);
+  const [top, bot] = skyColors(G.clock.time);
   const sky = ctx.createLinearGradient(0, 0, 0, hz);
   sky.addColorStop(0, top); sky.addColorStop(1, bot);
   ctx.fillStyle = sky;
@@ -1973,10 +2695,12 @@ function drawWashView() {
 
   // --- the active tool, following the pointer (nothing when none is in hand)
   const px = pointer.x, py = pointer.y;
+  const toolK = washDef().reach / CONFIG.carWashTiers[0].reach; // bigger equipment, bigger tool
   if (w.tool === "brush") {
     ctx.save();
     ctx.translate(px, py);
     ctx.rotate(-0.6);
+    ctx.scale(toolK, toolK);
     ctx.fillStyle = "rgba(0,0,0,0.18)";
     rr(ctx, -24, -14, 54, 18, 9); ctx.fill();      // soft contact shadow on the glass
     drawBrush(-8, 96, -22, 6);
@@ -1984,7 +2708,11 @@ function drawWashView() {
   } else if (w.tool === "hose") {
     // the hose drapes from the faucet to the nozzle at the pointer
     drawHoseLine(fcx, fcy + 20, px, py);
-    if (pointerDown && !w.done) drawHoseSpray(px, py, now);
+    if (pointerDown && !w.done) {
+      ctx.save(); ctx.translate(px, py); ctx.scale(toolK, toolK); ctx.translate(-px, -py);
+      drawHoseSpray(px, py, now);
+      ctx.restore();
+    }
     drawHoseNozzle(px, py);
   }
 
@@ -1992,7 +2720,7 @@ function drawWashView() {
   const n = w.g.length;
   const gAvg = w.g.reduce((a, v) => a + v, 0) / n;
   const fAvg = w.f.reduce((a, v) => a + v, 0) / n;
-  const P = { x: -offX + 18, y: -offY + 18, w: 220, h: 84 }; // pinned to the visible top-left corner
+  const P = { x: -offX + 18, y: -offY + 18, w: 220, h: 100 }; // pinned to the visible top-left corner
   ctx.save();
   ctx.shadowColor = "rgba(0,0,0,0.35)";
   ctx.shadowBlur = 12;
@@ -2033,6 +2761,10 @@ function drawWashView() {
       : fAvg < 0.5 ? "1 · ön camı köpükle (fırça)"
       : "2 · köpüğü durula (hortum)",
     P.x + 16, P.y + 66, P.w - 32);
+  ctx.font = "11px system-ui, sans-serif";
+  ctx.fillStyle = "rgba(255, 211, 107, 0.9)";
+  ctx.fillText(`${washDef().name} · ücret ${fmtTL(washDef().fee)}`, P.x + 16, P.y + 88, P.w - 32);
+  drawCashFloats(W / 2, 120);
 
   // sparkles over a finished windshield
   if (w.done) {
@@ -2082,12 +2814,13 @@ function enterCounter(p) {
   // (finalizePayment releases from the first queue only, then breaks).
   if (facilities.C.queue.includes(p) || facilities.C.queue2.includes(p)) return;
   p.bill = pick(BILL_POOL);
-  p.owed = p.bill - WC_PRICE;
+  p.owed = p.bill - CONFIG.economy.toiletFee;
   p.changeGiven = 0;
   p.changeNotes = [];
   p.cologne = false;
   p.colognePrev = null;
   p.payT = 0; p.doneT = 0; p.dripT = 0;
+  p.feePaid = false; // this visit's fee is booked once, in finalizePayment
   // An exact ₺20 bill needs no change, no cologne, no clicks: this guest
   // joins the separate exact-pay line (queue2) and settles on their own.
   p.auto = p.owed <= 0;
@@ -2138,7 +2871,7 @@ function stepCQueue(f, q, auto, timeDt) {
     if (bus && bus.state === "stop" && reached(p.boardAt) && p.leaveLineAt == null && !auto)
       p.leaveLineAt = (bus.__hurry && bus.__lineDeadline != null)
         ? bus.__lineDeadline
-        : S.time + rand(5 / 60, 10 / 60);
+        : G.clock.time + rand(5 / 60, 10 / 60);
     if (p.leaveLineAt != null && reached(p.leaveLineAt)) {
       if (auto) continue; // self-serving line — it keeps draining, never abandoned
       // Mid-transaction exemption: a guest at the pay spot has handed over
@@ -2167,6 +2900,7 @@ function stepCQueue(f, q, auto, timeDt) {
     // payT there and finalizes, so this line never blocks on the player.
   }
   if (!auto) {
+    autoCounter(front, timeDt);
     if (front.state === "dripC") {
       front.dripT -= timeDt;
       if (front.dripT <= 0) { front.state = front.colognePrev || "payC"; front.colognePrev = null; }
@@ -2196,7 +2930,7 @@ function finalSat(p) {
   const extra = Math.max(0, (p.changeNotes || []).length - minNotes(p.owed));
   if (p.changeGiven === p.owed) sat += Math.max(-15, 10 - 6 * extra);
   else if (p.changeGiven > p.owed) sat -= 6 + 2 * extra; // overpaid — and sloppy
-  if (p.cologne) sat += 8;
+  if (p.cologne) sat += wcDef("cologne").sat;
   return clamp(sat + rand(-8, 8), 0, 100);
 }
 
@@ -2205,6 +2939,7 @@ function finalizePayment(p) {
     const i = q.indexOf(p);
     if (i >= 0) { q.splice(i, 1); break; }
   }
+  collectPayment(p);
   // Teach the crisp-change rule: the same total in more bills rates worse.
   if (p.owed > 0 && p.changeGiven === p.owed &&
       (p.changeNotes || []).length > minNotes(p.owed))
@@ -2262,6 +2997,7 @@ function giveChange(d) {
 
 // You splash cologne on the guest at the counter (called on bottle clicks).
 function offerCologne() {
+  if (!hasCologne()) return; // no bottle on the counter yet
   const front = facilities.C.queue[0];
   if (S.bottle <= 0) { toast("🧴 Kolonya bitti — gece dolar", ""); return; }
   if (!front || (front.state !== "payC" && front.state !== "doneC") || front.cologne || !atPaySpot(front)) return;
@@ -2329,7 +3065,8 @@ function interruptService(p, bus) {
     // the visit was interrupted mid-use — their stall still gets the dirt
     const si = p.stall;
     const sc = si >= 0 && si < WC_STALLS ? S.stallClean[si] : S.cleanliness;
-    if (si >= 0 && sc > 15) S.stallClean[si] = Math.max(0, sc - rand(8, 16));
+    if (si >= 0 && sc > 15) S.stallClean[si] = Math.max(0, sc - rand(...toiletDef().dirtUse));
+    autoCleanAfterVisit(si);
     const sat = clamp((p.useSat != null ? p.useSat : SAT_BASE) - 15, 15, 100);
     p.wcUsed = true;
     p.unpaid = true; // the visit was interrupted — the fee is never collected
@@ -2339,7 +3076,10 @@ function interruptService(p, bus) {
 }
 
 /* ------------------------------ Update ------------------------------ */
-function update(dt, timeDt = dt) {
+// The one scheduler: the shared clock advances once per sub-step, then every
+// owned terminal is stepped against it — the visible one and the unseen ones
+// alike, so switching terminals only changes what is drawn.
+function advanceSimulation(dt, timeDt = dt) {
   // Sub-step coarse frames. Every timer in this sim integrates per second —
   // queue patience (8–30 s), stall service (4–6 s), stop clocks — so one step
   // of a few seconds (a 100x/200x frame on a busy tab: dt up to 10–20 s)
@@ -2349,27 +3089,51 @@ function update(dt, timeDt = dt) {
   // hidden-tab catch-up responsive (its far end stays coarse, as before).
   if (timeDt > 2) {
     const k = Math.min(60, Math.ceil(timeDt / 2));
-    for (let i = 0; i < k; i++) update(dt / k, timeDt / k);
+    for (let i = 0; i < k; i++) advanceSimulation(dt / k, timeDt / k);
     return;
   }
+  // clock — driven by real elapsed time, so 1 game hour = 6 real minutes (at 1x)
+  G.clock.time += timeDt / SECONDS_PER_HOUR;
+  // while-loop: a catch-up after a long hidden tab may cross several midnights
+  while (G.clock.time >= 24) {
+    G.clock.time -= 24; G.clock.day++;
+    for (const t of ownedTerminals()) {
+      t.sim.bottle = wcDef("cologne", t).ml;
+      // automation's daily running cost — owed whether or not cash covers it
+      const op = operatingCost(t);
+      if (op) applyTransaction("operating", -op, t.id, "günlük işletme", true);
+      // close the day here and now: the next fee already belongs to the new day
+      t.sim.history.push(Object.assign({}, t.sim.stats, { day: G.clock.day - 1, repEnd: t.sim.rep }));
+      if (t.sim.history.length > HISTORY_DAYS) t.sim.history.splice(0, t.sim.history.length - HISTORY_DAYS);
+      t.sim.stats = freshDayStats(t.sim.rep);
+    }
+    showDaySummary();
+    G.clock.lastSave = G.clock.time; // time wrapped — otherwise the >8h autosave never re-arms this day
+  }
+  for (const t of ownedTerminals()) { bindTerminal(t.id); stepTerminal(dt, timeDt); }
+  bindTerminal(G.activeTerminal);
+  updateCars(dt);
+
+  if (G.clock.time - G.clock.lastSave > 8) { G.clock.lastSave = G.clock.time; save(); }
+}
+
+// One step of the bound terminal (S / buses / facilities).
+function stepTerminal(dt, timeDt) {
   // the bus we're washing must still be parked, or we step back out
   if (S.view === "wash") {
     const wb = buses.find(x => x.id === S.washBus);
     if (!wb || wb.state !== "stop") setView("out");
   }
-  // clock — driven by real elapsed time, so 1 game hour = 6 real minutes (at 1x)
-  S.time += timeDt / SECONDS_PER_HOUR;
   // your tea on the counter: sipped down over TEA_HOURS; a fresh glass comes
-  // only when you order one on the intercom
-  S.tea = Math.max(0, S.tea - timeDt / SECONDS_PER_HOUR / TEA_HOURS);
-  if (S.teaOrder != null) {
-    S.teaOrder -= timeDt / SECONDS_PER_HOUR;
-    if (S.teaOrder <= 0) { S.teaOrder = null; S.tea = 1; toast("🍵 Taze çay geldi!", "good"); }
-  }
-  // while-loop: a catch-up after a long hidden tab may cross several midnights
-  while (S.time >= 24) {
-    S.time -= 24; S.day++; S.bottle = BOTTLE_MAX; showDaySummary();
-    S.lastSave = S.time; // time wrapped — otherwise the >8h autosave never re-arms this day
+  // only when you order one on the intercom (only if tea upgrade is purchased)
+  if (hasTea()) {
+    S.tea = Math.max(0, S.tea - timeDt / SECONDS_PER_HOUR / TEA_HOURS);
+    if (S.teaOrder != null) {
+      S.teaOrder -= timeDt / SECONDS_PER_HOUR;
+      if (S.teaOrder <= 0) { S.teaOrder = null; S.tea = 1; toast("🍵 Taze çay geldi!", "good"); }
+    }
+  } else {
+    S.tea = 1;
   }
 
   // bus spawning — max 4 parked, at most one inbound bus at a time.
@@ -2387,18 +3151,19 @@ function update(dt, timeDt = dt) {
   if (S.slotVacantSince) for (let i = 0; i < BAY_SLOTS.length; i++) {
     const v = S.slotVacantSince[i];
     if (v == null || !reached(v + maxGap())) continue;
-    // (S.time - v) wraps midnight safely: a stall can't sit vacant >12 h (the
+    // (G.clock.time - v) wraps midnight safely: a stall can't sit vacant >12 h (the
     // backstop fires at <= 2 h), so the +24 modulo is the true elapsed time.
     if (vacantTooLong < 0 ||
-        (S.time - v + 24) % 24 < (S.time - S.slotVacantSince[vacantTooLong] + 24) % 24) vacantTooLong = i;
+        (G.clock.time - v + 24) % 24 < (G.clock.time - S.slotVacantSince[vacantTooLong] + 24) % 24) vacantTooLong = i;
   }
+  openingBus();
   const scheduleDue = reached(S.nextBusAt);
   if ((scheduleDue || vacantTooLong >= 0) && parked < BAY_SLOTS.length && !inbound && buses.length < BAY_SLOTS.length) {
     // A backstop bus is promised the stall that went quiet longest, so the
     // 30-minute guarantee lands on the right stall (baySlotFor honors
     // forcedSlot); a plain schedule bus takes the first free stall it reaches.
     spawnBus(vacantTooLong >= 0 ? vacantTooLong : null);
-    S.nextBusAt = S.time + busInterval();
+    S.nextBusAt = G.clock.time + busInterval();
   }
 
   // buses
@@ -2453,7 +3218,7 @@ function update(dt, timeDt = dt) {
           if (p.state === "queueC" || p.state === "payC" || p.state === "doneC" || p.state === "dripC" || cAuto) {
             if (!cAuto) {
               if (lineDeadline == null)
-                lineDeadline = S.time + rand(5 / 60, 10 / 60); // one grace draw per bus, from the ready moment
+                lineDeadline = G.clock.time + rand(5 / 60, 10 / 60); // one grace draw per bus, from the ready moment
               p.leaveLineAt = lineDeadline; // shared by all manual counter pax — any earlier per-guest grace is overwritten
             }
             continue; // cAuto: the exact line drains on its own — no deadline needed
@@ -2507,9 +3272,51 @@ function update(dt, timeDt = dt) {
 
   updateFacilities(dt, timeDt);
   stepCounter(timeDt);
-  updateCars(dt);
+  stepAutomation(timeDt);
+  maintenanceTick();
+}
 
-  if (S.time - S.lastSave > 8) { S.lastSave = S.time; save(); }
+// The automated systems' routine work, on game time (sim seconds).
+function stepAutomation(timeDt) {
+  const td = toiletDef();
+  if (td.auto && autoRunning("toilet")) {
+    const add = td.autoCleanPerHour * timeDt / SECONDS_PER_HOUR;
+    for (const i of activeStalls()) if (!facilities.T.spots[i]) S.stallClean[i] = Math.min(100, S.stallClean[i] + add);
+  }
+  const wd = carWashOpen() ? washDef() : null;
+  if (wd && wd.auto && autoRunning("wash")) {
+    // the bus the player is washing by hand is left to the player
+    const ready = buses.filter(b => b.state === "stop" && !b.washDone && !(S.view === "wash" && S.washBus === b.id));
+    const started = ready.filter(b => b.autoWashT > 0);
+    const work = wd.auto === "full" ? ready : (started.length ? started : ready).slice(0, 1);
+    for (const b of work) {
+      b.autoWashT = (b.autoWashT || 0) + timeDt;
+      if (b.autoWashT >= wd.autoWashSec) {
+        const w = ensureWash(b);
+        w.g.fill(0);
+        finishWash(b, false);
+      }
+    }
+  }
+}
+
+// The self-clean cycle an automated stall runs as the guest leaves.
+function autoCleanAfterVisit(i) {
+  const td = toiletDef();
+  if (i >= 0 && td.autoCleanPerVisit && autoRunning("toilet")) S.stallClean[i] = Math.min(100, S.stallClean[i] + td.autoCleanPerVisit);
+}
+
+// Fully automated counter: the guest at the pay spot gets crisp change on
+// its own after autoChangeSec — the player may still serve them first.
+function autoCounter(front, timeDt) {
+  const td = toiletDef();
+  if (!td.autoChangeSec || !autoRunning("toilet") || front.state !== "payC" || !atPaySpot(front)) return;
+  front.autoPayT = (front.autoPayT || 0) + timeDt;
+  if (front.autoPayT < td.autoChangeSec) return;
+  if (!Array.isArray(front.changeNotes)) front.changeNotes = [];
+  let r = front.owed - front.changeGiven;
+  for (const d of [50, 20, 10]) while (r >= d) { front.changeNotes.push(d); front.changeGiven += d; r -= d; }
+  finalizePayment(front);
 }
 
 function updatePax(p, bus, dt, timeDt = dt) {
@@ -2725,9 +3532,6 @@ function resize() {
   // centered in the gap between the left view edge and the stall row, at the top
   COUNTER_IN.hose.x = -offX + (stallOx() + offX - COUNTER_IN.hose.w) / 2;
   COUNTER_IN.hose.y = -offY + 6;
-  const rowR = stallOx() + STALL_ROW_W * stallKx();
-  COUNTER_IN.hoseR.x = rowR + (Wdyn - offX - rowR - COUNTER_IN.hoseR.w) / 2;
-  COUNTER_IN.hoseR.y = COUNTER_IN.hose.y;
   COUNTER_IN.exit.x = W + offX - COUNTER_IN.exit.w - 18;
   COUNTER_IN.exit.y = H + offY - COUNTER_IN.exit.h - 18;
   deskK = a > ULTRA_ASPECT ? DESK_ULTRA_K : 1;
@@ -2775,7 +3579,7 @@ function mix(a, b, t) {
 function hex(h) { return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]; }
 
 function nightFactor() {
-  const t = S.time;
+  const t = G.clock.time;
   if (t < 5 || t >= 21) return 1;
   if (t < 7) return 1 - (t - 5) / 2;
   if (t < 19) return 0;
@@ -2789,10 +3593,247 @@ const trees = [
 const clouds = [ { x: 80, y: 30, s: 1 }, { x: 340, y: 16, s: 0.7 }, { x: 560, y: 38, s: 1.2 }, { x: 820, y: 22, s: 0.85 }, { x: 1100, y: 34, s: 1 } ];
 const LAMPS = [200, 410, 902];
 
-function drawScene() {
+/* ---------------------------- Regional map ---------------------------- */
+// A view, not a pause: every terminal keeps running while the map is open.
+// mapZoom eases 0 (terminal) ↔ 1 (map); in between, the terminal scene shrinks
+// into its node as the map fades in.
+let mapOpen = false, mapZoom = 0, mapSel = null, mapMsg = null;
+
+// The map's drawing area: the visible canvas minus the side panel on the right.
+function mapArea() {
+  const r = canvas.getBoundingClientRect(), panel = $("mapPanel");
+  const pw = r.width > 0 && panel.offsetWidth ? (panel.offsetWidth + 24) * Wdyn / r.width : 0;
+  return { x: -offX + 40, y: -offY + 70, w: Wdyn - 80 - pw, h: Hdyn - 140 };
+}
+// Simplified real geography, [lon, lat]. Coasts run so the polygons share edges.
+const GEO = (() => {
+  const blackSea = [[29.08,41.23],[29.6,41.18],[30.25,41.2],[30.65,41.12],[31.12,41.1],[31.42,41.28],[31.78,41.45],[32.38,41.75],[33,41.9],[33.76,41.98],[34.5,42],[34.95,42.1],[35.15,42.02],[35.2,41.8],[35.6,41.65],[35.95,41.73],[36.1,41.6],[36.33,41.3],[36.65,41.38],[36.95,41.35],[37.28,41.13],[37.6,41.05],[37.88,41],[38.39,40.93],[38.82,41.02],[39.3,41.03],[39.72,41.01],[40.27,40.95],[40.52,41.04],[40.9,41.18],[41.42,41.4],[41.55,41.52]];
+  const border = [[41.55,41.52],[42,41.5],[42.5,41.45],[42.85,41.58],[43.45,41.15],[43.47,40.98],[43.75,40.7],[43.6,40.45],[43.9,40.15],[44.35,40],[44.78,39.7],[44.5,39.45],[44.05,39.38],[44.2,38.9],[44.45,38.35],[44.25,37.95],[44.6,37.45],[44.79,37.15],[44.3,37],[43.9,37.25],[43.4,37.3],[42.75,37.37],[42.36,37.11],[41.5,37.08],[40.8,37.12],[40.2,36.9],[39.2,36.68],[38.4,36.9],[37.8,36.75],[37,36.65],[36.68,36.83],[36.6,36.4],[36.3,36.2],[36.2,35.9],[35.92,35.92]];
+  const south = [[35.92,35.92],[35.97,36.1],[35.85,36.35],[36,36.5],[36.17,36.6],[36.22,36.85],[35.95,36.85],[35.78,36.77],[35.55,36.6],[35.38,36.56],[34.95,36.72],[34.63,36.8],[34.3,36.6],[34.05,36.4],[33.9,36.3],[33.55,36.15],[32.8,36.03],[32.5,36.12],[32.3,36.27],[32,36.54],[31.43,36.78],[31,36.85],[30.7,36.88],[30.57,36.6],[30.45,36.25],[30,36.25],[29.64,36.2],[29.4,36.26],[29.1,36.65],[28.8,36.68],[28.4,36.8],[28,36.6],[27.4,36.68],[27.9,36.78],[28.3,37.03],[27.7,37],[27.43,37.03],[27.25,37],[27.3,37.15],[27.6,37.25],[27.25,37.38],[27.25,37.65],[27.25,37.86],[26.95,38.05],[26.85,38.2],[26.5,38.18],[26.3,38.3],[26.4,38.45],[26.5,38.65],[26.75,38.42],[27.1,38.42],[26.85,38.6],[26.75,38.7],[26.95,38.8],[26.9,38.98],[26.75,39.1],[26.68,39.32],[26.95,39.5],[27,39.58],[26.6,39.55],[26.07,39.48],[26.15,39.75],[26.15,39.95],[26.35,40.08],[26.4,40.15],[26.68,40.35],[27.2,40.45],[27.5,40.32],[27.8,40.33],[27.75,40.53],[28,40.4],[28.4,40.4],[28.88,40.38],[29.1,40.43],[28.85,40.52],[28.95,40.62],[29.27,40.66],[29.6,40.73],[29.92,40.76],[29.6,40.78],[29.35,40.8],[29.3,40.82],[29.15,40.9],[29.03,40.98],[29.05,41.1]];
+  const thrace = [[28.03,41.98],[28.3,41.7],[28.6,41.45],[28.68,41.35],[29,41.25],[29.05,41.2],[29,41.02],[28.6,41],[28.25,41.07],[27.95,41],[27.5,40.97],[27.25,40.7],[27.1,40.6],[26.7,40.42],[26.4,40.2],[26.18,40.05],[26.2,40.3],[26.65,40.55],[26.75,40.65],[26.3,40.6],[26.05,40.72],[26.35,41.25],[26.6,41.35],[26.55,41.65],[26.35,41.75],[26.6,41.95],[27,42.05],[27.6,41.95]];
+  return {
+    turkey: [blackSea.concat(border.slice(1), south.slice(1)), thrace, [[25.65,40.2],[25.95,40.25],[25.95,40.12],[25.7,40.1]]],
+    neighbors: [
+      [[28.03,41.98],[27.95,42.3],[27.47,42.5],[27.9,42.85],[27.9,43.2],[28.6,43.8],[28.8,44.5],[29.7,45.2],[30.7,46.5],[31.5,46.6],[33,46],[32.5,45.4],[33.6,44.5],[35,45],[36.5,45.3],[37.5,47],[39,47.2],[38.3,46],[37.5,44.7],[39,44],[39.7,43.6],[41,42.9],[41.67,42.15],[41.63,41.65],[41.55,41.52],
+       [60,41],[60,52],[15,52],[15,38],[20,38],[21.5,36.8],[22.5,36.4],[23.2,36.5],[23,37.5],[24,37.7],[24,38.2],[23.2,38.7],[22.9,39.4],[23.3,39.15],[22.8,40],[22.9,40.6],[23.4,40.25],[23.9,40],[24.3,40.1],[23.8,40.4],[24.4,40.9],[25,40.95],[25.88,40.85],...thrace.slice(20)],
+      [...border, [35.78,35.52],[35.88,34.9],[35.5,33.9],[35,32.8],[34.5,31.5],[34,31.2],[30,31.3],[25,31.8],[25,28],[60,28],[60,41]],
+      [[32.27,35.1],[32.9,34.65],[33.6,34.9],[34,34.98],[34.6,35.7],[33.9,35.25],[33,35.35],[32.9,35.18]],
+      [[27.7,36.15],[28.2,36.45],[28.25,36.35],[27.75,35.9]], [[25.85,39.25],[26.2,39.38],[26.6,39.05],[26.15,39]],
+      [[25.9,38.6],[26.15,38.55],[26.1,38.2],[25.85,38.25]], [[26.6,37.8],[27.05,37.7],[26.95,37.65],[26.6,37.65]],
+      [[23.5,35.5],[24.3,35.6],[25.5,35.35],[26.3,35.25],[25,35],[23.6,35.2]],
+    ],
+    lakes: [[[42.3,38.6],[42.9,38.95],[43.35,38.8],[43.6,38.45],[43.1,38.35],[42.6,38.4]], [[33.25,38.95],[33.5,39.05],[33.6,38.7],[33.4,38.6],[33.25,38.75]]],
+    cities: [["Ankara", 32.85, 39.93, true], ["İzmir", 27.14, 38.42], ["Bursa", 29.06, 40.19], ["Antalya", 30.71, 36.9], ["Konya", 32.49, 37.87], ["Adana", 35.32, 37], ["Kayseri", 35.48, 38.72], ["Sivas", 37.02, 39.75], ["Erzurum", 41.27, 39.9], ["Diyarbakır", 40.23, 37.91], ["Van", 43.38, 38.5]],
+    seas: [["K A R A D E N İ Z", 34.6, 42.45], ["A K D E N İ Z", 31.9, 36.1], ["E G E", 26.05, 37.35]],
+  };
+})();
+const MAP_VIEW = { lon0: 25.8, lon1: 42, lat0: 36, lat1: 42.6, k: Math.cos(39.3 * Math.PI / 180) };
+// Equirectangular, the whole view fitted (and centred) inside the map area.
+function mapProj(A) {
+  const V = MAP_VIEW, w = (V.lon1 - V.lon0) * V.k, h = V.lat1 - V.lat0, s = Math.min(A.w / w, A.h / h);
+  const ox = A.x + (A.w - w * s) / 2, oy = A.y + (A.h - h * s) / 2;
+  return (lon, lat) => ({ x: ox + (lon - V.lon0) * V.k * s, y: oy + (V.lat1 - lat) * s });
+}
+const mapPos = (pt, A = mapArea()) => mapProj(A)(pt.lon, pt.lat);
+function mapNodeAt(x, y, pad = 0) {
+  const A = mapArea();
+  let best = null, bd = 22 + pad;
+  for (const d of CONFIG.terminals) { const p = mapPos(d.map, A), dd = Math.hypot(x - p.x, y - p.y); if (dd <= bd) { best = d.id; bd = dd; } }
+  return best;
+}
+// owned | available (every requirement met — cash may still be short) | locked
+function mapState(id) {
+  if (ownedTerminal(id)) return "owned";
+  return terminalRequirements(id).every(r => r.met) ? "available" : "locked";
+}
+
+function drawMap(alpha) {
+  const A = mapArea(), now = performance.now(), pulse = 0.5 + 0.5 * Math.sin(now / 260);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  const P = mapProj(A);
+  const poly = pts => { ctx.beginPath(); pts.forEach(([lon, lat], i) => { const q = P(lon, lat); i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y); }); ctx.closePath(); };
+  ctx.fillStyle = "#1c3f63";
+  ctx.fillRect(-offX, -offY, Wdyn, Hdyn);
+  ctx.lineJoin = "round";
+  ctx.fillStyle = "#333d37";
+  for (const pts of GEO.neighbors) { poly(pts); ctx.fill(); }
+  const land = ctx.createLinearGradient(0, -offY, 0, Hdyn - offY);
+  land.addColorStop(0, "#35543f"); land.addColorStop(1, "#1e3326");
+  ctx.fillStyle = land; ctx.strokeStyle = "rgba(255,255,255,0.3)"; ctx.lineWidth = 1.5;
+  for (const pts of GEO.turkey) { poly(pts); ctx.fill(); ctx.stroke(); }
+  ctx.fillStyle = "#1c3f63"; ctx.lineWidth = 1;
+  for (const pts of GEO.lakes) { poly(pts); ctx.fill(); ctx.stroke(); }
+  ctx.textAlign = "center";
+  ctx.fillStyle = "rgba(190, 220, 255, 0.35)";
+  ctx.font = "italic bold 14px system-ui, sans-serif";
+  for (const [name, lon, lat] of GEO.seas) { const q = P(lon, lat); ctx.fillText(name, q.x, q.y); }
+  // reference cities
+  ctx.textAlign = "left";
+  for (const [name, lon, lat, capital] of GEO.cities) {
+    const q = P(lon, lat);
+    ctx.fillStyle = "rgba(220, 228, 240, 0.55)";
+    ctx.beginPath(); ctx.arc(q.x, q.y, capital ? 3.5 : 2.5, 0, 7); ctx.fill();
+    ctx.font = `${capital ? "bold 12px" : "11px"} system-ui, sans-serif`;
+    ctx.fillText(name, q.x + 6, q.y + 4);
+  }
+  ctx.textAlign = "center";
+  // the road: İstanbul → every terminal (west to east) → Trabzon
+  const stops = [CONFIG.mapEnds.from, ...CONFIG.mapRoute.map(w => typeof w === "string" ? termDef(w).map : { lon: w[0], lat: w[1] }), CONFIG.mapEnds.to].map(p => mapPos(p, A));
+  const road = () => { ctx.beginPath(); stops.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); };
+  ctx.lineCap = "round";
+  ctx.strokeStyle = "#151a22"; ctx.lineWidth = 9; road(); ctx.stroke();
+  ctx.strokeStyle = "#4b515d"; ctx.lineWidth = 6; road(); ctx.stroke();
+  ctx.strokeStyle = "rgba(240, 214, 120, 0.8)"; ctx.lineWidth = 1.2; ctx.setLineDash([5, 6]); road(); ctx.stroke(); ctx.setLineDash([]);
+  ctx.lineCap = "butt";
+  ctx.shadowColor = "rgba(0,0,0,0.85)"; ctx.shadowBlur = 4;
+  for (const [pt, name] of [[stops[0], DEST_A], [stops[stops.length - 1], DEST_B]]) {
+    ctx.fillStyle = "#e8ecf5";
+    ctx.beginPath(); ctx.arc(pt.x, pt.y, 5, 0, 7); ctx.fill();
+    ctx.font = "bold 13px system-ui, sans-serif";
+    ctx.fillText(name, pt.x, pt.y + 22);
+  }
+  // terminals
+  for (const d of CONFIG.terminals) {
+    const p = mapPos(d.map, A), st = mapState(d.id), t = ownedTerminal(d.id);
+    const active = d.id === G.activeTerminal, sel = d.id === mapSel;
+    if (active) {
+      ctx.strokeStyle = `rgba(255, 255, 255, ${0.35 + 0.5 * pulse})`; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 22 + 3 * pulse, 0, 7); ctx.stroke();
+    }
+    if (sel) {
+      ctx.strokeStyle = "#8fd3ff"; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 27, 0, 7); ctx.stroke();
+    }
+    ctx.fillStyle = st === "owned" ? "#3cc878" : st === "available" ? "#e3a43a" : "#5b6475";
+    ctx.beginPath(); ctx.arc(p.x, p.y, 16, 0, 7); ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,0.5)"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = "#10141f";
+    ctx.font = "bold 14px system-ui, sans-serif";
+    ctx.textBaseline = "middle";
+    ctx.fillText(st === "owned" ? "★" : st === "available" ? "₺" : "🔒", p.x, p.y + 1);
+    ctx.textBaseline = "alphabetic";
+    // name, status, "you are here" — stacked away from the node on its label side
+    // (Bolu Dağı and Gerede sit ~40 km apart, so their text goes opposite ways; the panel has full names)
+    const lines = [["bold 13px", "#ffffff", d.short]];
+    if (t) {
+      lines.push(["12px", "#c9f5d6", `★ ${Math.round(t.sim.rep)} · bugün +${fmtTL(t.sim.stats.revenue || 0)}${needsAttention(t) ? " · 🔧" : ""}`]);
+      if (active) lines.push(["bold 10px", "#ffd36b", "BURADASIN"]);
+    } else lines.push(["12px", st === "available" ? "#ffd36b" : "#aab3c5", `${st === "locked" ? "🔒 " : ""}${fmtTL(d.price)}`]);
+    const up = d.map.label === "up";
+    lines.forEach(([font, col, text], i) => {
+      ctx.font = `${font} system-ui, sans-serif`; ctx.fillStyle = col;
+      ctx.fillText(text, p.x, up ? p.y - 26 - (lines.length - 1 - i) * 15 : p.y + 32 + i * 15);
+    });
+  }
+  ctx.shadowBlur = 0;
+  ctx.textAlign = "left";
+  // title + legend, top-left over the sea (the bottom-left belongs to the toasts)
+  const lx = -offX + 20, ly = -offY + 30;
+  ctx.fillStyle = "rgba(16, 20, 31, 0.7)";
+  ctx.beginPath(); ctx.roundRect(lx - 10, ly - 22, 380, 52, 10); ctx.fill();
+  ctx.fillStyle = "#e8ecf5";
+  ctx.font = "bold 15px system-ui, sans-serif";
+  ctx.fillText("🗺 BÖLGE HARİTASI", lx, ly);
+  ctx.font = "12px system-ui, sans-serif";
+  let x = lx;
+  for (const [col, label] of [["#3cc878", "sahip"], ["#e3a43a", "satılık"], ["#5b6475", "kilitli"]]) {
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.arc(x + 5, ly + 16, 5, 0, 7); ctx.fill();
+    ctx.fillStyle = "#c8d0de";
+    ctx.fillText(label, x + 14, ly + 20);
+    x += 24 + ctx.measureText(label).width;
+  }
+  ctx.fillText(`— bir terminale ${coarseQ ? "dokun" : "tıkla"}`, x, ly + 20);
+  ctx.restore();
+}
+
+function renderMapPanel() {
+  const list = CONFIG.terminals.map(d => {
+    const st = mapState(d.id), label = st === "owned" ? (d.id === G.activeTerminal ? "buradasın" : "sahip") : st === "available" ? fmtTL(d.price) : "kilitli";
+    return `<button data-sel="${d.id}" class="${d.id === mapSel ? "sel" : ""}" aria-pressed="${d.id === mapSel}"><span>${escHtml(d.name)}</span><span class="st ${st === "owned" ? "own" : st === "available" ? "buy" : "lock"}">${escHtml(label)}</span></button>`;
+  }).join("");
+  $("mapList").innerHTML = list;
+  const d = termDef(mapSel), t = ownedTerminal(mapSel);
+  let html = "";
+  if (t) {
+    const wash = tierOfWash(t);
+    html = `<div class="name">${escHtml(d.name)}</div>
+      <ul><li>★ İtibar ${Math.round(t.sim.rep)} / 100</li>
+        <li>WC: ${escHtml(wcSummary(t.wc))}</li>
+        <li>Oto yıkama: ${wash ? escHtml(wash.name) : "yok"}</li>
+        <li>Bugün: +${fmtTL(t.sim.stats.revenue || 0)} / −${fmtTL(t.sim.stats.expenses || 0)}</li>
+        ${needsAttention(t) ? `<li class="no">🔧 Bakım ya da onarım gerekiyor</li>` : ""}
+        <li>Yükseltme maliyeti ×${d.devCost}</li></ul>
+      ${d.id === G.activeTerminal ? `<button data-act="back">Terminale dön</button>` : `<button class="buy" data-act="switch" data-id="${d.id}">Bu terminale geç</button>`}`;
+  } else {
+    const st = terminalStatus(d.id), prof = CONFIG.profiles[d.profile];
+    html = `<div class="name">${escHtml(d.name)}</div>
+      <ul><li>Fiyat: ${fmtTL(d.price)}</li>
+        <li>WC: ${escHtml(wcSummary(prof.wc))}</li>
+        <li>Oto yıkama: ${prof.carWash.unlocked ? escHtml(CONFIG.carWashTiers.find(x => x.tier === prof.carWash.tier).name) : "yok"}</li>
+        <li>Başlangıç itibarı ${prof.rep} · yükseltmeler ×${d.devCost}</li></ul>
+      <div>Şartlar:</div>
+      <ul>${st.reqs.length ? st.reqs.map(r => `<li class="${r.met ? "ok" : "no"}">${r.met ? "✓" : "✗"} ${escHtml(r.text)}</li>`).join("") : `<li class="ok">✓ Şart yok</li>`}</ul>
+      <button class="buy" data-act="buyTerminal" data-id="${d.id}" ${st.ok ? "" : `disabled title="${escHtml(st.reason)}"`}>Satın al · ${fmtTL(d.price)}</button>
+      ${st.ok ? "" : `<div class="why">${escHtml(st.reason)}</div>`}`;
+  }
+  if (mapMsg) html += `<div class="msg ${mapMsg.ok ? "good" : "bad"}" role="status">${escHtml(mapMsg.text)}</div>`;
+  $("mapDetail").innerHTML = html;
+}
+
+function setMapOpen(on) {
+  if (on === mapOpen) return;
+  if (on) {
+    setView("out");       // tools back on their stations; the terminal is seen from outside as it shrinks away
+    viewFade = 0;
+    mapSel = G.activeTerminal;
+    mapMsg = null;
+  }
+  mapOpen = on;
+  $("mapPanel").classList.toggle("hidden", !on);
+  $("mapBtn").classList.toggle("on", on);
+  $("btnShop").classList.toggle("hidden", on);
+  if (on) renderMapPanel();
+}
+
+function mapSelect(id) { mapSel = id; mapMsg = null; renderMapPanel(); }
+
+function mapAction(btn) {
+  if (btn.dataset.sel) { mapSelect(btn.dataset.sel); return; }
+  const a = btn.dataset.act;
+  if (a === "back") { setMapOpen(false); return; }
+  if (a === "switch") {
+    const r = switchTerminal(btn.dataset.id);
+    if (r.ok) { setMapOpen(false); return; } // zoom into the new terminal
+    mapMsg = { ok: false, text: "✗ " + r.reason };
+  } else if (a === "buyTerminal") {
+    const r = unlockTerminal(btn.dataset.id);
+    mapMsg = r.ok ? { ok: true, text: `✓ Satın alındı (−${fmtTL(-r.tx.amount)}) — "Bu terminale geç" ile git` } : { ok: false, text: "✗ " + r.reason };
+  } else return;
+  renderMapPanel();
+}
+
+function drawTerminalScene() {
   if (S.view === "wc") drawWCInterior();
   else if (S.view === "wash") drawWashView();
   else drawOutdoor();
+}
+
+function drawScene() {
+  if (mapZoom >= 1) drawMap(1);
+  else if (mapZoom > 0) {
+    // the terminal shrinks into its map node while the map fades in over it
+    const e = easeInOut(mapZoom), node = mapPos(termDef(G.activeTerminal).map);
+    const k = lerp(1, 0.05, e);
+    ctx.save();
+    ctx.translate(lerp(W / 2, node.x, e), lerp(H / 2, node.y, e));
+    ctx.scale(k, k);
+    ctx.translate(-W / 2, -H / 2);
+    drawTerminalScene();
+    ctx.restore();
+    drawMap(e);
+  } else drawTerminalScene();
   if (viewFade > 0.001) {
     ctx.fillStyle = `rgba(6, 9, 18, ${viewFade})`;
     ctx.fillRect(-offX, -offY, Wdyn, Hdyn + offY);
@@ -2822,19 +3863,20 @@ function drawOutdoor() {
   }
 
   drawWcPrompt(); // after the overlay — the nudge stays bright at night
+  drawCashFloats(851, 84);
   drawWashHint(); // ditto — a dusty parked bus hints at the wash
 }
 
 const duskGlow = t => Math.max(0, 1 - Math.abs(t - 6.3) / 1.5) + Math.max(0, 1 - Math.abs(t - 19.2) / 1.8);
 
 function drawSky(nf, now) {
-  const [top, bot] = skyColors(S.time);
+  const [top, bot] = skyColors(G.clock.time);
   const g = ctx.createLinearGradient(0, -offY, 0, GRASS.top);
   g.addColorStop(0, top); g.addColorStop(1, bot);
   ctx.fillStyle = g;
   ctx.fillRect(-offX, -offY, Wdyn, GRASS.top + offY);
 
-  const dusk = Math.min(1, duskGlow(S.time));
+  const dusk = Math.min(1, duskGlow(G.clock.time));
   if (dusk > 0) {
     const hg = ctx.createLinearGradient(0, 0, 0, GRASS.top);
     hg.addColorStop(0, "rgba(255,150,90,0)");
@@ -2853,8 +3895,8 @@ function drawSky(nf, now) {
   }
 
   // sun / moon
-  if (S.time >= 5 && S.time <= 19) {
-    const f = clamp((S.time - 6) / 12, 0, 1), h = Math.sin(f * Math.PI);
+  if (G.clock.time >= 5 && G.clock.time <= 19) {
+    const f = clamp((G.clock.time - 6) / 12, 0, 1), h = Math.sin(f * Math.PI);
     const sx = lerp(offX + 60, Wdyn - offX - 60, f), sy = 70 - h * 45;
     const halo = ctx.createRadialGradient(sx, sy, 12, sx, sy, 90);
     halo.addColorStop(0, "rgba(255,226,140,0.55)");
@@ -2867,7 +3909,7 @@ function drawSky(nf, now) {
     ctx.fillStyle = disk;
     ctx.beginPath(); ctx.arc(sx, sy, 22, 0, 7); ctx.fill();
   } else {
-    const f = clamp(((S.time + 24 - 19) % 24) / 11, 0, 1);
+    const f = clamp(((G.clock.time + 24 - 19) % 24) / 11, 0, 1);
     const mx = lerp(offX + 60, Wdyn - offX - 60, f), my = 66 - Math.sin(f * Math.PI) * 40;
     const halo = ctx.createRadialGradient(mx, my, 8, mx, my, 60);
     halo.addColorStop(0, "rgba(200,215,255,0.28)");
@@ -3104,7 +4146,7 @@ function drawPylonFace() {
   ctx.textAlign = "center";
   ctx.fillStyle = "#1d3f8f";
   ctx.font = "800 11px system-ui";
-  ctx.fillText("DİNLENME TESİSİ", cx, by + 45);
+  ctx.fillText(termDef(G.activeTerminal).short || "DİNLENME TESİSİ", cx, by + 45);
   ctx.fillStyle = "#e0262b";
   ctx.fillRect(bx + 14, by + 51, P.bw - 28, 1.5);
   const stars = Math.round(S.rep / 20);
@@ -3256,7 +4298,7 @@ function drawRestStop() {
   ctx.fillStyle = "#9fe8ff";
   ctx.font = "bold 12px system-ui";
   ctx.textAlign = "center";
-  ctx.fillText("WC · ₺20", 851, 114);
+  ctx.fillText("WC · " + fmtTL(CONFIG.economy.toiletFee), 851, 114);
   ctx.textAlign = "left";
   // cleanliness bar
   const cw = 66;
@@ -3337,7 +4379,7 @@ function drawNightLights(nf, now) {
   ctx.fillText("LOKANTA", 705, 105);
   ctx.shadowColor = "#4fd8ff";
   ctx.fillStyle = "#b6f0ff";
-  ctx.fillText("WC · ₺20", 851, 114);
+  ctx.fillText("WC · " + fmtTL(CONFIG.economy.toiletFee), 851, 114);
   ctx.restore();
   // backlit pylon face cuts through the night overlay
   ctx.save();
@@ -3586,15 +4628,17 @@ function drawCounterIn() {
       ctx.fillRect(kx + 2, ky + 0.5, 11, 1);
     }
   }
-  withDesk("calc", drawCalculator);
-  withDesk("bottle", drawBottle);
-  withDesk("tea", drawTea);
-  withDesk("intercom", drawIntercom);
+  if (hasCalc()) withDesk("calc", drawCalculator);
+  if (hasCologne()) withDesk("bottle", drawBottle);
+  if (hasTea()) {
+    withDesk("tea", drawTea);
+    withDesk("intercom", drawIntercom);
+  }
 }
 
 function drawBottle() {
   const b = COUNTER_IN.bottle;
-  const f = S.bottle / BOTTLE_MAX;
+  const f = S.bottle / bottleMax();
   // a Pereja-style lemon cologne: ribbed pale-yellow plastic body, white
   // screw cap, cream label with brown bands and the PE·RE·JA hexagons
   // drawn at a fixed 54×108 design size, scaled down into the hit rect
@@ -3845,8 +4889,10 @@ function drawIntercom() {
 // Intercom click: call for a fresh glass of tea.
 function orderTea() {
   if (S.teaOrder != null) { toast("🍵 Çayın zaten yolda", ""); return; }
+  const price = CONFIG.economy.teaPrice;
+  if (!applyTransaction("tea", -price, boundId, "çay")) { toast(`🍵 Çay için kasada ${fmtTL(price)} yok`, "bad"); return; }
   S.teaOrder = rand(TEA_DELIVERY[0], TEA_DELIVERY[1]);
-  toast("🍵 Çay geliyor!", "");
+  toast(`🍵 Çay geliyor! (${fmtTL(price)})`, "");
 }
 
 function drawCounterInPrompts() {
@@ -3857,7 +4903,7 @@ function drawCounterInPrompts() {
   ctx.textAlign = "center";
   const front = facilities.C.queue[0];
   if (atPaySpot(front)) {
-    if (!front.cologne && S.bottle > 0 && (front.state === "payC" || front.state === "doneC")) {
+    if (hasCologne() && !front.cologne && S.bottle > 0 && (front.state === "payC" || front.state === "doneC")) {
       const b = deskRect(COUNTER_IN.bottle, "bottle");
       ctx.fillStyle = `rgba(255, 211, 107, ${pulse})`;
       ctx.font = "bold 10px system-ui, sans-serif";
@@ -3879,7 +4925,7 @@ function drawWcExitDoor() {
   const Ex = COUNTER_IN.exit;
   Ex.x = W + offX - Ex.w - 18;
   Ex.y = H + offY - Ex.h - 18;
-  const nf = nightFactor(S.time);
+  const nf = nightFactor(G.clock.time);
   const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 200);
 
   const eg = ctx.createLinearGradient(0, Ex.y, 0, Ex.y + Ex.h);
@@ -3991,11 +5037,11 @@ function drawHoseSpray(px, py, now) {
 /* A cleaning-hose station: a wall faucet with a coiled hose at one end of the
  * stall row (left, or mirrored on the right). Click it to pick that hose up;
  * hold the mouse and drag it over a stall
- * to spray (hoseApply). It pulses amber while any stall needs cleaning. */
+ * to spray (cleanApply). It pulses amber while any stall needs cleaning. */
 function drawHoseStation(st) {
-  const held = hoseInHand === st, m = st.right ? -1 : 1; // the right station is drawn mirrored
+  const held = toolInHand === st, m = st.right ? -1 : 1; // the right station is drawn mirrored
   const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 200);
-  const needsClean = S.stallClean.some(v => v < 60);
+  const needsClean = activeStalls().some(i => S.stallClean[i] < 60);
   const fcx = st.x + st.w / 2, fcy = st.y + 30; // the wall faucet; the coil sits on the stalls' floor line
   ctx.fillStyle = "rgba(0,0,0,0.3)";
   ctx.beginPath(); ctx.ellipse(fcx, st.y + st.h - 4, 26, 5, 0, 0, 7); ctx.fill();
@@ -4026,7 +5072,7 @@ function drawHoseStation(st) {
     : "rgba(226,235,248,0.8)";
   ctx.font = "bold 9px system-ui, sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText(held ? "ELİNDE" : "HORTUM", fcx, st.y + 8);
+  ctx.fillText(held ? "ELİNDE" : cleaningTool().label, fcx, st.y + 8);
   ctx.textAlign = "left";
 }
 
@@ -4093,9 +5139,9 @@ function drawScrub() {
     const dk = wcPaxK(pose.y), s = dk * ((PAX_TYPES[p.type] || PAX_TYPES.m).scale);
     // suds left on every bowl already scrubbed
     stallSpace();
-    for (let i = 0; i < WC_STALLS; i++) {
-      if (t < scrub.legs[i].t1) continue;
-      const bx = stallLx(i);
+    for (const leg of scrub.legs) {
+      if (t < leg.t1) continue;
+      const i = leg.stall, bx = stallLx(i);
       stallWiden(i);
       for (let k = 0; k < 7; k++) {
         const u = ((i * 7 + k * 13) % 10) / 10;
@@ -4317,6 +5363,200 @@ function drawStallGrime(i, bx, cx, dirty) {
   }
 }
 
+// An unbuilt bay (stall space, inside stallWiden): planked over until the WC is upgraded.
+function drawBoardedBay(i, bx) {
+  ctx.fillStyle = "#23283a";
+  ctx.fillRect(bx, 108, 52, 138);
+  ctx.save();
+  ctx.beginPath(); ctx.rect(bx + 2, 110, 48, 134); ctx.clip();
+  for (let k = 0; k < 6; k++) {
+    const y = 116 + k * 22;
+    ctx.fillStyle = k % 2 ? "#6e5638" : "#7b6040";
+    ctx.save();
+    ctx.translate(bx + 26, y + 8);
+    ctx.rotate((grimeRnd(i, k) - 0.5) * 0.12);
+    ctx.fillRect(-28, -8, 56, 15);
+    ctx.fillStyle = "rgba(0,0,0,0.25)";
+    ctx.fillRect(-28, 6, 56, 1.5);
+    ctx.fillStyle = "#3b4048";
+    ctx.beginPath(); ctx.arc(-21, -1, 1.4, 0, 7); ctx.arc(21, -1, 1.4, 0, 7); ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
+  ctx.fillStyle = "rgba(255, 211, 107, 0.85)";
+  ctx.font = "bold 8px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("KAPALI", bx + 26, 180);
+  ctx.textAlign = "left";
+}
+
+// The primitive alaturka (squat) toilet, in stall space inside stallWiden: a
+// floor pan with ribbed footrests, a high pull-chain cistern, a wall tap and
+// the plastic jug. Grime layers fade in with dirt like drawStallGrime's.
+function drawAlaturka(i, bx, dirty) {
+  const cx = bx + 22; // the open door leaf covers bx+44..52
+  const ramp = (from, to) => clamp((dirty - from) / (to - from), 0, 1);
+  const r = k => grimeRnd(i, k);
+  const porcelain = ctx.createLinearGradient(cx - 18, 0, cx + 18, 0);
+  porcelain.addColorStop(0, "#c3c7cc"); porcelain.addColorStop(0.4, "#f3f3ef"); porcelain.addColorStop(1, "#b3b7bd");
+  // high cistern, its chain and the down pipe
+  ctx.fillStyle = "#9aa4b2";
+  ctx.fillRect(bx + 13, 126, 2, 104);
+  ctx.fillStyle = porcelain;
+  rr(ctx, bx + 9, 116, 24, 11, 2); ctx.fill();
+  ctx.strokeStyle = "#8d96a6"; ctx.setLineDash([1.5, 1.5]);
+  ctx.beginPath(); ctx.moveTo(bx + 29, 127); ctx.lineTo(bx + 29, 158); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#cfd6e2";
+  rr(ctx, bx + 27, 158, 4, 6, 1.5); ctx.fill();
+  // wall tap and the jug beneath it
+  ctx.fillStyle = "#c9d0da";
+  rr(ctx, bx + 34, 196, 7, 3, 1); ctx.fill();
+  ctx.fillRect(bx + 39, 199, 2, 4);
+  ctx.fillStyle = "#d2473c";
+  rr(ctx, bx + 33, 222, 9, 13, 2); ctx.fill();
+  ctx.strokeStyle = "#a8342b"; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(bx + 42, 228, 3, -1.2, 1.2); ctx.stroke();
+  ctx.lineWidth = 1;
+  // the pan: a ceramic tray set into the floor, its basin and drain
+  ctx.fillStyle = "rgba(0,0,0,0.3)";
+  ctx.beginPath(); ctx.ellipse(cx, 238, 19, 6.5, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = porcelain;
+  ctx.beginPath(); ctx.ellipse(cx, 236, 18, 6, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = "#8fa0ab";
+  ctx.beginPath(); ctx.ellipse(cx, 236.5, 8, 3, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = "#2a2f36";
+  ctx.beginPath(); ctx.ellipse(cx + 2, 237, 3, 1.4, 0, 0, 7); ctx.fill();
+  // ribbed footrests either side of the basin
+  for (const fx of [cx - 15, cx + 9]) {
+    ctx.fillStyle = "#e4e6e5";
+    rr(ctx, fx, 232.5, 6, 8, 2); ctx.fill();
+    ctx.fillStyle = "rgba(0,0,0,0.15)";
+    for (let k = 0; k < 3; k++) ctx.fillRect(fx + 1, 234 + k * 2.2, 4, 0.8);
+  }
+  if (dirty <= 0.08) return;
+  // brown stain ring in the basin
+  let a = ramp(0.1, 0.6);
+  ctx.strokeStyle = `rgba(110, 78, 34, ${a * 0.85})`; ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.ellipse(cx, 236.5, 7.5, 2.7, 0, 0, 7); ctx.stroke();
+  ctx.lineWidth = 1;
+  // a spreading puddle around the pan
+  a = ramp(0.25, 0.75);
+  if (a > 0) {
+    ctx.fillStyle = `rgba(175, 150, 60, ${a * 0.4})`;
+    ctx.beginPath(); ctx.ellipse(cx + (r(70) - 0.5) * 8, 242, 10 + dirty * 10, 2.6, 0, 0, 7); ctx.fill();
+  }
+  // splashes on the footrests and smudges on the wall
+  a = ramp(0.4, 0.9);
+  if (a > 0) {
+    ctx.fillStyle = `rgba(150, 110, 40, ${a * 0.75})`;
+    for (let j = 0; j < 3 + Math.round(dirty * 4); j++)
+      { ctx.beginPath(); ctx.ellipse(cx - 16 + r(60 + j) * 32, 233 + r(65 + j) * 6, 1.5, 0.9, 0, 0, 7); ctx.fill(); }
+    ctx.fillStyle = `rgba(70, 55, 30, ${a * 0.45})`;
+    ctx.beginPath(); ctx.ellipse(bx + 8 + r(80) * 8, 150 + r(81) * 40, 3.5, 6, 0, 0, 7); ctx.fill();
+  }
+  // used paper on the floor
+  if (dirty > 0.5) {
+    ctx.fillStyle = "#e6e1d2";
+    for (let j = 0; j < (dirty > 0.75 ? 3 : 1); j++)
+      { ctx.beginPath(); ctx.ellipse(bx + 4 + r(100 + j) * 36, 241 + r(105 + j) * 3, 3, 2, 0, 0, 7); ctx.fill(); }
+  }
+  // flies over the pan
+  if (dirty > 0.6) {
+    const t = performance.now() / 1000;
+    ctx.fillStyle = "#15171c";
+    for (let j = 0; j < (dirty > 0.85 ? 3 : dirty > 0.72 ? 2 : 1); j++) {
+      const sp = 2 + r(120 + j) * 2, ph = r(125 + j) * 7;
+      ctx.beginPath(); ctx.arc(cx + Math.sin(t * sp + ph) * 12, 222 + Math.cos(t * sp * 1.3 + ph) * 7, 1.1, 0, 7); ctx.fill();
+    }
+  }
+}
+
+function toolStations() {
+  return [COUNTER_IN.hose];
+}
+
+// A bucket cleaning station (hand brush or mop) at one end of the stall row —
+// the hose's counterpart before the WC has running-water equipment.
+function drawBucketStation(st) {
+  const tool = cleaningTool(), held = toolInHand === st;
+  const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 200);
+  const needsClean = activeStalls().some(i => S.stallClean[i] < 60);
+  const cx = st.x + st.w / 2, base = st.y + st.h - 6;
+  ctx.fillStyle = "rgba(0,0,0,0.3)";
+  ctx.beginPath(); ctx.ellipse(cx, base + 2, 24, 5, 0, 0, 7); ctx.fill();
+  if (!held) { // the tool rests in its bucket until you pick it up
+    if (tool === CONFIG.cleaningTools.mop) {
+      ctx.strokeStyle = "#8a5a2b"; ctx.lineWidth = 3.5; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(cx + 4, base - 30); ctx.lineTo(cx + 14, st.y + 14); ctx.stroke();
+      ctx.lineCap = "butt"; ctx.lineWidth = 1;
+    } else {
+      if (tool === CONFIG.cleaningTools.longBrush) {
+        ctx.strokeStyle = "#8a5a2b"; ctx.lineWidth = 3; ctx.lineCap = "round";
+        ctx.beginPath(); ctx.moveTo(cx + 10, base - 44); ctx.lineTo(cx + 16, st.y + 14); ctx.stroke();
+        ctx.lineCap = "butt"; ctx.lineWidth = 1;
+      }
+      ctx.fillStyle = "#8a5a2b";
+      rr(ctx, cx + 2, base - 44, 16, 7, 3); ctx.fill();
+      ctx.fillStyle = "#e7d27a";
+      ctx.fillRect(cx + 4, base - 37, 12, 6);
+    }
+  }
+  const bk = ctx.createLinearGradient(cx - 18, 0, cx + 18, 0);
+  bk.addColorStop(0, "#2a5a86"); bk.addColorStop(0.5, "#3c7bb5"); bk.addColorStop(1, "#2a5a86");
+  ctx.fillStyle = bk;
+  ctx.beginPath();
+  ctx.moveTo(cx - 18, base - 30); ctx.lineTo(cx + 18, base - 30); ctx.lineTo(cx + 14, base); ctx.lineTo(cx - 14, base);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = "#cfefff";
+  ctx.beginPath(); ctx.ellipse(cx, base - 30, 18, 4, 0, 0, 7); ctx.fill();
+  ctx.strokeStyle = "#9aa4b2"; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(cx, base - 30, 16, Math.PI, 0); ctx.stroke();
+  ctx.lineWidth = 1;
+  ctx.fillStyle = held ? `rgba(120, 225, 255, ${0.6 + 0.4 * pulse})`
+    : needsClean ? `rgba(255, 211, 107, ${0.5 + 0.5 * pulse})`
+    : "rgba(226,235,248,0.8)";
+  ctx.font = "bold 9px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(held ? "ELİNDE" : tool.label, cx, st.y + 8);
+  ctx.textAlign = "left";
+}
+
+// The hand brush / mop at the pointer; suds where it scrubs a free stall.
+function drawHandTool(px, py, scrubbing, now) {
+  if (scrubbing) {
+    for (let k = 0; k < 7; k++) {
+      const f = frac(now / 700 + k / 7);
+      ctx.fillStyle = `rgba(250, 253, 255, ${0.85 * (1 - f)})`;
+      ctx.beginPath(); ctx.arc(px + Math.sin(k * 2.1 + f * 5) * 10, py - f * 22, 1.8 + (k % 3), 0, 7); ctx.fill();
+    }
+  }
+  const wob = scrubbing ? Math.sin(now / 45) * 3 : 0;
+  ctx.save();
+  ctx.translate(px + wob, py);
+  ctx.rotate(-0.5);
+  if (cleaningTool() === CONFIG.cleaningTools.mop) {
+    ctx.strokeStyle = "#8a5a2b"; ctx.lineWidth = 4; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(0, -6); ctx.lineTo(0, -60); ctx.stroke();
+    ctx.strokeStyle = "#dfe6ee"; ctx.lineWidth = 3;
+    for (let k = -3; k <= 3; k++) { ctx.beginPath(); ctx.moveTo(k * 2, -6); ctx.lineTo(k * 3.5, 4); ctx.stroke(); }
+    ctx.lineCap = "butt"; ctx.lineWidth = 1;
+  } else {
+    if (cleaningTool() === CONFIG.cleaningTools.longBrush) {
+      ctx.strokeStyle = "#8a5a2b"; ctx.lineWidth = 3.5; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(0, -8); ctx.lineTo(0, -56); ctx.stroke();
+      ctx.lineCap = "butt"; ctx.lineWidth = 1;
+    }
+    ctx.fillStyle = "#8a5a2b";
+    rr(ctx, -9, -10, 18, 8, 3); ctx.fill();
+    ctx.fillStyle = "#e7d27a";
+    ctx.fillRect(-8, -2, 16, 6);
+    ctx.fillStyle = "rgba(0,0,0,0.2)";
+    for (let k = 0; k < 5; k++) ctx.fillRect(-7 + k * 3.4, -2, 0.8, 6);
+  }
+  ctx.restore();
+}
+
 function drawWCInterior() {
   // floor
   ctx.fillStyle = "#262b36";
@@ -4361,6 +5601,7 @@ function drawWCInterior() {
     const s = facilities.T.spots[i];
     const dirty = 1 - S.stallClean[i] / 100;
     stallWiden(i);
+    if (!stallActive(i)) { drawBoardedBay(i, bx); ctx.restore(); continue; }
     // inside the cubicle: its own tiled back wall in shadow, then a strip of floor
     ctx.fillStyle = "#2c3343";
     ctx.fillRect(bx, 108, 52, 120);
@@ -4382,6 +5623,8 @@ function drawWCInterior() {
       ctx.fillStyle = f > 0.6 ? "#5ad07a" : f > 0.3 ? "#ffd36b" : "#ff6b6b";
       rr(ctx, bx + 6, 94, 40 * f, 8, 2); ctx.fill();
     }
+    if (toiletDef().style === "alaturka") drawAlaturka(i, bx, dirty);
+    else {
     const cx = bx + 26;
     const porcelain = ctx.createLinearGradient(bx + 10, 0, bx + 42, 0);
     porcelain.addColorStop(0, "#c9ccd0");
@@ -4460,6 +5703,7 @@ function drawWCInterior() {
     ctx.fillRect(bx + 15, 205, 2, 9);
     if (dirty > 0.08) drawStallGrime(i, bx, cx, dirty);
     ctx.restore();
+    }
     if (stallDoorClosed(i)) {
       ctx.fillStyle = `hsl(${s.pax.hue}, 55%, 55%)`;
       ctx.fillRect(bx + 16, 122, 20, 26); // someone's in there (the closed door hides them below)
@@ -4473,8 +5717,16 @@ function drawWCInterior() {
     ctx.restore();
   }
   ctx.restore();
-  drawHoseStation(COUNTER_IN.hose); // either side of the stall row
-  drawHoseStation(COUNTER_IN.hoseR);
+  const drawStation = cleaningTool() === CONFIG.cleaningTools.hose ? drawHoseStation : drawBucketStation;
+  for (const st of toolStations()) drawStation(st);
+  if (toiletDef().auto) { // what the automation is doing, under the left station
+    const st = COUNTER_IN.hose, broken = systemFailed(term(), "toilet");
+    ctx.font = "bold 9px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = broken ? "#ff6b6b" : "#7dffa8";
+    ctx.fillText(broken ? "⚠ OTOMASYON ARIZALI" : toiletDef().autoChangeSec ? "🤖 OTO TEMİZLİK + GİŞE" : "🤖 OTO TEMİZLİK", st.x + st.w / 2, st.y + st.h + 14);
+    ctx.textAlign = "left";
+  }
   // the guests — scaled by depth (wcPaxK)
   // (whoever's turn it is at the counter is held back and drawn on top of everyone)
   const atCounter = p => p.state === "payC" || p.state === "doneC" || p.state === "dripC" || p.state === "payC2";
@@ -4527,6 +5779,16 @@ function drawWCInterior() {
   // stands at the pay spot is seen behind its ledge, not on top of it
   drawCounterIn();
   drawCounterInPrompts();
+  // draw bills on top of the counter
+  for (const b of buses) for (const p of b.pax) {
+    if (atCounter(p) && holdsBill(p)) {
+      const k = wcPaxK(p.y, p.x);
+      const x = p.x, y = p.y;
+      const s = k * ((PAX_TYPES[p.type] || PAX_TYPES.m).scale);
+      const billY = S.view === "wc" && deskK > 1 ? y - 9.5 * s : y - 6.5 * s;
+      drawHeldBill(x + 5 * s, billY, 0.3 * s, BILL_COLORS[p.bill] || "#c9c2a8", p.bill);
+    }
+  }
   // the caught runaway scrubs in front of everything (drawn from the sequence
   // itself, so they stay visible even if their bus has already pulled out)
   drawScrub();
@@ -4534,7 +5796,7 @@ function drawWCInterior() {
   const stinkT = performance.now() / 1000;
   stallSpace();
   ctx.lineCap = "round";
-  for (let i = 0; i < WC_STALLS; i++) {
+  for (const i of activeStalls()) {
     const sc = S.stallClean[i];
     if (sc >= 45) continue;
     const k = (45 - sc) / 45;
@@ -4559,9 +5821,20 @@ function drawWCInterior() {
   ctx.lineCap = "butt";
   ctx.lineWidth = 1;
   // the cleaning hose in hand: drapes from its faucet to the pointer; holding
-  // the mouse sprays the stall under it (hoseApply throttles the actual work)
-  if (hoseInHand) {
-    const st = hoseInHand;
+  // the mouse sprays the stall under it (cleanApply throttles the actual work)
+  if (toolInHand && cleaningTool() !== CONFIG.cleaningTools.hose) {
+    const si = pointerDown ? stallAt(pointer.x, pointer.y) : -1;
+    const closed = si >= 0 && stallDoorClosed(si);
+    if (closed) {
+      ctx.fillStyle = "rgba(255, 120, 120, 0.9)";
+      ctx.font = "bold 11px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("kapı kapalı", pointer.x, pointer.y - 14);
+      ctx.textAlign = "left";
+    }
+    drawHandTool(pointer.x, pointer.y, si >= 0 && stallActive(si) && !closed, performance.now());
+  } else if (toolInHand) {
+    const st = toolInHand;
     drawHoseLine(st.x + st.w / 2, st.y + 49, pointer.x, pointer.y, st.right ? 60 : -60); // from the faucet spout
     if (pointerDown) {
       const si = stallAt(pointer.x, pointer.y);
@@ -4592,8 +5865,27 @@ function drawWCInterior() {
     ctx.fillText("✨", stallCx(i), stallSy(100));
     ctx.textAlign = "left";
   }
+  drawCashFloats(PAY_SPOT.x + 90, 330);
   // exit door button + waiting-for-toilet queue badge — drawn last so nothing covers it
   drawWcExitDoor();
+}
+
+// "+₺20" / "−₺1.000" rising from (x, y) for each recent booking at this terminal.
+function drawCashFloats(x, y) {
+  const now = performance.now();
+  cashFloats = cashFloats.filter(f => now - f.t0 < 1400);
+  ctx.save();
+  ctx.font = "bold 13px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.shadowColor = "rgba(0,0,0,0.8)";
+  ctx.shadowBlur = 3;
+  cashFloats.forEach((f, k) => {
+    const u = (now - f.t0) / 1400;
+    ctx.globalAlpha = 1 - u * u;
+    ctx.fillStyle = f.amount >= 0 ? "#7dffa8" : "#ff8a8a";
+    ctx.fillText(`${f.amount >= 0 ? "+" : "−"}${fmtTL(Math.abs(f.amount))}`, x, y - u * 34 - (cashFloats.length - 1 - k) * 4);
+  });
+  ctx.restore();
 }
 
 // Outdoor nudge for the WC building: red badge + pulsing hint.
@@ -4639,29 +5931,47 @@ function drawWcPrompt() {
 // Outdoor nudge for the car wash: a pulsing 🚿 above any parked bus whose
 // windshield hasn't been washed yet. Washed buses read clean — no nudge.
 function drawWashHint() {
+  if (!carWashOpen()) return;
   const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 200);
   ctx.font = "bold 11px system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillStyle = `rgba(140, 220, 255, ${0.4 + 0.6 * pulse})`;
+  const wd = washDef();
   for (const b of buses) {
     if (b.state !== "stop" || b.washDone) continue;
+    if (wd.autoWashSec && b.autoWashT > 0) { // the gantry is on it
+      const f = clamp(b.autoWashT / wd.autoWashSec, 0, 1);
+      ctx.fillStyle = "rgba(13, 17, 32, 0.85)";
+      rr(ctx, b.cx - 26, LOT_NOSE - 12, 52, 6, 3); ctx.fill();
+      ctx.fillStyle = "#8fe3f2";
+      rr(ctx, b.cx - 26, LOT_NOSE - 12, 52 * f, 6, 3); ctx.fill();
+      ctx.fillText("🤖", b.cx, LOT_NOSE - 22);
+      ctx.fillStyle = `rgba(140, 220, 255, ${0.4 + 0.6 * pulse})`;
+      continue;
+    }
     ctx.fillText("🚿 yıka", b.cx, LOT_NOSE - 6);
   }
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
 }
 
-function drawRoadSign(x, y, label, alignRight) {
-  ctx.font = "bold 11px system-ui";
-  const w = ctx.measureText(label).width + 14;
+function drawRoadSign(x, y, name, km, alignRight) {
+  ctx.font = "bold 12px system-ui";
+  const num = String(km);
+  const w = ctx.measureText(name).width + ctx.measureText(num).width + 34;
+  const h = 20;
   const sx = alignRight ? x - w : x;
-  ctx.fillStyle = "#1f6b45";
-  rr(ctx, sx, y, w, 16, 3); ctx.fill();
-  ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 1;
-  rr(ctx, sx + 1.5, y + 1.5, w - 3, 13, 2); ctx.stroke();
+  ctx.fillStyle = "#0a3fd8";
+  rr(ctx, sx, y, w, h, 3); ctx.fill();
+  ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5;
+  rr(ctx, sx + 2.5, y + 2.5, w - 5, h - 5, 2.5); ctx.stroke();
   ctx.fillStyle = "#fff";
-  ctx.fillText(label, sx + 7, y + 12);
+  ctx.textAlign = "left";
+  ctx.fillText(name, sx + 8, y + 14.5);
+  ctx.textAlign = "right";
+  ctx.fillText(num, sx + w - 8, y + 14.5);
+  ctx.textAlign = "left";
 }
 
 function drawRoads() {
@@ -4691,8 +6001,9 @@ function drawRoads() {
   ctx.beginPath(); ctx.moveTo(560, ROAD.top + 3); ctx.lineTo(Wdyn, ROAD.top + 3); ctx.stroke();
   ctx.setLineDash([]);
   ctx.beginPath(); ctx.moveTo(-offX, ROAD.bot - 3); ctx.lineTo(Wdyn, ROAD.bot - 3); ctx.stroke();
-  drawRoadSign(-offX + 8, ROAD.top + 5, `${DEST_A} →`, false);
-  drawRoadSign(Wdyn - offX - 8, ROAD.top + 5, `${DEST_B} →`, true);
+  const km = termDef(G.activeTerminal).km;                         // road km from here to each end
+  drawRoadSign(-offX + 8, ROAD.top + 5, DEST_A, km.a, false);
+  drawRoadSign(Wdyn - offX - 8, ROAD.bot - 25, DEST_B, km.b, true);
 }
 
 function drawBus(b) {
@@ -5181,11 +6492,6 @@ function drawPax(p, k = 1) {
     ctx.fillStyle = "#ffd36b";
     ctx.beginPath(); ctx.arc(x + 6 * s, y - 8 * s, 2.5 * s, 0, 7); ctx.fill();
   }
-  if (holdsBill(p)) {
-    // held higher over the ultra-wide view's taller ledge so it stays visible
-    const billY = S.view === "wc" && deskK > 1 ? y - 9.5 * s : y - 6.5 * s;
-    drawHeldBill(x + 5 * s, billY, 0.3 * s, BILL_COLORS[p.bill] || "#c9c2a8", p.bill); // handing the bill
-  }
   if (p.state === "dripC") {
     const f = clamp(1 - p.dripT / 0.8, 0, 1);
     ctx.fillStyle = "rgba(200, 130, 40, 0.9)";
@@ -5217,7 +6523,21 @@ function drawPax(p, k = 1) {
 /* ------------------------------ UI (DOM) ---------------------------- */
 const $ = id => document.getElementById(id);
 
-function toast(msg, cls) {
+// Is the bound terminal the one on screen? (The scheduler binds every owned
+// terminal in turn.)
+const onScreen = () => !G || boundId === G.activeTerminal;
+let toastLog = [];   // recent notices, shown or not: { msg, terminal, shown } (test hook)
+
+// Notices from the terminal on screen are shown as they are. From an unseen
+// terminal only the important ones (breakdowns, maintenance due) get through,
+// prefixed with the terminal's name — routine chatter (a bus arrived, a stall
+// is spotless) stays quiet.
+function toast(msg, cls, important = false) {
+  const away = !onScreen();
+  toastLog.push({ msg, terminal: boundId, shown: !away || important, important });
+  if (toastLog.length > 200) toastLog.splice(0, toastLog.length - 200);
+  if (away && !important) return null;
+  if (away) msg = `📍 ${terminalName(boundId)} · ${msg}`;
   const box = $("toasts");
   const el = document.createElement("div");
   el.className = "toast " + (cls || "");
@@ -5229,41 +6549,232 @@ function toast(msg, cls) {
 }
 
 /* --------------------------- HUD & modals --------------------------- */
-function updateHUD() {
-  $("statServed").textContent = "👥 " + S.stats.served;
-  const hh = Math.floor(S.time), mm = Math.floor((S.time % 1) * 60);
-  $("statClock").textContent = `Gün ${S.day} · ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
-  $("repFill").style.width = S.rep + "%";
-  $("repNum").textContent = Math.round(S.rep);
-  $("btnPause").textContent = paused ? "▶" : "⏸";
-  $("btnSpeed").textContent = speed + "×";
+// Runs every frame: rewriting unchanged text replaces the text node, and WebKit
+// drops a click whose mousedown target node was detached before mouseup.
+function setText(id, text) {
+  const el = $(id);
+  text = String(text);
+  if (el.textContent !== text) el.textContent = text;
 }
 
+// Odometer-style: each changed digit rolls in (up when cash rises, down when it falls).
+function setCashChip(text, value) {
+  const el = $("cashChip");
+  if (el.dataset.text === text) return;
+  const prev = Array.from(el.dataset.text || ""), next = Array.from(text);
+  const dir = value >= +(el.dataset.val || 0) ? "up" : "down";
+  el.dataset.text = text;
+  el.dataset.val = value;
+  el.replaceChildren(...next.map((c, i) => {
+    const d = document.createElement("span"), inner = document.createElement("i");
+    d.className = "d";
+    inner.textContent = c;
+    d.append(inner);
+    const o = prev[prev.length - next.length + i]; // compare right-aligned so the ones stay put
+    if (prev.length && o !== c && /\d/.test(c + (o || ""))) {
+      d.classList.add(dir);
+      inner.dataset.old = o || "";
+    }
+    return d;
+  }));
+}
+
+function updateHUD() {
+  setText("statServed", "👥 " + S.stats.served);
+  const hh = Math.floor(G.clock.time), mm = Math.floor((G.clock.time % 1) * 60);
+  setText("statClock", `Gün ${G.clock.day} · ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`);
+  $("repFill").style.width = S.rep + "%";
+  setText("repNum", Math.round(S.rep));
+  const attention = ownedTerminals().some(needsAttention);
+  setCashChip((attention ? "🔧 " : "") + fmtTL(G.company.cash), G.company.cash);
+  $("cashChip").classList.toggle("warn", attention);
+  $("cashChip").classList.toggle("neg", G.company.cash < 0);
+  setText("statCash", "💰 " + fmtTL(G.company.cash));
+  setText("statTerm", "📍 " + terminalName(G.activeTerminal));
+  setText("btnPause", paused ? "▶" : "⏸");
+  setText("btnSpeed", speed + "×");
+}
+
+// The day that just ended (archived at midnight). A long catch-up can cross
+// several midnights while the summary is up: it then shows the latest and
+// says how many days went by.
+let summaryFromDay = null;
 function showDaySummary() {
   paused = true;
-  const st = S.stats;
-  const repDelta = S.rep - st.repStart;
+  const st = S.history[S.history.length - 1];
+  if (!st) return;
+  if (summaryFromDay == null) summaryFromDay = st.day;
+  const skipped = st.day - summaryFromDay;
+  const repDelta = st.repEnd - st.repStart;
   const avgSat = st.satN ? Math.round(st.satSum / st.satN) : 0;
-  $("modalTitle").textContent = `${S.day - 1}. gün tamamlandı`;
+  const sameDay = t => t.sim.history.find(h => h.day === st.day) || { revenue: 0, expenses: 0 };
+  $("modalTitle").textContent = `${st.day}. gün tamamlandı · ${terminalName(G.activeTerminal)}${skipped ? ` (+${skipped} gün daha geçti)` : ""}`;
   $("modalBody").innerHTML = `
     <table>
       <tr><td>Hizmet verilen otobüs</td><td>${st.buses}</td></tr>
       <tr><td>Hizmet verilen misafir</td><td>${st.served}</td></tr>
+      <tr><td>Gelir</td><td class="pos">${fmtTL(st.revenue)}</td></tr>
+      <tr><td>Gider</td><td class="neg">${fmtTL(st.expenses)}</td></tr>
+      ${ownedTerminals().length > 1 ? `<tr><td>Bütün terminaller: gelir / gider</td><td>${fmtTL(ownedTerminals().reduce((a, t) => a + sameDay(t).revenue, 0))} / ${fmtTL(ownedTerminals().reduce((a, t) => a + sameDay(t).expenses, 0))}</td></tr>` : ""}
+      <tr><td>Şirket kasası</td><td>${fmtTL(G.company.cash)}</td></tr>
       <tr><td>Dökülen kolonya</td><td>${st.cologne}</td></tr>
       <tr><td>Yıkanan ön cam</td><td>${st.washes}</td></tr>
-      <tr><td>Kaçırılan ₺20 ücret</td><td>${st.evaded || 0}</td></tr>
-      <tr><td>Yakalanan kaçak</td><td>${st.caught || 0}</td></tr>
+      <tr><td>Kaçırılan ${fmtTL(CONFIG.economy.toiletFee)} ücret</td><td>${st.evaded}</td></tr>
+      <tr><td>Yakalanan kaçak</td><td>${st.caught}</td></tr>
       <tr><td>Ort. memnuniyet</td><td>${st.satN ? avgSat + " / 100" : "—"}</td></tr>
-      <tr><td>İtibar</td><td class="${repDelta >= 0 ? "pos" : "neg"}">${Math.round(st.repStart)} → ${Math.round(S.rep)} (${repDelta >= 0 ? "+" : ""}${repDelta.toFixed(1)})</td></tr>
+      <tr><td>İtibar</td><td class="${repDelta >= 0 ? "pos" : "neg"}">${Math.round(st.repStart)} → ${Math.round(st.repEnd)} (${repDelta >= 0 ? "+" : ""}${repDelta.toFixed(1)})</td></tr>
     </table>
     <div class="big">${repDelta >= 3 ? "Ünün yayılıyor — yarın daha büyük otobüsler bekle."
       : repDelta <= -3 ? "Zor bir gündü. Tuvaletleri temiz tut."
       : "Mola Yeri'nde sakin bir gün."}</div>`;
-  $("modalBtn").textContent = `${S.day}. güne başla →`;
-  $("modalBtn").onclick = () => {
-    S.stats = freshDayStats();
-    hideModal();
-  };
+  $("modalBtn").textContent = `${G.clock.day}. güne devam →`;
+  $("modalBtn").onclick = () => { summaryFromDay = null; hideModal(); };
+  showModal();
+}
+
+/* ------------------------ Business panel (upgrades) ------------------------ */
+// DOM only: every button calls one of the validated economy functions and the
+// panel re-renders from G. Prices and benefits come straight from CONFIG.
+let shopOpen = false;
+let shopMsg = null;        // { ok, text } — the last action's outcome
+const escHtml = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+// What a WC track level gives (over the level before it).
+function wcBenefits(track, def) {
+  const prev = wcLevel(track, def.level - 1), out = [];
+  if (track === "count") {
+    out.push(prev ? `${def.stalls} kabin (önceki: ${prev.stalls}) — yeni kabinler tertemiz açılır` : `${def.stalls} kabin`);
+  } else if (track === "style") {
+    if (!prev) return ["Yere gömülü alaturka taşlar", `Her tuvalet puanı ${def.satBonus}`, `Ziyaret başına kir ${def.dirtUse.join("–")}`];
+    if (def.style !== prev.style) out.push("Modern klozetler — alaturkanın yerine, hepsi tertemiz");
+    if (def.satBonus !== prev.satBonus) out.push(`Her tuvalet puanı ${def.satBonus - prev.satBonus > 0 ? "+" : ""}${def.satBonus - prev.satBonus}`);
+    if (def.dirtUse.join() !== prev.dirtUse.join()) out.push(`Daha dayanıklı: ziyaret başına kir ${prev.dirtUse.join("–")} → ${def.dirtUse.join("–")}`);
+    if (def.auto) out.push(def.auto === "semi" ? "Rutin temizlik kendiliğinden — arızalar ve bakım sende" : "Temizlik ve gişe kendiliğinden — periyodik bakım sende");
+  } else if (track === "tool") {
+    const nt = CONFIG.cleaningTools[def.tool], pt = prev && CONFIG.cleaningTools[prev.tool];
+    out.push(`${Math.round(nt.perSec)}/sn temizlik${pt ? ` (önceki: ${Math.round(pt.perSec)}/sn)` : ""}`);
+    if (pt && nt.reach > pt.reach) out.push("Daha geniş temizlik alanı");
+  } else if (track === "cologne") {
+    if (!def.ml) return ["Gişede kolonya yok"];
+    if (!prev || prev.ml !== def.ml) out.push(`Gişede ${def.ml} ml'lik şişe (gece yarısı dolar)`);
+    if (!prev || prev.sat !== def.sat) out.push(`Dökülen her kolonya misafir puanına +${def.sat}`);
+  } else if (track === "calc") {
+    out.push(def.level ? "Gişedeki ekranda verilecek para üstü yazar" : "Para üstünü kafandan hesaplarsın");
+  } else if (track === "tea") {
+    out.push(def.level ? "Gişede çay yapabilirsin — molaları daha keyifli hale getirir" : "Çay yapma olanaği yok");
+  }
+  return out;
+}
+
+// What a car-wash tier gives (over the one before it).
+function washBenefits(def) {
+  const prev = CONFIG.carWashTiers.find(x => x.tier === def.tier - 1);
+  if (!prev) return ["Park etmiş otobüse dokun: uzun saplı fırçayla köpükle, hortumla durula",
+    `Biten her yıkama ${fmtTL(def.fee)} kazandırır`, `İtibar +${def.rep}, otobüs memnuniyeti +${def.sat}`, "İtibar şartı yok — sadece kasa"];
+  const out = [];
+  if (def.fee !== prev.fee) out.push(`Yıkama ücreti ${fmtTL(prev.fee)} → ${fmtTL(def.fee)}`);
+  if (def.reach !== prev.reach) out.push(`Daha geniş fırça ve hortum (${prev.reach} → ${def.reach})`);
+  if (def.soap !== prev.soap || def.rinse.join() !== prev.rinse.join()) out.push("Daha güçlü köpük ve durulama — daha az geçiş");
+  if (def.rep !== prev.rep || def.sat !== prev.sat) out.push(`İtibar +${def.rep}, otobüs memnuniyeti +${def.sat}`);
+  if (def.auto) out.push(def.auto === "semi" ? "Yıkamanın bir kısmı kendiliğinden — arızalar ve bakım sende" : "Otobüsler kendiliğinden yıkanır — periyodik bakım sende");
+  return out;
+}
+
+function renderShop() {
+  const t = term();
+  const card = (cls, name, tag, lines, why, btn) => `
+    <div class="card ${cls}">
+      <div class="info">
+        <div class="name">${escHtml(name)}${tag ? ` <span class="tag ${tag.cls || ""}">${escHtml(tag.text)}</span>` : ""}</div>
+        ${lines.length ? `<ul>${lines.map(l => `<li>${escHtml(l)}</li>`).join("")}</ul>` : ""}
+        ${why ? `<div class="why">${escHtml(why)}</div>` : ""}
+      </div>${btn || ""}
+    </div>`;
+  const buyBtn = (attrs, price, st, label = "Satın al") =>
+    `<button class="buy" ${attrs} ${st.ok ? "" : `disabled title="${escHtml(st.reason)}"`}>${label} · ${fmtTL(price)}</button>`;
+
+  // One card per track: what you have now, and a button to the next level.
+  const upgradeCard = (curName, next, lines, st, attrs, price, label = "Yükselt") => next
+    ? card("", curName, { text: "şu an", cls: "cur" }, lines, st.ok ? "" : st.reason, buyBtn(attrs, price, st, label))
+    : card("owned", curName, { text: "en yüksek", cls: "cur" }, [], "", "");
+
+  let wcSections = "";
+  for (const [track, tr] of Object.entries(CONFIG.wcTracks)) {
+    const cur = wcLevel(track, t.wc[track]), next = wcLevel(track, t.wc[track] + 1);
+    const lines = !next ? [] : track === "count" ? [`Yükseltince ${next.stalls} kabin — yeni kabinler tertemiz açılır`]
+      : [`Sonraki: ${next.icon} ${next.name}`, ...wcBenefits(track, next)];
+    const cards = upgradeCard(`${cur.icon} ${cur.name}`, next, lines, next && wcUpgradeStatus(t.id, track, next.level),
+      next && `data-act="wc" data-track="${track}" data-tier="${next.level}"`, next && tierCost(t.id, next));
+    wcSections += `<div class="shopSection"><h2>WC · ${tr.title}</h2>${cards}</div>`;
+  }
+
+  const haveWash = t.carWash.unlocked ? t.carWash.tier : 0;
+  const curWash = CONFIG.carWashTiers.find(x => x.tier === haveWash), nextWash = CONFIG.carWashTiers.find(x => x.tier === haveWash + 1);
+  const washCards = upgradeCard(curWash ? `${curWash.icon} ${curWash.name}` : "🚫 Oto yıkama yok", nextWash,
+    nextWash ? [`Sonraki: ${nextWash.icon} ${nextWash.name}`, ...washBenefits(nextWash)] : [], nextWash && carWashStatus(t.id, nextWash.tier),
+    nextWash && `data-act="wash" data-tier="${nextWash.tier}"`, nextWash && tierCost(t.id, nextWash), haveWash ? "Yükselt" : "Kur");
+
+  let maint = "";
+  const sys = autoSystems(t);
+  if (!sys.length) maint = card("locked", "⚙️ Otomasyon yok", null, ["Bakım yalnızca otomatik sistemler için gerekir (yarı otomatik tuvaletler, yıkama 4+)"], "", "");
+  else {
+    const m = t.maintenance, due = maintenanceDue(t), left = m.nextDueAt - absNow(), st = maintenanceStatus(t.id);
+    const hm = h => `${Math.floor(h)} sa ${Math.floor((h % 1) * 60)} dk`;
+    maint = card(due ? "warn" : "", "🔧 Günlük bakım", { text: `durum %${Math.round(m.condition)}`, cls: m.condition >= CONFIG.maintenance.warnCondition ? "cur" : "" },
+      [`Sistemler: ${sys.map(x => SYSTEM_NAMES[x]).join(", ")}`,
+       due ? `GECİKTİ — ${hm(-left)}: aşınma ve arıza riski artıyor` : `Sonraki bakım: ${hm(left)} sonra`,
+       `İşletme gideri: ${fmtTL(operatingCost(t))} / gün (gece yarısı)`],
+      st.ok ? "" : (st.reason === "Bakım gerekmiyor" ? "" : st.reason),
+      `<button class="buy" data-act="maint" ${st.ok ? "" : `disabled title="${escHtml(st.reason)}"`}>Bakım yap · ${fmtTL(maintenanceCost(t))}</button>`);
+    for (const f of t.maintenance.failures) {
+      const rs = repairStatus(t.id, f.system);
+      maint += card("warn", `⚠️ ${SYSTEM_NAMES[f.system]} arızalı`, null, ["Onarılana kadar bu iş elle yapılır"], rs.ok ? "" : rs.reason,
+        `<button class="buy" data-act="repair" data-sys="${f.system}" ${rs.ok ? "" : "disabled"}>Onar · ${fmtTL(CONFIG.maintenance.repairCost[f.system])}</button>`);
+    }
+  }
+
+  const msg = `<div class="shopMsg ${shopMsg ? (shopMsg.ok ? "good" : "bad") : ""}" role="status">${shopMsg ? escHtml(shopMsg.text) : ""}</div>`;
+  if (S.view === "wc") { $("shopBody").innerHTML = msg + wcSections; return; }
+  if (S.view === "wash") { $("shopBody").innerHTML = `${msg}<div class="shopSection"><h2>OTO YIKAMA</h2>${washCards}</div>`; return; }
+  $("shopBody").innerHTML = `
+    ${msg}
+    ${sys.length ? `<div class="shopSection"><h2>BAKIM</h2>${maint}</div>` : ""}
+    <div class="shopSection"><h2>OTO YIKAMA</h2>${washCards}</div>
+    ${sys.length ? "" : `<div class="shopSection"><h2>BAKIM</h2>${maint}</div>`}`;
+}
+
+function shopAction(btn) {
+  const a = btn.dataset.act;
+  let res;
+  if (a === "wc") {
+    const def = wcLevel(btn.dataset.track, +btn.dataset.tier);
+    res = purchaseUpgrade(G.activeTerminal, btn.dataset.track, +btn.dataset.tier);
+    if (res.ok) res.text = `✓ ${def.name} kuruldu (−${fmtTL(-res.tx.amount)})`;
+  } else if (a === "wash") {
+    const def = CONFIG.carWashTiers.find(x => x.tier === +btn.dataset.tier);
+    res = purchaseUpgrade(G.activeTerminal, "carWash", +btn.dataset.tier);
+    if (res.ok) res.text = `✓ ${def.tier === 1 ? "Oto yıkama kuruldu" : def.name + " kuruldu"} (−${fmtTL(-res.tx.amount)})`;
+  } else if (a === "maint") {
+    res = performMaintenance(G.activeTerminal);
+    if (res.ok) res.text = "✓ Bakım yapıldı — sistemler %100";
+  } else if (a === "repair") {
+    res = repairFailure(G.activeTerminal, btn.dataset.sys);
+    if (res.ok) res.text = `✓ ${SYSTEM_NAMES[btn.dataset.sys]} onarıldı`;
+  } else return;
+  shopMsg = { ok: res.ok, text: res.ok ? res.text : "✗ " + res.reason };
+  renderShop();
+}
+
+// Save migration / recovery report, shown once on load.
+function showLoadNotice(res) {
+  paused = true;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const migrated = res.status === "migrated" || res.from != null;
+  $("modalTitle").textContent = res.status === "recovered" ? "⚠️ Kayıt sorunu" : "💾 Kaydın aktarıldı";
+  $("modalBody").innerHTML =
+    (migrated ? `<p>Eski kayıt (sürüm ${esc(res.from)}) yeni sürüme aktarıldı: itibarın, saat, otobüsler, misafirler ve kabinler olduğu gibi duruyor. Eski kayıt yedek olarak tarayıcıda kalıyor.</p>` : "") +
+    res.notes.map(n => `<p>${esc(n)}</p>`).join("");
+  $("modalBtn").textContent = "Devam";
+  $("modalBtn").onclick = () => hideModal();
   showModal();
 }
 
@@ -5274,6 +6785,7 @@ function hideModal() { $("modal").classList.add("hidden"); $("modalBox").classLi
 function showIntro(first) {
   const touch = coarseQ; // phones & tablets — say "tap" where the desktop says "click"
   const act = touch ? "dokun" : "tıkla";
+  const tool = cleaningTool();
   $("modalTitle").textContent = first ? "👋 Mola Yeri'ne hoş geldin" : "Nasıl oynanır";
   $("modalBox").classList.add("tall"); // both intro screens are scrollable
   $("modalBody").innerHTML = `
@@ -5282,16 +6794,17 @@ function showIntro(first) {
     <p>🍔 Lokantadaki yemek ve içecekler <strong>bedava</strong> — otobüs beklerken misafirler yer, içer ve etrafta dolaşır.</p>
     <p>⏱ Otobüsler yaklaşık <strong>30 dakika</strong> mola verir — terminalde en fazla bir saat kalabilirler. Kalkış vakti gelince <strong>WC ödeme sırasındaki</strong> misafirlere ödemeyi bitirmeleri için <strong>5–10 dakika</strong> tanınır; sıra hâlâ duruyorsa <strong>ödemeden sırayı terk edip</strong> otobüse binerler ve otobüs kalkar.</p>
     <p>🕐 Zaman <strong>sıkıştırılmıştır</strong> — 1× hızda bir oyun saati gerçekte 6 dakika sürer, yani bir oyun günü yaklaşık 2,4 gerçek saattir. Otobüsler, yemekler ve sıralar oyun içi temposunu korur.</p>
-    <p>🚻 Tuvalet <strong>₺20</strong>; ücret ziyaretten <em>sonra</em> gişede ödenir — ve gişe <strong>sensin</strong>. <strong>İçeri girmek için WC binasına ${act}</strong>: içinde biri varken <strong>her kabinin kapısı kapanır</strong> (bir ziyaret oyun içinde 1–10 dakika sürer) ve <strong>her kabinin kendi temizliği vardır</strong> — kirli kabin ziyaretin puanını düşürür, misafirler hep <strong>en temiz boş kabini</strong> seçer (çok pis olanı kimse kullanmaz).</p>
-    <p>💳 İçeride işini bitiren her misafir gişedeki sıraya girer ve sana bir banknot uzatır. Doğru para üstünü vermek için <strong>açık kasa çekmecesindeki gözlere ${act}</strong> (₺10 / ₺20 / ₺50) — ve <strong>misafirler banknotları sayar</strong>: aynı tutarı daha az banknotla vermek daha iyi puan alır (₺30'u 10+20 olarak vermek şıktır, 10+10+10 bir avuç kâğıttır; ₺80 için 10+20+50, 10×8'den iyidir). <strong>Tam ₺20</strong> veren misafirlerin sana ihtiyacı yok: <strong>kendi ikinci sıralarında</strong> durur, kendileri öder ve yan geçitten çıkarlar — para üstü yok, kolonya yok, tıklama yok. Eksik ya da hiç verilmeyen para üstü diğer misafirleri mutsuz eder.</p>
-    <p>💨 Gişede 500 ml'lik bir şişe <strong>limon kolonyası</strong> durur. Öndeki misafir öderken ellerine biraz dökmek için <strong>şişeye ${act}</strong>. Para üstü eline geçer geçmez yan geçitten çıkar (tam ₺20 sırası kendi kendine öder — kolonya ana sıranın öndeki misafiri içindir), o yüzden erken dök. Şişe gece yarısı dolar.</p>
-    <p>🍵 <strong>Çayın</strong> gişede durur ve yaklaşık 30 oyun dakikasında biter. Taze bir bardak istemek için gişenin sağ ucundaki <strong>interkoma ${act}</strong> — 2 oyun dakikası içinde gelir.</p>
+    <p>🚻 Tuvalet <strong>${fmtTL(CONFIG.economy.toiletFee)}</strong>; ücret ziyaretten <em>sonra</em> gişede ödenir — ve gişe <strong>sensin</strong>. <strong>İçeri girmek için WC binasına ${act}</strong>: içinde biri varken <strong>her kabinin kapısı kapanır</strong> (bir ziyaret oyun içinde 1–10 dakika sürer) ve <strong>her kabinin kendi temizliği vardır</strong> — kirli kabin ziyaretin puanını düşürür, misafirler hep <strong>en temiz boş kabini</strong> seçer (çok pis olanı kimse kullanmaz).</p>
+    <p>💳 İçeride işini bitiren her misafir gişedeki sıraya girer ve sana bir banknot uzatır. Doğru para üstünü vermek için <strong>açık kasa çekmecesindeki gözlere ${act}</strong> (₺10 / ₺20 / ₺50) — ve <strong>misafirler banknotları sayar</strong>: aynı tutarı daha az banknotla vermek daha iyi puan alır (₺30'u 10+20 olarak vermek şıktır, 10+10+10 bir avuç kâğıttır; ₺80 için 10+20+50, 10×8'den iyidir). <strong>Tam ${fmtTL(CONFIG.economy.toiletFee)}</strong> veren misafirlerin sana ihtiyacı yok: <strong>kendi ikinci sıralarında</strong> durur, kendileri öder ve yan geçitten çıkarlar — para üstü yok, kolonya yok, tıklama yok. Eksik ya da hiç verilmeyen para üstü diğer misafirleri mutsuz eder. ${hasCalc() ? "Gişedeki <strong>hesap makinesi</strong> verilecek para üstünü gösterir." : "Henüz <strong>hesap makinen yok</strong> — para üstünü kafandan hesapla (₺20 düş)."}</p>
+    ${hasCologne() ? `<p>💨 Gişede ${bottleMax()} ml'lik bir şişe <strong>limon kolonyası</strong> durur. Öndeki misafir öderken ellerine biraz dökmek için <strong>şişeye ${act}</strong>. Para üstü eline geçer geçmez yan geçitten çıkar (tam ₺20 sırası kendi kendine öder — kolonya ana sıranın öndeki misafiri içindir), o yüzden erken dök. Şişe gece yarısı dolar.</p>` : ""}
+    <p>🍵 <strong>Çayın</strong> gişede durur ve yaklaşık 30 oyun dakikasında biter. Taze bir bardak istemek için gişenin sağ ucundaki <strong>interkoma ${act}</strong> — bardağı ${fmtTL(CONFIG.economy.teaPrice)}, 2 oyun dakikası içinde gelir.</p>
     <p>🚪 Dışarı çıkmak için üst çubuktaki <strong>🚪</strong> düğmesine ${act}${touch ? "" : " — ya da <strong>E</strong> tuşuna bas"}. Misafirler gişenin iki yanındaki geçitlerden girip çıkar.</p>
-    <p>🧻 <strong>Her kabin her kullanımda biraz daha kirlenir</strong> (her kabinin üstündeki çubuğu izle). Eski anında temizlik artık yok: kabinlerin yanındaki <strong>hortumu al</strong> ve <strong>${touch ? "parmağını basılı tutup" : "fareyi basılı tutup"} bir kabinin üzerinde sürükle</strong>, su sıkıp temizle — ama <strong>kapısı kapalı</strong> (içinde biri olan) bir kabine su sıkılamaz.</p>
-    <p>🚿 Otobüsler tozlu gelir. Önüne geçmek için <strong>park etmiş bir otobüse ${act}</strong>: <strong>uzun saplı fırçayı al ve ön camın üzerinde sürükle</strong>, köpükle; sonra <strong>temiz su hortumunu al ve köpüğü durula</strong>. <strong>Bırakmak</strong> için alete yeniden ${act}. Pırıl pırıl bir ön cam şoförün minnetini kazanır.</p>
+    <p>🧻 <strong>Her kabin her kullanımda biraz daha kirlenir</strong> (her kabinin üstündeki çubuğu izle). Kabinlerin iki yanındaki istasyondan <strong>${tool.name.toLocaleLowerCase("tr-TR")}</strong> aletini al ve <strong>${touch ? "parmağını basılı tutup" : "fareyi basılı tutup"} bir kabinin üzerinde sürükle</strong>, temizle — ama <strong>kapısı kapalı</strong> (içinde biri olan) bir kabin temizlenemez.${stallCount() < WC_STALLS ? ` Şimdilik <strong>${stallCount()} ${toiletDef().style === "alaturka" ? "alaturka " : ""}tuvaletin</strong> var; kalan bölmeler tahtayla kapalı. Kabin sayısı, tuvaletler, temizlik ekipmanı, kolonya ve hesap makinesi İşletme panelinden ayrı ayrı yükseltilir.` : ""}</p>
+    ${carWashOpen() ? `<p>🚿 Otobüsler tozlu gelir. Önüne geçmek için <strong>park etmiş bir otobüse ${act}</strong>: <strong>uzun saplı fırçayı al ve ön camın üzerinde sürükle</strong>, köpükle; sonra <strong>temiz su hortumunu al ve köpüğü durula</strong>. <strong>Bırakmak</strong> için alete yeniden ${act}. Pırıl pırıl bir ön cam şoförün minnetini kazanır — ve otobüs firması yıkama başına <strong>${fmtTL(washDef().fee)}</strong> öder.</p>` : `<p>🔒 Henüz <strong>oto yıkaman yok</strong> — otobüsler tozlu gelip tozlu gider. Oto yıkama ileride ${fmtTL(tierCost(G.activeTerminal, CONFIG.carWashTiers[0]))} ile kurulabilir.</p>`}
     <p>💢 İlgilenilmeyen misafirler ödemeden <strong>öfkeyle çıkıp gider</strong>, ★ memnun misafirler ise <strong>itibarını</strong> yükseltir → otobüsler çok daha sık uğrar ve daha kalabalık gelir. Yoğun ve itibarı yüksek bir terminalde aynı anda birkaç otobüs olur — boşalan bir park yeri 30 dakika içinde dolar, asla boş kalmaz.</p>
-    <p>🚨 Her misafir <strong>₺20</strong>'yi ödemez. <strong>Ödeme sırasını terk eden</strong> misafirler (sabırları tükendiği ya da otobüsleri kalktığı için) sadece bir <strong>bildirim</strong> olarak görünür — onlara tıklanamaz. Ama bazı misafirler (yaklaşık 100'de 3) <strong>kabinde işini bitirip ödemeden yan geçide koşar</strong>; bunlar <strong>kırmızı rozetle</strong> işaretlenir. Yakalamak için <strong>binadan çıkmadan onlara ${act}</strong>: bir paspas kapıp 3 saniye boyunca <strong>bütün tuvaletleri ovarlar</strong> — ve her kabin <strong>pırıl pırıl</strong> olur. Kaçak binadan çıktıysa gitmiştir.</p>
-    <p><b style="color:var(--good)">Kâr yok, geliştirme yok</b> — para sadece ritüelin bir parçası. ${touch ? "⏸ düğmesi oyunu duraklatır · 1× düğmesi hız kademesini değiştirir (1×, 10×, 100×, 200×)." : "Boşluk tuşu duraklatır · 1–4 tuşları hız kademesini seçer (1×, 10×, 100×, 200×)."}</p>`;
+    <p>🚨 Her misafir <strong>${fmtTL(CONFIG.economy.toiletFee)}</strong> ücreti ödemez. <strong>Ödeme sırasını terk eden</strong> misafirler (sabırları tükendiği ya da otobüsleri kalktığı için) sadece bir <strong>bildirim</strong> olarak görünür — onlara tıklanamaz. Ama bazı misafirler (yaklaşık 100'de 3) <strong>kabinde işini bitirip ödemeden yan geçide koşar</strong>; bunlar <strong>kırmızı rozetle</strong> işaretlenir. Yakalamak için <strong>binadan çıkmadan onlara ${act}</strong>: bir paspas kapıp 3 saniye boyunca <strong>bütün tuvaletleri ovarlar</strong> — ve her kabin <strong>pırıl pırıl</strong> olur. Kaçak binadan çıktıysa gitmiştir.</p>
+    ${autoSystems(term()).length ? `<p>🤖 <strong>Otomasyon</strong> rutin işi kendisi yapar, ama <strong>her gün bakım</strong> ister: İşletme panelindeki <strong>Bakım yap</strong>. Geciken bakım aşınmayı ve arıza riskini artırır; arızalanan sistem <strong>onarılana kadar</strong> durur ve o işi yine elle yaparsın. Otomasyonun günlük işletme gideri gece yarısı kasadan düşer.</p>` : ""}
+    <p>💰 Ödenen her ücret <strong>şirket kasasına</strong> girer (sağ üstte). Kasayla <strong>🏗 İşletme</strong> panelinden (kasaya ${act}${touch ? "" : " ya da <strong>U</strong>"}) daha iyi tuvaletler ve ekipman alırsın — fiyatlar, koşullar ve ne kazandırdıkları orada yazar. Panel açıkken saat durur. ${touch ? "⏸ düğmesi oyunu duraklatır · 1× düğmesi hız kademesini değiştirir (1×, 10×, 100×, 200×)." : "Boşluk tuşu duraklatır · 1–4 tuşları hız kademesini seçer (1×, 10×, 100×, 200×)."}</p>`;
   $("modalBody").scrollTop = 0;
   $("modalBtn").textContent = first ? "Dükkânı aç!" : "İşe dön";
   $("modalBtn").onclick = () => hideModal();
@@ -5311,9 +6824,10 @@ function frame(now) {
   const raw = Math.min(0.1, elapsed);
   const timeDt = Math.min(86400, elapsed) * speed;
   if (viewFade > 0) viewFade = Math.max(0, viewFade - raw * 3); // transition flash fades even while paused
-  if (!paused && !modalOpen) {
+  mapZoom = clamp(mapZoom + (mapOpen ? 1 : -1) * raw * 2.5, 0, 1); // ~0.4 s zoom, also while paused
+  if (!paused && !modalOpen && !shopOpen) { // the business panel holds the clock while you shop
     const dt = raw * speed;
-    update(dt, timeDt);
+    advanceSimulation(dt, timeDt);
     stepScrub(Math.min(0.25, elapsed)); // real seconds — the scrub ignores the speed tier
   }
   drawScene();
@@ -5323,8 +6837,8 @@ function frame(now) {
 
 /* ------------------------------- Init ------------------------------- */
 function init() {
-  const hadSave = load();
-  rebuildFacilities();
+  const loaded = load();
+  openingBus(); // drawn behind the welcome screen, rolling in the moment play starts
 
   const burgerMenu = $("burgerMenu");
   const burgerBackdrop = $("burgerBackdrop");
@@ -5352,23 +6866,48 @@ function init() {
     speed = i >= 0 ? SPEEDS[(i + 1) % SPEEDS.length] : 1;
     updateHUD();
   };
+  const openShop = () => {
+    if (modalOpen) return;
+    closeBurger();
+    shopOpen = true;
+    shopMsg = null;
+    renderShop();
+    $("shop").classList.remove("hidden");
+    $("btnShopClose").focus();
+  };
+  const closeShop = () => {
+    shopOpen = false;
+    $("shop").classList.add("hidden");
+    save();
+  };
+  $("btnShop").onclick = openShop;
+  // testing aid: booked like any other money, so the ledger and totals stay consistent
+  $("btnTestCash").onclick = () => {
+    applyTransaction("testCash", 100000, null, "test");
+    toast(`🧪 +${fmtTL(100000)} test parası`, "good");
+    if (shopOpen) renderShop();
+    save();
+  };
+  $("mapBtn").onclick = () => setMapOpen(!mapOpen);
+  $("btnMapClose").onclick = () => setMapOpen(false);
+  $("mapPanel").addEventListener("click", e => {
+    const btn = e.target.closest("button[data-sel], button[data-act]");
+    if (btn && !btn.disabled) mapAction(btn);
+  });
+  $("cashChip").onclick = openShop;
+  $("btnShopClose").onclick = closeShop;
+  $("shop").addEventListener("click", e => {
+    if (e.target === $("shop")) { closeShop(); return; } // the backdrop
+    const btn = e.target.closest("button[data-act]");
+    if (btn && !btn.disabled) shopAction(btn);
+  });
   $("btnHelp").onclick = () => {
     closeBurger();
     paused = true;
     showIntro(false);
   };
   $("btnReset").onclick = () => {
-    if (confirm("Bütün oyun sıfırlansın mı? Kayıtlı oyunun silinecek.")) {
-      // Stop saving FIRST: location.reload() fires beforeunload, which calls
-      // save() and would write the current state back after the delete.
-      resetting = true;
-      // Delete every key load() might read, including the v3 migration
-      // fallback — otherwise a stale v3 save silently survives the reset.
-      localStorage.removeItem(SAVE_KEY);
-      localStorage.removeItem("layover-lane-v5");
-      localStorage.removeItem("layover-lane-v3");
-      location.reload();
-    }
+    if (confirm("Bütün oyun sıfırlansın mı? Kayıtlı oyunun silinecek.")) resetGame();
   };
   // ---- canvas input: pointer events (one code path for mouse + touch) ----
   // toGame maps a pointer event into logical scene coordinates: the 960×540
@@ -5399,8 +6938,9 @@ function init() {
     downClient = { x: e.clientX, y: e.clientY };
     // a press in the wash view starts a scrub/spray; holding the cleaning hose
     // sprays the stall under the pointer (per-cell cooldowns throttle the work)
+    if (mapOpen) return; // the map only takes taps
     if (S.view === "wash") { pointerDown = true; washApply(x, y); }
-    if (S.view === "wc" && hoseInHand) { pointerDown = true; hoseApply(x, y); }
+    if (S.view === "wc" && toolInHand) { pointerDown = true; cleanApply(x, y); }
   });
 
   canvas.addEventListener("pointermove", (e) => {
@@ -5411,13 +6951,14 @@ function init() {
     if (activePointer === e.pointerId) {
       // a held scrub/spray — the per-cell cooldown inside washApply throttles it
       if (S.view === "wash" && pointerDown) washApply(x, y);
-      if (S.view === "wc" && pointerDown && hoseInHand) hoseApply(x, y);
+      if (S.view === "wc" && pointerDown && toolInHand) cleanApply(x, y);
     }
     if (e.pointerType !== "mouse") return; // no hover cursor for touch
+    if (mapOpen) { canvas.style.cursor = mapNodeAt(x, y) ? "pointer" : "default"; return; }
     const hit = (r, pad = 2) => x >= r.x - pad && x <= r.x + r.w + pad && y >= r.y - pad && y <= r.y + r.h + pad;
     let hot;
     if (S.view === "out") {
-      hot = hit(WC_BUILDING) || buses.some(z => z.state === "stop" && !z.washDone
+      hot = hit(WC_BUILDING) || carWashOpen() && buses.some(z => z.state === "stop" && !z.washDone
         && x >= z.cx - 36 - 2 && x <= z.cx + 36 + 2 && y >= LOT_NOSE - 2 && y <= z.cy + z.len / 2 + 2);
     } else if (S.view === "wash") {
       hot = hit(WASH.brush) || hit(WASH.hose) || hit(WASH.exit);
@@ -5425,14 +6966,14 @@ function init() {
       const onGlass = bp.x >= Wn.x && bp.x <= Wn.x + Wn.w && bp.y >= Wn.y && bp.y <= Wn.y + Wn.h;
       canvas.style.cursor = hot ? "pointer" : (onGlass ? "crosshair" : "default");
       return;
-    } else if (hoseInHand) {
-      hot = hit(COUNTER_IN.hose) || hit(COUNTER_IN.hoseR) || hit(COUNTER_IN.exit);
+    } else if (toolInHand) {
+      hot = toolStations().some(st => hit(st)) || hit(COUNTER_IN.exit);
     } else {
-      hot = hit(COUNTER_IN.exit) || COUNTER_IN.chips.some(c => hit(deskRect(chipHit(c), "drawer"))) || hit(deskRect(COUNTER_IN.bottle, "bottle"))
-        || hit(deskRect(COUNTER_IN.intercom, "intercom")) || hit(COUNTER_IN.hose) || hit(COUNTER_IN.hoseR)
+      hot = hit(COUNTER_IN.exit) || COUNTER_IN.chips.some(c => hit(deskRect(chipHit(c), "drawer")))
+        || (hasCologne() && hit(deskRect(COUNTER_IN.bottle, "bottle"))) || hit(deskRect(COUNTER_IN.intercom, "intercom")) || toolStations().some(st => hit(st))
         || !!runawayAt(x, y, 2);
     }
-    canvas.style.cursor = hot ? "pointer" : (S.view === "wc" && hoseInHand && stallAt(x, y) >= 0 ? "crosshair" : "default");
+    canvas.style.cursor = hot ? "pointer" : (S.view === "wc" && toolInHand && stallAt(x, y) >= 0 ? "crosshair" : "default");
   });
 
   canvas.addEventListener("pointerup", (e) => {
@@ -5468,6 +7009,7 @@ function init() {
   function routePress(x, y, isMouse) {
     const scale = canvas.getBoundingClientRect().width / Wdyn; // CSS px per logical px
     const padMin = isMouse ? 0 : clamp(10 / scale, 4, 16);
+    if (mapOpen) { const id = mapNodeAt(x, y, padMin); if (id) mapSelect(id); return; }
     const hit = (r, pad = 2) => {
       const p = Math.max(pad, padMin);
       return x >= r.x - p && x <= r.x + r.w + p && y >= r.y - p && y <= r.y + r.h + p;
@@ -5477,7 +7019,8 @@ function init() {
       if (hit(WC_BUILDING)) { setView("wc"); return; }
       const b = buses.find(z => z.state === "stop" && !z.washDone
         && x >= z.cx - 36 - 2 - padMin && x <= z.cx + 36 + 2 + padMin && y >= LOT_NOSE - 2 - padMin && y <= z.cy + z.len / 2 + 2 + padMin);
-      if (b) openWash(b);
+      if (b && !carWashOpen()) toast(`🔒 Oto yıkama yok — ${fmtTL(tierCost(G.activeTerminal, CONFIG.carWashTiers[0]))} ile kurulabilir`, "");
+      else if (b) openWash(b);
       return;
     }
     if (S.view === "wash") {
@@ -5495,16 +7038,16 @@ function init() {
     }
     // inside the counter room: exit button, the hose station, till chips, cologne bottle, tea intercom
     if (hit(COUNTER_IN.exit)) {
-      if (hoseInHand) hoseInHand = null;
+      if (toolInHand) toolInHand = null;
       setView("out");
       return;
     }
-    for (const st of [COUNTER_IN.hose, COUNTER_IN.hoseR]) // tap picks up / puts down that station's hose
-      if (hit(st)) { hoseInHand = hoseInHand === st ? null : st; return; }
-    if (hoseInHand) return; // while holding the hose, other desk/counter interactions and runaway catching are blocked
+    for (const st of toolStations()) // tap picks up / puts down that station's hose
+      if (hit(st)) { toolInHand = toolInHand === st ? null : st; return; }
+    if (toolInHand) return; // while holding the hose, other desk/counter interactions and runaway catching are blocked
     const chip = COUNTER_IN.chips.find(c => hit(deskRect(chipHit(c), "drawer")));
     if (chip) { giveChange(chip.d); save(); return; }
-    if (hit(deskRect(COUNTER_IN.bottle, "bottle"))) { offerCologne(); save(); return; }
+    if (hasCologne() && hit(deskRect(COUNTER_IN.bottle, "bottle"))) { offerCologne(); save(); return; }
     if (hit(deskRect(COUNTER_IN.intercom, "intercom"))) { orderTea(); save(); return; }
     const p = runawayAt(x, y, isMouse ? 2 : 8);
     if (p && catchRunaway(p)) return; // a runaway bound for the side passage — catch them
@@ -5519,13 +7062,46 @@ function init() {
     setView, view: () => S.view,
     openWash, washApply,
     wash: () => { const b = bus(); return b ? b.wash : null; },
-    hose: () => ({ inHand: !!hoseInHand, apply: hoseApply, stallClean: S.stallClean, bay: stallBay, at: stallAt }),
+    hose: () => ({ inHand: !!toolInHand, apply: cleanApply, stallClean: S.stallClean, bay: stallBay, at: stallAt }),
     scrub: () => scrub,
     catchRunaway, fleeCounter, stormOut, giveUpLine, runawayAt,
     evaders: () => buses.flatMap(b => b.pax).filter(p => p.unpaid),   // every guest who used the WC and never paid
     runaways: () => buses.flatMap(b => b.pax).filter(p => p.runaway), // running for the exit right now: the catchable ones
+    game: () => G, loaded, save, shopOpen: () => shopOpen, renderShop,
+    toastLog: () => toastLog, runtimeOf: id => runtime[id], boundId: () => boundId,
+    mapOpen: () => mapOpen, mapZoom: () => mapZoom, mapSel: () => mapSel, setMapOpen,
+    mapNode: id => mapPos(termDef(id).map), mapState,
+    sim: () => S, buses: () => buses, facilities: () => facilities,
+    // drive the scheduler directly: `sec` real seconds at the current speed tier, in 1/30 s frames
+    advance: sec => { for (let i = Math.round(sec * 30); i > 0; i--) advanceSimulation(speed / 30, speed / 30); },
+    setSpeed: v => { speed = v; }, speed: () => speed, paused: () => paused,
+    frame: (dt, timeDt) => advanceSimulation(dt, timeDt), // one raw frame, e.g. a hidden-tab catch-up
+    activeStalls, tool: () => Object.keys(CONFIG.cleaningTools).find(k => CONFIG.cleaningTools[k] === cleaningTool()), toolInHand: () => !!toolInHand,
+    unlockTerminal, switchTerminal, terminalStatus, tierCost,
+    performMaintenance, repairFailure, maintenanceStatus, autoSystems: () => autoSystems(term()), absNow,
+    applyTransaction, purchaseUpgrade, carWashStatus, finishWash, wcUpgradeStatus, finalizePayment,
+    // logical scene point -> CSS client point, for synthesizing real pointer input
+    toClient: (x, y) => { const r = canvas.getBoundingClientRect(); return { x: r.left + (x + offX) * r.width / Wdyn, y: r.top + (y + offY) * r.height / Hdyn }; },
+    stations: () => toolStations().map(st => ({ x: st.x + st.w / 2, y: st.y + st.h / 2 })),
+    windRect: () => { const Z = WASH.zoom, Wn = WASH.wind; return { x: Z.cx + (Wn.x - Z.cx) * Z.s, y: Z.y1 + (Wn.y - Z.y0) * Z.s, w: Wn.w * Z.s, h: Wn.h * Z.s }; },
+    washTools: () => ({ brush: { x: WASH.brush.x + WASH.brush.w / 2, y: WASH.brush.y + WASH.brush.h / 2 }, hose: { x: WASH.hose.x + WASH.hose.w / 2, y: WASH.hose.y + WASH.hose.h / 2 } }),
+    bayCenter: i => { const r = stallBay(i); return { x: r.x + r.w / 2, y: r.y + r.h / 2 }; },
   };
   window.addEventListener("keydown", e => {
+    // the panel owns the keyboard while open (Tab / Enter / Space work its buttons)
+    if (shopOpen) { if (e.key === "Escape" || e.key === "u" || e.key === "U") closeShop(); return; }
+    if ((e.key === "u" || e.key === "U") && !modalOpen && !mapOpen) { openShop(); return; }
+    if ((e.key === "m" || e.key === "M") && !modalOpen) { setMapOpen(!mapOpen); return; }
+    if (mapOpen) {
+      if (e.key === "Escape") { setMapOpen(false); return; }
+      const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+      if (step) {
+        e.preventDefault();
+        const ids = CONFIG.terminals.map(d => d.id);
+        mapSelect(ids[(ids.indexOf(mapSel) + step + ids.length) % ids.length]);
+        return;
+      }
+    }
     if (e.code === "Space") { e.preventDefault(); paused = !paused; }
     // keys 1-4 pick the speed tier (1x / 10x / 100x / 200x)
     const tier = "1234".indexOf(e.key);
@@ -5537,13 +7113,14 @@ function init() {
       }
       // any interior view (counter room, car wash) steps back outside; from
       // outside the key keeps its original counter-room shortcut
-      setView(S.view === "out" ? "wc" : "out");
+      if (!mapOpen) setView(S.view === "out" ? "wc" : "out");
     }
   });
   window.addEventListener("beforeunload", save);
   document.addEventListener("visibilitychange", () => { if (document.hidden) { releasePointer(); save(); } });
 
-  if (!hadSave) { paused = true; showIntro(true); }
+  if (loaded.status === "new") { paused = true; showIntro(true); }
+  else if (loaded.status !== "loaded") showLoadNotice(loaded);
 
   requestAnimationFrame(frame);
 }
