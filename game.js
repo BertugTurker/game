@@ -4594,9 +4594,9 @@ function drawCounterIn() {
     ctx.textAlign = "left";
   }
   withDesk("drawer", drawDrawer);
-  // WC upgrade sign on top left
+  // WC upgrade sign between toilets
   function drawWCSign() {
-    const signX = 120, signY = 320, signW = 100, signH = 60;
+    const signX = 430, signY = 80, signW = 100, signH = 60;
     // sign background
     ctx.fillStyle = "#dc143c";
     rr(ctx, signX, signY, signW, signH, 6); ctx.fill();
