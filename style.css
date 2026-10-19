@@ -180,6 +180,11 @@ button.icon { width: 34px; height: 34px; padding: 0 2px; font-size: 15px; }
   gap: 16px;
   overflow-y: auto;
   transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  /* #stage sets line-height: 0 (kills the canvas baseline gap) and it inherits
+     into the drawer. With a zero-height line box WebKit hit-tests the glyph as
+     a degenerate rect and drops the click — only the padding ("sides") was
+     tappable. Reset it for all drawer text. */
+  line-height: normal;
 }
 #burgerMenu.hidden {
   display: none;
