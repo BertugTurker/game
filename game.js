@@ -4596,17 +4596,17 @@ function drawCounterIn() {
   withDesk("drawer", drawDrawer);
   // WC upgrade sign between toilets
   function drawWCSign() {
-    const signX = 430, signY = 80, signW = 100, signH = 60;
+    const signX = 440, signY = 90, signW = 60, signH = 40;
     // sign background
     ctx.fillStyle = "#dc143c";
-    rr(ctx, signX, signY, signW, signH, 6); ctx.fill();
+    rr(ctx, signX, signY, signW, signH, 4); ctx.fill();
     // text
     ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 14px system-ui, sans-serif";
+    ctx.font = "bold 10px system-ui, sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText("WC", signX + signW / 2, signY + 20);
-    ctx.font = "bold 18px system-ui, sans-serif";
-    ctx.fillText("20 ₺", signX + signW / 2, signY + 45);
+    ctx.fillText("WC", signX + signW / 2, signY + 13);
+    ctx.font = "bold 12px system-ui, sans-serif";
+    ctx.fillText("20 ₺", signX + signW / 2, signY + 31);
   }
   withDesk("sign", drawWCSign);
   // calculator, cologne
