@@ -4301,7 +4301,7 @@ function drawRestStop() {
   ctx.fillStyle = "#9fe8ff";
   ctx.font = "bold 12px system-ui";
   ctx.textAlign = "center";
-  ctx.fillText("WC · " + fmtTL(CONFIG.economy.toiletFee), 851, 114);
+  ctx.fillText("WC", 851, 114);
   ctx.textAlign = "left";
   // cleanliness bar
   const cw = 66;
@@ -4382,7 +4382,7 @@ function drawNightLights(nf, now) {
   ctx.fillText("LOKANTA", 705, 105);
   ctx.shadowColor = "#4fd8ff";
   ctx.fillStyle = "#b6f0ff";
-  ctx.fillText("WC · " + fmtTL(CONFIG.economy.toiletFee), 851, 114);
+  ctx.fillText("WC", 851, 114);
   ctx.restore();
   // backlit pylon face cuts through the night overlay
   ctx.save();
@@ -4594,6 +4594,27 @@ function drawCounterIn() {
     ctx.textAlign = "left";
   }
   withDesk("drawer", drawDrawer);
+  // WC upgrade sign on top left
+  function drawWCSign() {
+    const signX = 120, signY = 200, signW = 100, signH = 60;
+    // sign background
+    ctx.fillStyle = "#f4d03f";
+    rr(ctx, signX - 6, signY - 6, signW + 12, signH + 12, 8); ctx.fill();
+    ctx.fillStyle = "#2c3e50";
+    rr(ctx, signX, signY, signW, signH, 6); ctx.fill();
+    // border
+    ctx.strokeStyle = "#f4d03f";
+    ctx.lineWidth = 2;
+    rr(ctx, signX, signY, signW, signH, 6); ctx.stroke();
+    // text
+    ctx.fillStyle = "#f4d03f";
+    ctx.font = "bold 14px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("WC", signX + signW / 2, signY + 20);
+    ctx.font = "bold 18px system-ui, sans-serif";
+    ctx.fillText("20 ₺", signX + signW / 2, signY + 45);
+  }
+  withDesk("sign", drawWCSign);
   // calculator, cologne
   function drawCalculator() {
     softShadow(218, 396, 66, 68, 6, 8, 4);                          // calculator
@@ -5975,6 +5996,11 @@ function drawRoadSign(x, y, name, km, alignRight) {
   ctx.textAlign = "right";
   ctx.fillText(num, sx + w - 8, y + 14.5);
   ctx.textAlign = "left";
+  // support legs
+  ctx.fillStyle = "#8b8680";
+  const legX1 = sx + 6, legX2 = sx + w - 6;
+  ctx.fillRect(legX1 - 2, y + h, 4, 12);
+  ctx.fillRect(legX2 - 2, y + h, 4, 12);
 }
 
 function drawRoads() {
@@ -6005,7 +6031,7 @@ function drawRoads() {
   ctx.setLineDash([]);
   ctx.beginPath(); ctx.moveTo(-offX, ROAD.bot - 3); ctx.lineTo(Wdyn, ROAD.bot - 3); ctx.stroke();
   const km = termDef(G.activeTerminal).km;                         // road km from here to each end
-  drawRoadSign(-offX + 8, ROAD.top + 5, DEST_A, km.a, false);
+  drawRoadSign(-offX + 8, ROAD.top - 30, DEST_A, km.a, false);
   drawRoadSign(Wdyn - offX - 8, ROAD.bot - 25, DEST_B, km.b, true);
 }
 
