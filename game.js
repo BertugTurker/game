@@ -4596,18 +4596,12 @@ function drawCounterIn() {
   withDesk("drawer", drawDrawer);
   // WC upgrade sign on top left
   function drawWCSign() {
-    const signX = 120, signY = 200, signW = 100, signH = 60;
+    const signX = 120, signY = 320, signW = 100, signH = 60;
     // sign background
-    ctx.fillStyle = "#f4d03f";
-    rr(ctx, signX - 6, signY - 6, signW + 12, signH + 12, 8); ctx.fill();
-    ctx.fillStyle = "#2c3e50";
+    ctx.fillStyle = "#dc143c";
     rr(ctx, signX, signY, signW, signH, 6); ctx.fill();
-    // border
-    ctx.strokeStyle = "#f4d03f";
-    ctx.lineWidth = 2;
-    rr(ctx, signX, signY, signW, signH, 6); ctx.stroke();
     // text
-    ctx.fillStyle = "#f4d03f";
+    ctx.fillStyle = "#ffffff";
     ctx.font = "bold 14px system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.fillText("WC", signX + signW / 2, signY + 20);
