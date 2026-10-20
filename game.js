@@ -4598,9 +4598,10 @@ function drawCounterIn() {
   function drawWCSign() {
     const signW = 60, signH = 40;
     const signX = STALL_ROW_W / 2 - signW / 2; // center in stall-space
-    const signY = 84 + (246 - 84) * 0.02; // 2% from top of stall row
+    const signY = 110; // positioned above stall openings for visibility at all resolutions
 
-    stallSpace();
+    // Note: stallSpace() transformation is NOT applied here because this function
+    // is already wrapped by withDesk() which provides its own transformation
     // sign background
     ctx.fillStyle = "#dc143c";
     rr(ctx, signX, signY, signW, signH, 4); ctx.fill();
@@ -4611,7 +4612,6 @@ function drawCounterIn() {
     ctx.fillText("WC", signX + signW / 2, signY + 13);
     ctx.font = "bold 12px system-ui, sans-serif";
     ctx.fillText("20 ₺", signX + signW / 2, signY + 31);
-    ctx.restore();
   }
   withDesk("sign", drawWCSign);
   // calculator, cologne
