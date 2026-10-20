@@ -1630,7 +1630,7 @@ function fleeCounter(p) {
 // The row sits at the far wall, so it is drawn at half scale (perspective):
 // half the visible width, centered, and half the old 1.36 vertical scale.
 const STALL_K = 0.78, STALL_MARGIN = 6;
-const STALL_AISLE = 48, STALL_ROW_W = 644 + STALL_AISLE;
+const STALL_AISLE = 80, STALL_ROW_W = 644 + STALL_AISLE;
 const stallOy = () => -offY - 84 * STALL_K; // row top flush with the top of the view
 const stallKx = () => (Wdyn - 2 * STALL_MARGIN) / 644 / 2;
 const stallOx = () => -offX + (Wdyn - STALL_ROW_W * stallKx()) / 2;
@@ -4596,7 +4596,11 @@ function drawCounterIn() {
   withDesk("drawer", drawDrawer);
   // WC upgrade sign between toilets
   function drawWCSign() {
-    const signX = 440, signY = 90, signW = 60, signH = 40;
+    const signW = 60, signH = 40;
+    const signX = STALL_ROW_W / 2 - signW / 2; // center in stall-space
+    const signY = 84 + (246 - 84) * 0.02; // 2% from top of stall row
+
+    stallSpace();
     // sign background
     ctx.fillStyle = "#dc143c";
     rr(ctx, signX, signY, signW, signH, 4); ctx.fill();
@@ -4607,6 +4611,7 @@ function drawCounterIn() {
     ctx.fillText("WC", signX + signW / 2, signY + 13);
     ctx.font = "bold 12px system-ui, sans-serif";
     ctx.fillText("20 ₺", signX + signW / 2, signY + 31);
+    ctx.restore();
   }
   withDesk("sign", drawWCSign);
   // calculator, cologne
