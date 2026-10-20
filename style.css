@@ -80,10 +80,9 @@ html, body {
   white-space: nowrap;
 }
 
-.stat#statServed { color: var(--accent); font-weight: 700; width: auto; }
 
 .stat .bar {
-  width: 90px;
+  width: 100%;
   height: 8px;
   background: #0d1120;
   border-radius: 6px;
@@ -135,24 +134,222 @@ button.icon { width: 34px; height: 34px; padding: 0 2px; font-size: 15px; }
 }
 
 /* ---------- Burger menu (highest z-index in project) ---------- */
-#btnBurger {
+#headerBar {
   position: absolute;
   top: 12px;
   right: 12px;
-  z-index: 1000;
+  z-index: 999;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+#btnBurger {
   width: 40px;
   height: 40px;
   font-size: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 0 0 2px;
+  background: rgba(26, 32, 48, 0.88);
+  border: 1px solid #33406a;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+}
+#btnBurger:hover {
+  background: #2a3552;
+}
+
+/* Customer count stat */
+#statServed {
+  height: 40px;
+  padding: 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 40px;
+  color: var(--accent);
+  background: rgba(26, 32, 48, 0.88);
+  border: 1px solid #33406a;
+  border-radius: 10px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+  backdrop-filter: blur(4px);
+}
+
+/* Company cash, taps to open the business panel */
+#cashChip {
+  height: 40px;
+  padding: 0 10px;
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: normal;
+  height: 40px;
+  padding: 0 10px;
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: normal;
+  color: var(--accent);
   background: rgba(26, 32, 48, 0.88);
   border: 1px solid #33406a;
   box-shadow: 0 4px 14px rgba(0,0,0,0.45);
   backdrop-filter: blur(4px);
 }
-#btnBurger:hover {
-  background: #2a3552;
+#cashChip .d {
+  display: inline-block;
+  position: relative;
+  overflow: hidden;
+  vertical-align: top;
+  height: 1.3em;
+  line-height: 1.3em;
+  white-space: pre;
+}
+#cashChip .d > i { display: block; position: relative; font-style: normal; }
+#cashChip .d.up > i, #cashChip .d.down > i { animation: 0.38s cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+#cashChip .d.up > i { animation-name: digitUp; }
+#cashChip .d.down > i { animation-name: digitDown; }
+#cashChip .d.up > i::before, #cashChip .d.down > i::before {
+  content: attr(data-old);
+  position: absolute;
+  left: 0;
+  right: 0;
+  text-align: center;
+}
+#cashChip .d.up > i::before { top: -100%; }
+#cashChip .d.down > i::before { top: 100%; }
+@keyframes digitUp { from { transform: translateY(100%); } }
+@keyframes digitDown { from { transform: translateY(-100%); } }
+@media (prefers-reduced-motion: reduce) {
+  #cashChip .d.up > i, #cashChip .d.down > i { animation: none; }
+}
+#cashChip.neg { color: var(--bad); }
+#cashChip.warn { border-color: var(--bad); animation: chipWarn 1.2s ease-in-out infinite; }
+@keyframes chipWarn { 50% { box-shadow: 0 0 0 4px rgba(255, 107, 107, 0.35), 0 4px 14px rgba(0,0,0,0.45); } }
+.hudWrap { flex-wrap: wrap; }
+#statCash { color: var(--accent); font-weight: 800; }
+
+/* ---------- Regional map: button + side panel ---------- */
+#mapBtn, #btnShop {
+  position: absolute;
+  top: 60px;
+  right: 12px;
+  z-index: 999;
+  width: 40px;
+  height: 40px;
+  line-height: normal;
+  background: rgba(26, 32, 48, 0.88);
+  border: 1px solid #33406a;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+}
+#btnShop { top: 108px; }
+#btnShop.hidden { display: none; }
+#mapBtn.on { border-color: var(--accent); }
+#mapPanel {
+  position: absolute;
+  top: 176px;
+  right: 12px;
+  z-index: 998;
+  width: min(300px, 38%);
+  max-height: calc(100% - 188px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  line-height: normal;
+  background: rgba(26, 32, 48, 0.94);
+  border: 1px solid #33406a;
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  padding: 10px 12px;
+  font-size: 12.5px;
+  color: var(--dim);
+  scrollbar-width: thin;
+}
+#mapPanel.hidden { display: none; }
+.mapHead { display: flex; align-items: center; justify-content: space-between; color: var(--ink); margin-bottom: 8px; }
+.mapHead .icon { width: 30px; height: 30px; }
+#mapList { display: flex; flex-direction: column; gap: 4px; }
+#mapList button { text-align: left; padding: 6px 9px; font-size: 12.5px; display: flex; justify-content: space-between; gap: 8px; }
+#mapList button.sel { border-color: var(--accent); background: #2a3552; }
+#mapList .st { font-size: 11px; font-weight: 700; }
+.st.own { color: var(--good); } .st.buy { color: var(--accent); } .st.lock { color: var(--dim); }
+#mapDetail { margin-top: 10px; border-top: 1px solid #2a3450; padding-top: 8px; }
+#mapDetail .name { color: var(--ink); font-weight: 700; font-size: 14px; }
+#mapDetail ul { margin: 6px 0; padding-left: 16px; }
+#mapDetail li.ok { color: var(--good); } #mapDetail li.no { color: var(--bad); }
+#mapDetail button { width: 100%; margin-top: 6px; font-weight: 700; }
+#mapDetail button.buy:not(:disabled) { background: linear-gradient(180deg, #b8722a, #9a5c1e); border-color: #c9822f; }
+#mapDetail .why { color: var(--bad); font-size: 12px; margin-top: 4px; }
+#mapDetail .msg { margin-top: 6px; font-weight: 700; }
+#mapDetail .msg.good { color: var(--good); } #mapDetail .msg.bad { color: var(--bad); }
+
+/* ---------- Business panel (upgrades, equipment) ---------- */
+#shop {
+  position: fixed;
+  inset: 0;
+  z-index: 1003;
+  background: rgba(6, 9, 16, 0.72);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+#shop.hidden { display: none; }
+#shopBox {
+  background: var(--panel);
+  border: 1px solid #33406a;
+  border-radius: 18px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  width: min(640px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 18px 22px;
+}
+.shopHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-shrink: 0; }
+.shopHead h1 { margin: 0; font-size: 20px; }
+#shopBody {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin-top: 12px;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--dim);
+  scrollbar-width: thin;
+  scrollbar-color: #3d4d75 rgba(13, 17, 32, 0.4);
+}
+.shopMsg { min-height: 20px; margin: 4px 0 8px; font-weight: 700; }
+.shopMsg:empty { display: none; }
+.shopMsg.good { color: var(--good); }
+.shopMsg.bad { color: var(--bad); }
+.shopSection { margin-top: 14px; }
+.shopSection h2 { font-size: 12px; letter-spacing: 1px; color: var(--dim); margin: 0 0 8px; }
+.card {
+  background: var(--panel2);
+  border: 1px solid #2c3856;
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.card.owned { border-color: #2f6b45; }
+.card.locked { opacity: 0.7; }
+.card.warn { border-color: var(--bad); background: #2a2231; }
+.card .info { flex: 1; min-width: 0; }
+.card .name { color: var(--ink); font-weight: 700; }
+.card .tag { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px; margin-left: 6px; background: rgba(255,255,255,0.08); }
+.card .tag.cur { color: var(--good); }
+.card ul { margin: 4px 0 0; padding-left: 18px; }
+.card .why { color: var(--bad); font-size: 12px; margin-top: 3px; }
+.card button { flex-shrink: 0; min-width: 104px; font-weight: 700; }
+.card button.buy:not(:disabled) { background: linear-gradient(180deg, #b8722a, #9a5c1e); border-color: #c9822f; }
+@media (max-width: 600px) {
+  #shop { padding: 10px; }
+  #shopBox { padding: 14px; border-radius: 14px; }
+  .card { flex-direction: column; align-items: stretch; }
 }
 
 #burgerBackdrop {
@@ -219,6 +416,7 @@ button.icon { width: 34px; height: 34px; padding: 0 2px; font-size: 15px; }
 }
 .burgerControls {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 .burgerControls button {
@@ -228,6 +426,9 @@ button.icon { width: 34px; height: 34px; padding: 0 2px; font-size: 15px; }
   font-size: 14px;
   padding: 10px 14px;
   font-weight: 600;
+}
+#btnTestCash {
+  margin-top: 10px;
 }
 /* Display size as a pure function of the *stage box*, never of the backing
    buffer (game.js sizes the buffer from the display size for sharpness — with
