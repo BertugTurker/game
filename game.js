@@ -3,7 +3,7 @@
 /* =====================================================================
    LAYOVER LANE — Bus Rest-Stop Simulator
    Tour buses run İstanbul (A) → Trabzon (B) and pull into your layover.
-   You run the diner and the toilets — and you are the WC counter.
+   The Lokanta is closed by default; you run the toilets and the WC counter.
    Click the WC building to step behind the counter: each stall's door
    closes while it's in use, and every stall carries its own dirt — take
    the ₺20 bill, splash Turkish cologne, make change, and keep the stalls
@@ -43,14 +43,14 @@ let lastWdyn = 0, lastHdyn = 0;
 const SECONDS_PER_HOUR = 360;         // real seconds per in-game hour (at 1x) — 1 game hour = 6 real minutes
 const LANE_Y = 520;                   // main road lane (feet line)
 const LOT_NOSE = 182;                 // lot stalls: where a parked bus's nose points (building side)
-const BAY_SLOTS = [                   // the parking lot: 4 stalls, one row — all parallel, nose-up facing the terminal
-  { cx: 620 }, { cx: 704 }, { cx: 788 }, { cx: 872 },
-];
+const PARKING_SLOT_COUNT = 10;
+const BAY_SLOTS = Array.from({ length: PARKING_SLOT_COUNT }, (_, i) => ({ cx: 250 + i * 74 })); // 10 parallel bus bays across the lot
 const GRASS = { top: 88, bot: 170 };  // grass strip — the diner and WC stand on it
 const LOT   = { top: 170, bot: 432 }; // bus parking lot (asphalt), in front of the diner + WC
 const ROAD  = { top: 432, bot: 530 }; // main road (buses drive here — never park on it)
 
 const DINER_SEATS = 3;                     // fixed — no upgrades in this game
+const LOKANTA_OPEN = false;                // the diner is closed; guests cannot enter or receive service
 const WC_STALLS   = 10;                    // 5 bays in two rows — one on the left, mirrored on the right
 const SVC_TIME_R  = 5.4;                   // real seconds per diner guest served
 const TOILET_STAY = [6, 60];               // a toilet visit lasts 1–10 in-game minutes (6 s of timeDt per game min)
@@ -110,6 +110,15 @@ function deskXf(item) {
   if (deskK === 1) return [1, 0, 0];
   return [deskK, 480 + ((DESK_SHIFT[item] || 0) - 508.5) * deskK, H - 4 - DRAWER_BOT * deskK];
 }
+function counterBounds() {
+  const gap = Wdyn * SIDE_GAP;
+  let L = -offX + gap, R = -offX + Wdyn - gap;
+  if (deskK > 1) {
+    L = Math.max(L, 480 + (DESK_ULTRA.L - 508.5) * deskK);
+    R = Math.min(R, 480 + (DESK_ULTRA.R - 508.5) * deskK);
+  }
+  return { L, R };
+}
 function deskRect(r, item) {
   const [s, tx, ty] = deskXf(item);
   return { x: tx + r.x * s, y: ty + r.y * s, w: r.w * s, h: r.h * s };
@@ -162,6 +171,13 @@ const CONFIG = {
     toiletFee: 20,      // what a toilet visit costs the guest
     teaPrice: 20,       // what a glass of tea ordered on the intercom costs you
   },
+  parkingLots: [
+    { spaces: 2, minBuses: 0, cost: 0 },
+    { spaces: 4, minBuses: 20, cost: 1000 },
+    { spaces: 6, minBuses: 50, cost: 2500 },
+    { spaces: 8, minBuses: 100, cost: 5000 },
+    { spaces: 10, minBuses: 200, cost: 10000 },
+  ],
   // The profile a terminal starts from. "classic" is the pre-progression game
   // (10 stalls, hose, cologne, calculator, manual car wash) — legacy saves
   // migrate onto it. wc: the starting level of every WC upgrade track.
@@ -325,6 +341,10 @@ let runtime = {};        // per terminal, never saved: { facilities } (rebuilt f
 let boundId = null;
 let cars = [];           // ambient traffic in the far lane
 let paused = false;
+let arrivalInfoOpen = false;
+let arrivalInfoBusId = null;
+let arrivalInfoKind = "arrival";
+let arrivalInfoDelayUntil = 0;
 // Speed tiers: the whole simulation (game clock, guest needs, walks, animations)
 // runs this many times faster. At 1x, 1 game hour = 6 real minutes (a game day
 // is 2.4 real hours); at 10x a game day is ~14 min; at 200x it's ~43 seconds.
@@ -339,7 +359,17 @@ let toolInHand = null; // the hose station (COUNTER_IN.hose) whose hose is in ha
 let hoseCd = new Array(WC_STALLS).fill(0);      // last spray timestamp per stall (performance.now)
 let hoseGleam = new Array(WC_STALLS).fill(0);   // per stall: when it last hit 100 (sparkle burst)
 let lastHoseToast = 0;
-let cashFloats = [];         // "+₺20" / "−₺1.000" pops over the active terminal: { amount, t0 }
+let cashFloats = [];         // queued "+₺20" / "−₺1.000" money pops
+let changeBillFlights = [];  // bills handed from the drawer to the customer
+const CHANGE_BILL_FLIGHT_DURATION = 650, CHANGE_BILL_STAGGER = 180;
+const changePaymentFlights = new WeakMap(); // final change bill arrival times
+const receiptFlightEnds = new WeakMap(); // keep paid guests at the counter until their bill reaches the drawer
+const CASH_FLOAT_DURATION = 1400, CASH_FLOAT_STAGGER = 260;
+function enqueueCashFloat(amount) {
+  const now = performance.now(), last = cashFloats[cashFloats.length - 1];
+  const t0 = Math.max(now, last ? last.t0 + CASH_FLOAT_STAGGER : now);
+  cashFloats.push({ amount, t0 });
+}
 let lastDirtyToast = 0;      // throttle for the "too filthy to use" toasts
 let lastEvadeToast = 0;      // throttle for the "trying to escape" toasts
 // The caught runaway's cleaning sequence: { pax, t, from, foam } — t counts
@@ -351,6 +381,7 @@ let scrub = null;
 let scrubDoneAt = 0;         // performance.now when the last sequence finished (the "all clean" flash)
 let downClient = null;       // where the press started (CSS px) — the tap-vs-drag threshold
 let activePointer = null;    // the pointerId driving a press (pointer capture) — one at a time
+let mapOpen = false, mapPanelOpen = false, mapZoom = 0, mapSel = null, mapMsg = null;
 
 function emptyFacilities() {
   return { R: { spots: [], queue: [] }, T: { spots: [], queue: [] }, C: { queue: [], queue2: [] } };
@@ -364,7 +395,7 @@ function freshGame(profile = CONFIG.newGameProfile) {
     company: { cash: CONFIG.economy.startCash, nextTxId: 1, ledger: [], totals: {} },
     activeTerminal: start.id,
     terminals: {},
-    flags: { firstBusDone: false },
+    flags: { firstBusDone: false, firstBusParked: false, wcLockedToastSeen: false, arrivalInfoSeen: false, wcInfoSeen: false, wcIntroStep: 0 },
     migratedFrom: null,      // save version this game was migrated from (null = born on v7)
   };
   g.terminals[start.id] = freshTerminal(start.id, profile);
@@ -405,6 +436,9 @@ const wcLevel = (track, level) => CONFIG.wcTracks[track].levels.find(x => x.leve
 const wcDef = (track, t = term()) => wcLevel(track, t.wc[track]);
 const toiletDef = () => wcDef("style");
 const stallCount = () => wcDef("count").stalls;
+const parkingSpaces = (sim = S) => clamp(Math.floor(finiteOr(sim && sim.parkingSpaces, 2)), 2, PARKING_SLOT_COUNT);
+const parkingSlotStart = (count = parkingSpaces()) => Math.floor((PARKING_SLOT_COUNT - count + 1) / 2);
+const activeParkingSlots = (count = parkingSpaces()) => Array.from({ length: count }, (_, i) => parkingSlotStart(count) + i);
 const stallActive = i => STALL_RANK[i] < stallCount();
 const activeStalls = () => STALL_ORDER.slice(0, stallCount()).sort((a, b) => a - b);
 const cleaningTool = () => CONFIG.cleaningTools[wcDef("tool").tool];
@@ -427,7 +461,9 @@ function freshSim(rep = 50) {
     view: "out",             // "out" = the layover, "wc" = inside the WC counter room, "wash" = the bus front
     washBus: null,           // id of the bus being washed (set while view is "wash")
     nextBusAt: 9.5,
-    slotVacantSince: BAY_SLOTS.map(() => null), // per stall: game-hour it became vacant (null = filled or never used)
+    parkingSpaces: 2,          // built bus bays (upgrades: 2 → 4 → 6 → 8 → 10)
+    busesServed: 0,             // lifetime completed bus stops; does not reset with daily stats
+    slotVacantSince: BAY_SLOTS.map(() => null), // per bay: game-hour it became vacant (null = filled or never used)
     nextBusId: 1,
     stats: freshDayStats(rep),
     history: [],             // the last HISTORY_DAYS finished days: stats + { day, repEnd }
@@ -592,6 +628,17 @@ function restoreGame(data) {
     nextTxId: Math.max(Number.isInteger(co.nextTxId) ? co.nextTxId : 1, ...ledger.map(x => x.id + 1)),
   };
   g.flags = Object.assign(g.flags, src.flags && typeof src.flags === "object" ? src.flags : {});
+  g.flags.arrivalInfoSeen = !!g.flags.arrivalInfoSeen;
+  g.flags.wcInfoSeen = !!g.flags.wcInfoSeen;
+  g.flags.wcLockedToastSeen = !!g.flags.wcLockedToastSeen;
+  g.flags.wcIntroStep = Number.isInteger(g.flags.wcIntroStep) ? clamp(g.flags.wcIntroStep, 0, 4) : 0;
+  const hasParkedFlag = !!src.flags && Object.prototype.hasOwnProperty.call(src.flags, "firstBusParked");
+  g.flags.firstBusParked = hasParkedFlag
+    ? !!g.flags.firstBusParked
+    : Object.values(src.terminals).some(t => t && (
+      Array.isArray(t.buses) && t.buses.some(b => b && b.stoppedOnce) ||
+      t.sim && t.sim.stats && t.sim.stats.buses > 0
+    ));
   g.migratedFrom = Number.isInteger(src.migratedFrom) ? src.migratedFrom : null;
   g.terminals = {};
   for (const def of CONFIG.terminals) { // ids no longer in CONFIG are dropped
@@ -624,6 +671,8 @@ function migrateLegacy(data) {
   g.company.cash = CONFIG.economy.migratedCash;
   g.migratedFrom = data.v;
   g.flags.firstBusDone = true; // an old game already had its buses — no new-game opening
+  g.flags.firstBusParked = true; // the old game has already been through the first stop
+  g.flags.wcIntroStep = 4; // old saves have already used the WC
   g.clock = sanitizeClock({ day: data.S.day, time: data.S.time, lastSave: data.S.lastSave });
   const t = g.terminals[g.activeTerminal];
   t.sim = data.S;
@@ -667,12 +716,27 @@ function fixupTerminal(t, v) {
   t.sim.stats = sanitizeStats(raw.stats, t.sim.rep);
   t.sim.history = (Array.isArray(raw.history) ? raw.history : []).filter(h => h && typeof h === "object")
     .slice(-HISTORY_DAYS).map(h => Object.assign(sanitizeStats(h, 50), { day: Math.max(1, Math.floor(finiteOr(h.day, 1))), repEnd: clamp(finiteOr(h.repEnd, 50), 0, 100) }));
-  if (!Array.isArray(t.sim.slotVacantSince) || t.sim.slotVacantSince.length !== BAY_SLOTS.length)
+  const hadParkingUpgradeData = CONFIG.parkingLots.some(x => x.spaces === raw.parkingSpaces);
+  t.sim.parkingSpaces = hadParkingUpgradeData ? raw.parkingSpaces : 4; // earlier saves had four built spaces
+  t.sim.busesServed = Math.max(0, Math.floor(finiteOr(raw.busesServed,
+    t.sim.history.reduce((n, h) => n + h.buses, t.sim.stats.buses))));
+  if (!Array.isArray(raw.slotVacantSince) || raw.slotVacantSince.length !== BAY_SLOTS.length) {
+    const old = Array.isArray(raw.slotVacantSince) ? raw.slotVacantSince : [];
     t.sim.slotVacantSince = BAY_SLOTS.map(() => null);
+    const start = parkingSlotStart(t.sim.parkingSpaces);
+    old.slice(0, t.sim.parkingSpaces).forEach((v, i) => { t.sim.slotVacantSince[start + i] = v == null ? null : finiteOr(v, null); });
+  }
   t.sim.nextBusAt = finiteOr(raw.nextBusAt, G.clock.time + 0.25);
   { const ml = wcLevel("cologne", t.wc.cologne).ml; t.sim.bottle = clamp(finiteOr(raw.bottle, ml), 0, ml); }
   t.sim.tea = clamp(finiteOr(raw.tea, 1), 0, 1);
   t.buses = Array.isArray(t.buses) ? t.buses.filter(b => b && typeof b === "object" && Array.isArray(b.pax)) : [];
+  if (!hadParkingUpgradeData) {
+    const start = parkingSlotStart(t.sim.parkingSpaces);
+    for (const b of t.buses) {
+      if (Number.isInteger(b.slot) && b.slot >= 0 && b.slot < 4) b.slot += start;
+      if (Number.isInteger(b.forcedSlot) && b.forcedSlot >= 0 && b.forcedSlot < 4) b.forcedSlot += start;
+    }
+  }
   // bus ids are per terminal: the next one must not collide with a saved bus
   t.sim.nextBusId = Math.max(Number.isInteger(raw.nextBusId) ? raw.nextBusId : 1, ...t.buses.map(b => (Number.isInteger(b.id) ? b.id : 0) + 1));
   bindTerminal(t.id);
@@ -687,7 +751,11 @@ function fixupTerminal(t, v) {
   else
     S.stallClean = raw.stallClean.map(x => clamp(finiteOr(x, 100), 0, 100));
   S.cleanliness = avgClean(); // re-derive the HUD average
-  for (const b of buses) { if (b.state === "stop" && !BAY_SLOTS[b.slot]) b.slot = 0; migrateBus(b); }
+  const activeSlots = new Set(activeParkingSlots());
+  for (const b of buses) {
+    if ((b.state === "stop" || b.state === "enter") && !activeSlots.has(b.slot)) b.slot = activeParkingSlots()[0];
+    migrateBus(b);
+  }
   // older saves predate the man/woman/kid looks — give untyped guests one
   for (const b of buses) for (const p of b.pax) {
     if (!p.type) p.type = rollPaxType();
@@ -719,6 +787,10 @@ function fixupTerminal(t, v) {
       const d = doorPos(b); p.x = d.x; p.y = d.y; p.tx = d.x; p.ty = d.y;
       p.state = "free"; p.idleT = rand(0.5, 2);
     }
+  // Older saves have no visitor-selection flags. Preserve passengers already
+  // outside and plan staggered remaining visits with the current WC guarantee.
+  for (const b of buses) if (b.state === "stop" && b.pax.some(p => typeof p.disembark !== "boolean"))
+    planStopVisitors(b, true);
   rebuildFacilities();
   // the windshield grid changed shape across versions (v3/v4: 6×3, v5: 6×4,
   // v6: 30×20) — resample any saved wash onto the current grid, taking the
@@ -769,7 +841,7 @@ function applyTransaction(kind, amount, terminalId = null, note = "", mandatory 
   if (co.ledger.length > CONFIG.economy.ledgerMax) co.ledger.splice(0, co.ledger.length - CONFIG.economy.ledgerMax);
   const t = terminalId && G.terminals[terminalId];
   if (t) { if (amount > 0) t.sim.stats.revenue += amount; else t.sim.stats.expenses -= amount; }
-  if (terminalId === G.activeTerminal) cashFloats.push({ amount, t0: performance.now() });
+  if (terminalId === G.activeTerminal) enqueueCashFloat(amount);
   return tx;
 }
 
@@ -804,6 +876,37 @@ function wcUpgradeStatus(id, track, level) {
   const cost = tierCost(id, def);
   if (G.company.cash < cost) return { ok: false, reason: `${fmtTL(cost - G.company.cash)} eksik`, def, cost };
   return { ok: true, def, cost };
+}
+
+// Can terminal `id` expand to the next parking-lot size? Progress is per terminal
+// and counts completed bus stops across days.
+function parkingUpgradeStatus(id, spaces) {
+  const t = ownedTerminal(id);
+  if (!t) return fail("Bu terminal senin değil");
+  const current = parkingSpaces(t.sim);
+  const next = CONFIG.parkingLots.find(x => x.spaces === spaces);
+  if (!next) return fail("Böyle bir otopark seviyesi yok");
+  if (spaces <= current) return { ok: false, reason: "Sahipsin", def: next, owned: true };
+  const expected = CONFIG.parkingLots.find(x => x.spaces > current);
+  if (next !== expected) return fail(`Önce ${expected.spaces} park yeri açılmalı`);
+  if ((t.sim.busesServed || 0) < next.minBuses)
+    return { ok: false, reason: `${next.minBuses - (t.sim.busesServed || 0)} otobüse daha hizmet ver`, def: next };
+  const cost = tierCost(id, next);
+  if (G.company.cash < cost) return { ok: false, reason: `${fmtTL(cost - G.company.cash)} eksik`, def: next, cost };
+  return { ok: true, def: next, cost };
+}
+
+function upgradeParkingLot(id, spaces) {
+  const st = parkingUpgradeStatus(id, spaces);
+  if (!st.ok) return st;
+  const sim = G.terminals[id].sim, old = parkingSpaces(sim);
+  const tx = applyTransaction("facility", -st.cost, id, `${st.def.spaces} otobüs park yeri`);
+  if (!tx) return fail("Yetersiz kasa");
+  sim.parkingSpaces = st.def.spaces;
+  for (const i of activeParkingSlots(st.def.spaces))
+    if (!activeParkingSlots(old).includes(i) && sim.slotVacantSince[i] == null) sim.slotVacantSince[i] = G.clock.time;
+  save();
+  return { ok: true, def: st.def, tx };
 }
 
 // Can terminal `id` buy car-wash tier `tier`? Tier 1 is the unlock: it needs
@@ -1034,13 +1137,13 @@ function migrateBus(b) {
   delete b.x; delete b.baseY;
   b.from = DEST_A; b.to = DEST_B;
   if (b.animFrom) { // saved mid-turn under the old tweened turn: restart the move on the new paths
-    if (b.state === "enter") { if (!BAY_SLOTS[b.slot]) b.slot = 0; b.mv = { s: 0 }; Object.assign(b, enterPose(enterGeom(b, b.slot), 0)); }
+    if (b.state === "enter") { if (!activeParkingSlots().includes(b.slot)) b.slot = activeParkingSlots()[0]; b.mv = { s: 0 }; Object.assign(b, enterPose(enterGeom(b, b.slot), 0)); }
     if (b.state === "exit") { b.mv = { s: 0, sx: b.animFrom.cx, sy: b.animFrom.cy }; Object.assign(b, exitPose(exitGeom(b), 0)); }
     b.v = 0;
     delete b.animFrom; delete b.animTo; delete b.animT;
   }
   if (b.state === "stop") {
-    const s = BAY_SLOTS[b.slot] || BAY_SLOTS[0];
+    const s = BAY_SLOTS[b.slot] || BAY_SLOTS[activeParkingSlots()[0]];
     b.cx = s.cx; b.cy = LOT_NOSE + b.len / 2; b.ang = -Math.PI / 2;
   }
 }
@@ -1060,6 +1163,13 @@ function rebuildFacilities() {
     return -1;
   };
   for (const p of buses.flatMap(b => b.pax)) {
+    // Saves from older versions may contain guests inside or queued for the
+    // diner. Release them outside; a closed Lokanta never resumes service.
+    if (!LOKANTA_OPEN && (p.state === "serveR" || p.state === "waitR" || p.want === "R")) {
+      p.refuseR = true;
+      wander(p);
+      continue;
+    }
     if (p.state === "serveR") { const s = nextFree(rSpots, p.stall); if (s >= 0) { rSpots[s] = { pax: p, t: SVC_TIME_R }; p.stall = s; } continue; }
     if (p.state === "serveT") { const s = nextFree(tSpots, p.stall, stallActive); if (s >= 0) { tSpots[s] = { pax: p, t: rand(TOILET_STAY[0], TOILET_STAY[1]) }; p.stall = s; } continue; }
     const inC2 = p.state === "queueC2" || p.state === "payC2";
@@ -1127,7 +1237,7 @@ function spawnBus(reserved = null, opening = false) {
   const roll = Math.random();
   const kind = roll < 0.68 ? "small" : roll < 0.9 ? "mid" : "big";
   const def = BUS_KINDS[kind];
-  const n = Math.max(4, Math.round(rand(def.pax[0], def.pax[1]) * (0.55 + S.rep / 130)));
+  const n = Math.max(20, Math.round(rand(def.pax[0], def.pax[1]) * (0.55 + S.rep / 130)));
   const hue = pick([8, 28, 145, 200, 260, 330]);
   const pax = [];
   for (let i = 0; i < n; i++) pax.push(makePax());
@@ -1135,7 +1245,7 @@ function spawnBus(reserved = null, opening = false) {
     id: S.nextBusId++,
     kind, len: def.len, hue,
     from: DEST_A, to: DEST_B,
-    cx: opening ? enterGeom({ len: def.len }, 0).x0 - CONFIG.firstBusLead
+    cx: opening ? enterGeom({ len: def.len }, activeParkingSlots()[0]).x0 - CONFIG.firstBusLead
       : -offX - def.len / 2 - rand(20, 160), // off the canvas edge, not the core edge
     cy: LANE_Y - 45,
     ang: 0,
@@ -1246,6 +1356,94 @@ function moveAlong(b, dt, L, vmax, acc, brake) {
   return b.mv.s >= L - 0.01;
 }
 
+// Outdoor walkers use bus-sized obstacles with a little personal-space padding.
+// A visibility graph around the bus corners routes paths without letting guests
+// cut through parked or moving buses, including on the way back to their door.
+const PAX_BUS_GAP = 9;
+function outdoorBusObstacles() {
+  return buses.map(b => ({
+    b, hl: b.len / 2 + PAX_BUS_GAP, hw: 33 + PAX_BUS_GAP,
+    c: Math.cos(b.ang), s: Math.sin(b.ang),
+  }));
+}
+function busLocalPoint(p, o) {
+  const x = p.x - o.b.cx, y = p.y - o.b.cy;
+  return { x: x * o.c + y * o.s, y: -x * o.s + y * o.c };
+}
+function busWorldPoint(p, o) {
+  return { x: o.b.cx + p.x * o.c - p.y * o.s, y: o.b.cy + p.x * o.s + p.y * o.c };
+}
+function outsideBuses(p, obstacles) {
+  let q = { x: p.x, y: p.y };
+  for (let n = 0; n < obstacles.length * 2 + 1; n++) {
+    let moved = false;
+    for (const o of obstacles) {
+      const l = busLocalPoint(q, o);
+      if (Math.abs(l.x) >= o.hl || Math.abs(l.y) >= o.hw) continue;
+      {
+        const dx = o.hl - Math.abs(l.x), dy = o.hw - Math.abs(l.y);
+        if (dx < dy) l.x = (l.x < 0 ? -1 : 1) * (o.hl + 1);
+        else l.y = (l.y < 0 ? -1 : 1) * (o.hw + 1);
+        q = busWorldPoint(l, o);
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+  return q;
+}
+function segmentHitsBus(a, z, o) {
+  const p = busLocalPoint(a, o), q = busLocalPoint(z, o);
+  const dx = q.x - p.x, dy = q.y - p.y;
+  let lo = 0, hi = 1;
+  for (const [start, delta, half] of [[p.x, dx, o.hl], [p.y, dy, o.hw]]) {
+    if (Math.abs(delta) < 1e-9) {
+      if (start <= -half || start >= half) return false;
+      continue;
+    }
+    let a0 = (-half - start) / delta, a1 = (half - start) / delta;
+    if (a0 > a1) [a0, a1] = [a1, a0];
+    lo = Math.max(lo, a0); hi = Math.min(hi, a1);
+    if (lo >= hi) return false;
+  }
+  return hi > 1e-6 && lo < 1 - 1e-6;
+}
+function nextOutdoorWaypoint(start, goal, obstacles) {
+  if (!obstacles.some(o => segmentHitsBus(start, goal, o))) return { point: goal, final: true };
+  const nodes = [start, goal];
+  for (const o of obstacles) for (const x of [-1, 1]) for (const y of [-1, 1]) {
+    nodes.push(busWorldPoint({ x: x * (o.hl + 4), y: y * (o.hw + 4) }, o));
+  }
+  const dist = Array(nodes.length).fill(Infinity), prev = Array(nodes.length).fill(-1), done = Array(nodes.length).fill(false);
+  dist[0] = 0;
+  for (let n = 0; n < nodes.length; n++) {
+    let u = -1;
+    for (let i = 0; i < nodes.length; i++) if (!done[i] && (u < 0 || dist[i] < dist[u])) u = i;
+    if (u < 0 || !Number.isFinite(dist[u]) || u === 1) break;
+    done[u] = true;
+    for (let v = 1; v < nodes.length; v++) {
+      if (done[v] || v === u || obstacles.some(o => segmentHitsBus(nodes[u], nodes[v], o))) continue;
+      const d = dist[u] + Math.hypot(nodes[v].x - nodes[u].x, nodes[v].y - nodes[u].y);
+      if (d < dist[v]) { dist[v] = d; prev[v] = u; }
+    }
+  }
+  if (prev[1] < 0) return { point: start, final: false };
+  let first = 1;
+  while (prev[first] !== 0 && prev[first] >= 0) first = prev[first];
+  return { point: nodes[first], final: first === 1 };
+}
+function moveOutdoorPax(p, tx, ty, step) {
+  const obstacles = outdoorBusObstacles();
+  const start = outsideBuses({ x: p.x, y: p.y }, obstacles);
+  const goal = outsideBuses({ x: tx, y: ty }, obstacles);
+  p.x = start.x; p.y = start.y;
+  const { point, final } = nextOutdoorWaypoint(start, goal, obstacles);
+  const dx = point.x - p.x, dy = point.y - p.y, d = Math.hypot(dx, dy);
+  if (d <= step) { p.x = point.x; p.y = point.y; return final; }
+  if (d > 0) { p.x += dx / d * step; p.y += dy / d * step; }
+  return false;
+}
+
 function beginEnter(b, slot) {
   b.slot = slot;
   b.forcedSlot = null; // the reservation is spent
@@ -1256,6 +1454,35 @@ function beginEnter(b, slot) {
   b.mv = { s: 0 };
   b.blink = true;
   Object.assign(b, enterPose(enterGeom(b, slot), 0)); // snaps the few px a coarse step may have overshot
+}
+
+function planStopVisitors(b, resuming = false) {
+  const candidates = b.pax.filter(p => p.state === "bus");
+  for (const p of b.pax) { p.disembark = false; p.forceToilet = false; }
+  // About 30% leave in the first staggered wave for varied activities. Select
+  // additional riders so at least half the entire bus gets a WC visit.
+  for (let i = candidates.length - 1; i > 0; i--) {
+    const j = randInt(0, i); [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+  }
+  const toiletCount = Math.min(candidates.length, Math.ceil(b.pax.length * 0.5));
+  const activityCount = Math.min(candidates.length, Math.max(1, Math.round(b.pax.length * 0.30)));
+  const wcInFirstWave = Math.min(toiletCount, Math.ceil(activityCount / 2));
+  const firstWave = candidates.slice(0, activityCount);
+  const extraWc = candidates.slice(activityCount, activityCount + toiletCount - wcInFirstWave);
+  const now = resuming ? G.clock.time : b.stopStart;
+  const duration = resuming ? Math.max(0, b.stopEnd - now) : b.stopEnd - b.stopStart;
+  const firstWindow = resuming ? Math.min(duration * 0.2, 0.06) : duration * 0.25;
+  const secondWindow = resuming ? Math.min(duration * 0.2, 0.05) : duration * 0.17;
+  firstWave.forEach((p, i) => {
+    p.disembark = true;
+    p.forceToilet = i < wcInFirstWave;
+    p.offAt = now + firstWindow * (i + 1) / (firstWave.length + 1);
+  });
+  extraWc.forEach((p, i) => {
+    p.disembark = true;
+    p.forceToilet = true;
+    p.offAt = now + firstWindow + secondWindow * (i + 1) / (extraWc.length + 1);
+  });
 }
 
 function finishEnter(b) {
@@ -1273,51 +1500,19 @@ function finishEnter(b) {
   // hour — the cap is a backstop that only triggers on a very unlucky stop.
   b.stopEnd = G.clock.time + rand(0.42, 0.60);
   for (const p of b.pax) {
-    p.offAt = b.stopStart + Math.random() * (b.stopEnd - b.stopStart) * 0.55;
-    // Start for the door 6–12 in-game min before stopEnd. In a 1:1 world the
-    // layover is only ~30 min, so this must stay short: the free window
-    // (landing → door call) is where the bladder can fill past WC_NEEDED and
-    // the guest walks off to the toilet before the hurry.
     p.boardAt = b.stopEnd - rand(0.10, 0.20);
   }
+  planStopVisitors(b);
   guaranteeWc(b);
+  if (!G.flags.firstBusParked) { G.flags.firstBusParked = true; save(); }
 }
 
-// The headline promise: at least half of every bus uses the WC. A "wait and
-// see" bladder (rising BLADDER_RISE/h from rand(20,85)) only crosses
-// WC_NEEDED inside the free window for some guests, so a one-shot boost on
-// the "short" ones is not a guarantee — and it was worse than useless: a
-// boosted guest who disembarked, wandered, and made one diner visit had their
-// bladder zeroed (completeService("R") sets bladder = 1) and never crossed
-// again within a 25–36 min stop. So the guarantee is deterministic instead:
-// tag the half of the bus whose bladders are worst-off at their door call, and
-// for each of them (1) clear any stale refuse flag, (2) nudge the landing
-// earlier if the free window (landing → door call) would be under 6 min, and
-// (3) set the bladder so it crosses WC_NEEDED within seconds of landing. Their
-// first evaluate then sends them straight for the T queue (T is checked before
-// R, and the door call is a full 6 min away, so a diner visit can never zero
-// the bladder first). Visits now last 1–10 game minutes (TOILET_STAY), so a
-// packed line may outlive the free window: landings are spread across the
-// layover and the 10-stall throughput keeps pace for all but the biggest
-// buses, and anyone still queued at their boardAt abandons the line and
-// sprints for the door (stepFac) — the guarantee is best-effort, and the rep
-// formula grades the stragglers honestly. Untagged pax keep 100% organic
-// behavior, so diner traffic is unchanged.
-// (stopStart/stopEnd/offAt/boardAt are all set within minutes of each other,
-// so the raw differences below are wrap-free.)
+// At each stop about 30% of passengers leave in a staggered first wave for
+// the WC, wandering, or the Lokanta if it is open. More riders leave later so
+// at least half of every bus is directed to the WC.
 function guaranteeWc(b) {
-  const n = b.pax.length;
-  const need = Math.ceil(n / 2);
-  if (!need) return;
-  // Most at-risk first: how far below WC_NEEDED each guest's bladder sits at
-  // their own door call, at the current fill rate.
-  const slack = p => p.bladder + BLADDER_RISE * (p.boardAt - b.stopStart) - WC_NEEDED;
-  const ranked = [...b.pax].sort((x, y) => slack(x) - slack(y));
-  // Only guests who land before their door call can use the WC; if that pool
-  // is short (very short stop), top up from the rest.
-  let claim = ranked.filter(p => p.offAt < p.boardAt);
-  if (claim.length < need) claim = claim.concat(ranked.filter(p => p.offAt >= p.boardAt));
-  claim = claim.slice(0, need);
+  const claim = b.pax.filter(p => p.disembark && p.forceToilet);
+  if (!claim.length) return;
   const MARGIN = 0.1; // 6 in-game min between landing and the door call
   for (const p of claim) {
     p.refuseT = false; // refuseT otherwise persists until the next finishVisit
@@ -1360,6 +1555,7 @@ function endStop(b) {
   const delta = clamp((avg - 50) * 0.15 * (b.pax.length / 12), -6, 6);
   S.rep = clamp(S.rep + delta, 0, 100);
   S.stats.buses++;
+  S.busesServed = (S.busesServed || 0) + 1;
   toast(`🚌 ${DEST_B} · ${delta >= 0 ? "+" : ""}${delta.toFixed(1)}`, delta >= 0 ? "good" : "bad");
 }
 
@@ -1382,7 +1578,7 @@ function baySlotFor(b, slack) {
   const free = i => !buses.some(o => o !== b && (o.state === "stop" || o.state === "enter") && o.slot === i);
   const ok = i => free(i) && b.cx <= enterGeom(b, i).x0 + slack;
   if (b.forcedSlot != null && ok(b.forcedSlot)) return b.forcedSlot; // != null: plain schedule buses carry null, and null >= 0 is true in JS
-  for (let i = 0; i < BAY_SLOTS.length; i++) if (ok(i)) return i;
+  for (const i of activeParkingSlots()) if (ok(i)) return i;
   return -1;
 }
 
@@ -1443,14 +1639,15 @@ function evaluate(p, bus) {
       wander(p);
       return;
     }
-    p.want = "T"; tryJoin("T", p, bus); return;
+    p.want = "T"; headToFacility("T", p, bus); return;
   }
-  if (!p.refuseR && p.hunger > 68)  { p.want = "R"; tryJoin("R", p, bus); return; }
-  if (!p.refuseR && p.thirst > 68)  { p.want = "R"; tryJoin("R", p, bus); return; }
+  if (LOKANTA_OPEN && !p.refuseR && p.hunger > 68)  { headToFacility("R", p, bus); return; }
+  if (LOKANTA_OPEN && !p.refuseR && p.thirst > 68)  { headToFacility("R", p, bus); return; }
   wander(p);
 }
 
 function tryJoin(fac, p, bus) {
+  if (fac === "R" && !LOKANTA_OPEN) { p.refuseR = true; wander(p); return; }
   const f = facilities[fac];
   if (f.spots.some(s => s && s.pax === p)) return;
   if (f.queue.includes(p)) return;
@@ -1462,8 +1659,19 @@ function tryJoin(fac, p, bus) {
   p.waitReal = 0;
 }
 
+function headToFacility(fac, p, bus) {
+  if (fac === "R" && !LOKANTA_OPEN) { p.refuseR = true; wander(p); return; }
+  const entrance = fac === "T" ? { x: 851, y: 184 } : { x: 690, y: 184 };
+  p.want = fac;
+  p.state = "walk";
+  p.tx = entrance.x; p.ty = entrance.y;
+  p.idleT = 0;
+  if (Math.hypot(p.tx - p.x, p.ty - p.y) < 8) tryJoin(fac, p, bus);
+}
+
 function wander(p) {
   p.state = "walk";
+  p.want = null;
   p.tx = rand(560, 940);
   p.ty = rand(195, 330);
   p.idleT = 0;
@@ -1471,13 +1679,14 @@ function wander(p) {
 
 function goDoor(p, bus) {
   p.state = "board";
+  p.want = null;
   const d = doorPos(bus);
   p.tx = d.x; p.ty = d.y;
 }
 
 /* --------------------------- Facilities ----------------------------- */
 function updateFacilities(dt, timeDt = dt) {
-  stepFac("R", timeDt, DINER_SEATS, SVC_TIME_R);
+  if (LOKANTA_OPEN) stepFac("R", timeDt, DINER_SEATS, SVC_TIME_R);
   stepFac("T", timeDt, WC_STALLS, SVC_TIME_T);
   // toilets do NOT recover on their own — grime only leaves via the hose (or a
   // caught runaway's scrub); S.cleanliness stays the derived average
@@ -1556,6 +1765,7 @@ function findBusOf(p) {
 
 function completeService(name, p) {
   if (name === "R") {
+    if (!LOKANTA_OPEN) { p.refuseR = true; wander(p); return; }
     if (p.hunger >= p.thirst) p.hunger = 10;
     else p.thirst = 10;
     p.bladder = 1;
@@ -1632,7 +1842,7 @@ function fleeCounter(p) {
 const STALL_K = 0.78, STALL_MARGIN = 6;
 const STALL_AISLE = 80, STALL_ROW_W = 644 + STALL_AISLE;
 const stallOy = () => -offY - 84 * STALL_K; // row top flush with the top of the view
-const stallKx = () => (Wdyn - 2 * STALL_MARGIN) / 644 / 2;
+const stallKx = () => Math.min((W - 2 * STALL_MARGIN) / 644 / 2, (Wdyn - 2 * STALL_MARGIN) / 644 / 2);
 const stallOx = () => -offX + (Wdyn - STALL_ROW_W * stallKx()) / 2;
 const stallLx = i => 8 + i * 64 + (i >= WC_STALLS / 2 ? STALL_AISLE : 0);
 const stallSx = lx => stallOx() + stallKx() * lx;
@@ -1694,10 +1904,19 @@ function cleanApply(x, y) {
 /* ---------------------- Player actions (counter) -------------------- */
 // Step between the layover, the WC counter room, and the car wash.
 function setView(v) {
+  if (v === "wc" && !G.flags.firstBusParked) {
+    if (!G.flags.wcLockedToastSeen) {
+      G.flags.wcLockedToastSeen = true;
+      toast("WC açılması için ilk otobüsün gelmesi gerekiyor", "");
+      save();
+    }
+    return;
+  }
   if (v === S.view) return;
   if (scrub && S.view === "wc") return; // stay and watch the caught runaway finish scrubbing (3 s)
   const from = S.view;
   S.view = v;
+  if (from !== "wc" && v === "wc") startWcIntro();
   viewFade = 1;
   if (from === "wash") S.washBus = null; // we step back out; the bus keeps its washed state
   if (v !== "wc") toolInHand = null;    // leaving the counter room — the hose goes back on its faucet
@@ -2906,9 +3125,15 @@ function stepCQueue(f, q, auto, timeDt) {
       front.dripT -= timeDt;
       if (front.dripT <= 0) { front.state = front.colognePrev || "payC"; front.colognePrev = null; }
     }
-    // Backstop only: live guests finalize the instant they're settled, so
-    // doneC never rests. This clears a doneC guest restored from an old save.
+    // Backstop only: live guests finalize once the last change note reaches them.
     if (front.state === "doneC") finalizePayment(front);
+    if (front.state === "payC" && front.owed > 0 && front.changeGiven >= front.owed) {
+      const flightEnd = changePaymentFlights.get(front);
+      if (flightEnd == null || performance.now() >= flightEnd) {
+        changePaymentFlights.delete(front);
+        finalizePayment(front);
+      }
+    }
   }
 }
 
@@ -2936,6 +3161,17 @@ function finalSat(p) {
 }
 
 function finalizePayment(p) {
+  const pendingFlight = receiptFlightEnds.get(p);
+  if (pendingFlight != null) {
+    if (performance.now() < pendingFlight) return;
+    receiptFlightEnds.delete(p);
+  } else {
+    const flightEnd = animateReceivedBill(p);
+    if (flightEnd != null && performance.now() < flightEnd) {
+      receiptFlightEnds.set(p, flightEnd);
+      return;
+    }
+  }
   for (const q of [facilities.C.queue, facilities.C.queue2]) {
     const i = q.indexOf(p);
     if (i >= 0) { q.splice(i, 1); break; }
@@ -2984,16 +3220,44 @@ const holdsBill = p => p.state === "payC2"
   ? Math.hypot(p.x - PAY_SPOT2.x, p.y - PAY_SPOT2.y) < 4
   : (p.state === "payC" || p.state === "doneC") && atPaySpot(p);
 
+function animateChangeBill(d, guest) {
+  const tray = COUNTER_IN.chips.find(c => c.d === d);
+  if (!tray) return;
+  const source = deskRect({ x: tray.x + tray.w / 2, y: tray.y + (tray.h + 20) / 2, w: 0, h: 0 }, "drawer");
+  const k = wcPaxK(guest.y, guest.x) * ((PAX_TYPES[guest.type] || PAX_TYPES.m).scale);
+  const billY = guest.y - (deskK > 1 ? 9.5 : 6.5) * k;
+  const now = performance.now(), previous = changeBillFlights[changeBillFlights.length - 1];
+  const t0 = Math.max(now, previous ? previous.t0 + CHANGE_BILL_STAGGER : now);
+  changeBillFlights.push({ d, from: { x: source.x, y: source.y }, to: { x: guest.x + 5 * k, y: billY }, fromU: 4.2, toU: 2.5, t0 });
+  return t0 + CHANGE_BILL_FLIGHT_DURATION;
+}
+
+function animateReceivedBill(guest) {
+  if (guest.bill == null) return null;
+  const tray = COUNTER_IN.chips.find(c => c.d === guest.bill) || COUNTER_IN.chips[COUNTER_IN.chips.length - 1];
+  const k = wcPaxK(guest.y, guest.x) * ((PAX_TYPES[guest.type] || PAX_TYPES.m).scale);
+  const from = { x: guest.x + 5 * k, y: guest.y - (deskK > 1 ? 9.5 : 6.5) * k };
+  const to = deskRect({ x: tray.x + tray.w / 2, y: tray.y + (tray.h + 20) / 2, w: 0, h: 0 }, "drawer");
+  const now = performance.now(), previous = changeBillFlights[changeBillFlights.length - 1];
+  const t0 = Math.max(now, previous ? previous.t0 + CHANGE_BILL_STAGGER : now);
+  changeBillFlights.push({ d: guest.bill, from, to: { x: to.x, y: to.y }, fromU: 0.6 * k, toU: 1.8, t0 });
+  return t0 + CHANGE_BILL_FLIGHT_DURATION;
+}
+
 // You hand back change from the till (called on chip clicks).
 function giveChange(d) {
   const front = facilities.C.queue[0];
-  if (!front || front.state !== "payC" || !atPaySpot(front)) return;
+  if (!front || front.state !== "payC" || !atPaySpot(front) || front.changeGiven >= front.owed) return;
+  const flightEnd = animateChangeBill(d, front);
+  enqueueCashFloat(-d);
   if (!Array.isArray(front.changeNotes)) front.changeNotes = []; // saves from before note tracking
   front.changeNotes.push(d);
   front.changeGiven += d;
-  // The moment the owed change is handed back the guest is done — no loiter:
-  // they leave immediately so the line never waits on a settled guest.
-  if (front.changeGiven >= front.owed) finalizePayment(front);
+  // Keep the customer at the counter until the final bill reaches them.
+  if (front.changeGiven >= front.owed) {
+    if (performance.now() >= flightEnd) finalizePayment(front);
+    else changePaymentFlights.set(front, flightEnd);
+  }
 }
 
 // You splash cologne on the guest at the counter (called on bottle clicks).
@@ -3137,10 +3401,9 @@ function stepTerminal(dt, timeDt) {
     S.tea = 1;
   }
 
-  // bus spawning — max 4 parked, at most one inbound bus at a time.
-  // Total scene buses is capped at BAY_SLOTS (not +1): a departing bus still
-  // holds its spot until it drives off-screen, so a new bus may only spawn
-  // while <= 3 exist — otherwise 3 parked + 1 just-departed admits a 5th.
+  // The built parking spaces limit buses on the scene, including a bus that
+  // is leaving and still physically occupies the lot.
+  const capacity = parkingSpaces();
   const parked = buses.filter(b => b.state === "stop" || b.state === "enter").length;
   const inbound = buses.some(b => b.state === "drive" && !b.stoppedOnce && b.cx < 700);
   // Two triggers: the rep-scaled schedule, and a vacancy backstop — a stall
@@ -3149,7 +3412,7 @@ function stepTerminal(dt, timeDt) {
   // the 2 h window stays looser than the 1.2–2 h schedule, so a quiet
   // terminal keeps breathing (visits at least every other hour).
   let vacantTooLong = -1; // stall that has been vacant longest, past its maxGap() deadline
-  if (S.slotVacantSince) for (let i = 0; i < BAY_SLOTS.length; i++) {
+  if (S.slotVacantSince) for (const i of activeParkingSlots()) {
     const v = S.slotVacantSince[i];
     if (v == null || !reached(v + maxGap())) continue;
     // (G.clock.time - v) wraps midnight safely: a stall can't sit vacant >12 h (the
@@ -3159,7 +3422,7 @@ function stepTerminal(dt, timeDt) {
   }
   openingBus();
   const scheduleDue = reached(S.nextBusAt);
-  if ((scheduleDue || vacantTooLong >= 0) && parked < BAY_SLOTS.length && !inbound && buses.length < BAY_SLOTS.length) {
+  if ((scheduleDue || vacantTooLong >= 0) && parked < capacity && !inbound && buses.length < capacity) {
     // A backstop bus is promised the stall that went quiet longest, so the
     // 30-minute guarantee lands on the right stall (baySlotFor honors
     // forcedSlot); a plain schedule bus takes the first free stall it reaches.
@@ -3325,14 +3588,17 @@ function updatePax(p, bus, dt, timeDt = dt) {
     const d = doorPos(bus);
     p.x = d.x; p.y = d.y;
     riseNeeds(p, timeDt);
-    if (bus.state === "stop" && reached(p.offAt) && !reached(p.boardAt)) {
+    if (bus.state === "stop" && p.disembark && reached(p.offAt) && !reached(p.boardAt)) {
+      p.disembark = false; // each guest leaves only once per stop
       p.state = "walk"; p.want = null;
       p.__boarded = false; // off the bus for this cycle
-      p.tx = d.x; p.ty = d.y + 4;
+      const side = bus.ang + Math.PI / 2;
+      p.tx = d.x + Math.cos(side) * 18;
+      p.ty = d.y + Math.sin(side) * 18;
     } else if (bus.stoppedOnce && reached(p.boardAt) && !p.__boarded) {
       // One-shot per boarding cycle. Guests who stayed aboard keep their
       // heads in the windows (the flag stays true); only a guest who never
-      // re-boarded after a visit would flip to the door here, and exactly once.
+      // re-boarded after a visit would leave again here, and exactly once.
       p.state = "board"; p.tx = d.x; p.ty = d.y;
     }
     return;
@@ -3342,16 +3608,11 @@ function updatePax(p, bus, dt, timeDt = dt) {
 
   // disembarked: walk toward target
   if (p.state === "walk" || p.state === "board") {
-    const dx = p.tx - p.x, dy = p.ty - p.y;
-    const d = Math.hypot(dx, dy);
     const step = (p.state === "board" ? 150 : 55) * dt; // sprinting to catch the bus
-    if (d <= step) {
-      p.x = p.tx; p.y = p.ty;
+    if (moveOutdoorPax(p, p.tx, p.ty, step)) {
       if (p.state === "board") { p.state = "bus"; p.__boarded = true; } // aboard again for this cycle
+      else if (p.want === "R" || p.want === "T") tryJoin(p.want, p, bus);
       else { p.state = "free"; p.idleT = rand(1, 3.5); p.tx = p.x; p.ty = p.y; evaluate(p, bus); }
-    } else {
-      p.x += dx / d * step;
-      p.y += dy / d * step;
     }
     return;
   }
@@ -3551,6 +3812,7 @@ function resize() {
   // with the black frame around it when the cap bites.
   canvas.style.width = (Wdyn * scaleK / dpr) + "px";
   canvas.style.height = (Hdyn * scaleK / dpr) + "px";
+  if (mapPanelOpen) positionMapPanel();
   // Draw the core centered inside the logical canvas.
   ctx.setTransform(scaleK, 0, 0, scaleK, offX * scaleK, offY * scaleK);
 }
@@ -3594,19 +3856,18 @@ const trees = [
   { x: -60, s: 1.0 }, { x: -140, s: 0.85 }, { x: 1010, s: 1.15 }, { x: 1095, s: 0.8 }, // only seen on wide screens
 ];
 const clouds = [ { x: 80, y: 30, s: 1 }, { x: 340, y: 16, s: 0.7 }, { x: 560, y: 38, s: 1.2 }, { x: 820, y: 22, s: 0.85 }, { x: 1100, y: 34, s: 1 } ];
-const LAMPS = [200, 410, 902];
+const LAMPS = [175, 980];
 
 /* ---------------------------- Regional map ---------------------------- */
 // A view, not a pause: every terminal keeps running while the map is open.
 // mapZoom eases 0 (terminal) ↔ 1 (map); in between, the terminal scene shrinks
 // into its node as the map fades in.
-let mapOpen = false, mapZoom = 0, mapSel = null, mapMsg = null;
-
 // The map's drawing area: the visible canvas minus the side panel on the right.
 function mapArea() {
   const r = canvas.getBoundingClientRect(), panel = $("mapPanel");
-  const pw = r.width > 0 && panel.offsetWidth ? (panel.offsetWidth + 24) * Wdyn / r.width : 0;
-  return { x: -offX + 40, y: -offY + 70, w: Wdyn - 80 - pw, h: Hdyn - 140 };
+  const panelPx = (panel.parentElement?.clientWidth || r.width) * 0.4;
+  const pw = r.width > 0 ? (panelPx + 24) * Wdyn / r.width : 0;
+  return { x: -offX + 40 + pw / 2, y: -offY + 70, w: Wdyn - 80 - pw, h: Hdyn - 140 };
 }
 // Simplified real geography, [lon, lat]. Coasts run so the polygons share edges.
 const GEO = (() => {
@@ -3630,10 +3891,10 @@ const GEO = (() => {
     seas: [["K A R A D E N İ Z", 34.6, 42.45], ["A K D E N İ Z", 31.9, 36.1], ["E G E", 26.05, 37.35]],
   };
 })();
-const MAP_VIEW = { lon0: 25.8, lon1: 42, lat0: 36, lat1: 42.6, k: Math.cos(39.3 * Math.PI / 180) };
+const MAP_VIEW = { lon0: 28.1, lon1: 40.4, lat0: 36, lat1: 42.6, k: Math.cos(39.3 * Math.PI / 180) };
 // Equirectangular, the whole view fitted (and centred) inside the map area.
 function mapProj(A) {
-  const V = MAP_VIEW, w = (V.lon1 - V.lon0) * V.k, h = V.lat1 - V.lat0, s = Math.min(A.w / w, A.h / h);
+  const V = MAP_VIEW, w = (V.lon1 - V.lon0) * V.k, h = V.lat1 - V.lat0, s = Math.min(A.w / w, A.h / h) * 1.15;
   const ox = A.x + (A.w - w * s) / 2, oy = A.y + (A.h - h * s) / 2;
   return (lon, lat) => ({ x: ox + (lon - V.lon0) * V.k * s, y: oy + (V.lat1 - lat) * s });
 }
@@ -3704,7 +3965,21 @@ function drawMap(alpha) {
       ctx.strokeStyle = `rgba(255, 255, 255, ${0.35 + 0.5 * pulse})`; ctx.lineWidth = 3;
       ctx.beginPath(); ctx.arc(p.x, p.y, 22 + 3 * pulse, 0, 7); ctx.stroke();
     }
-    if (sel) {
+    if (sel && mapPanelOpen) {
+      const panelRect = $("mapPanel").getBoundingClientRect(), canvasRect = canvas.getBoundingClientRect();
+      const panelLeft = (panelRect.left - canvasRect.left) * Wdyn / canvasRect.width - offX;
+      const radius = 27, transition = Math.min(12, radius * 0.45);
+      ctx.strokeStyle = "#8fd3ff"; ctx.lineWidth = 2.5 * Wdyn / canvasRect.width; ctx.lineCap = "round";
+      // One open-sided, rounded bulge joins the panel's masked left edge to
+      // the location marker; the right half of the circle is deliberately absent.
+      ctx.beginPath();
+      ctx.moveTo(panelLeft, p.y - radius);
+      ctx.bezierCurveTo(panelLeft, p.y - radius + transition, p.x + transition, p.y - radius, p.x, p.y - radius);
+      ctx.arc(p.x, p.y, radius, -Math.PI / 2, Math.PI / 2, true);
+      ctx.bezierCurveTo(p.x + transition, p.y + radius, panelLeft, p.y + radius - transition, panelLeft, p.y + radius);
+      ctx.stroke();
+      ctx.lineCap = "butt";
+    } else if (sel) {
       ctx.strokeStyle = "#8fd3ff"; ctx.lineWidth = 2.5;
       ctx.beginPath(); ctx.arc(p.x, p.y, 27, 0, 7); ctx.stroke();
     }
@@ -3752,37 +4027,66 @@ function drawMap(alpha) {
 }
 
 function renderMapPanel() {
-  const list = CONFIG.terminals.map(d => {
-    const st = mapState(d.id), label = st === "owned" ? (d.id === G.activeTerminal ? "buradasın" : "sahip") : st === "available" ? fmtTL(d.price) : "kilitli";
-    return `<button data-sel="${d.id}" class="${d.id === mapSel ? "sel" : ""}" aria-pressed="${d.id === mapSel}"><span>${escHtml(d.name)}</span><span class="st ${st === "owned" ? "own" : st === "available" ? "buy" : "lock"}">${escHtml(label)}</span></button>`;
-  }).join("");
-  $("mapList").innerHTML = list;
   const d = termDef(mapSel), t = ownedTerminal(mapSel);
-  let html = "";
+  if (!d) return;
+  $("mapTitle").textContent = d.name;
+  let html = "", actions = "";
   if (t) {
     const wash = tierOfWash(t);
-    html = `<div class="name">${escHtml(d.name)}</div>
-      <ul><li>★ İtibar ${Math.round(t.sim.rep)} / 100</li>
+    html = `<ul><li>★ İtibar ${Math.round(t.sim.rep)} / 100</li>
         <li>WC: ${escHtml(wcSummary(t.wc))}</li>
         <li>Oto yıkama: ${wash ? escHtml(wash.name) : "yok"}</li>
         <li>Bugün: +${fmtTL(t.sim.stats.revenue || 0)} / −${fmtTL(t.sim.stats.expenses || 0)}</li>
         ${needsAttention(t) ? `<li class="no">🔧 Bakım ya da onarım gerekiyor</li>` : ""}
-        <li>Yükseltme maliyeti ×${d.devCost}</li></ul>
-      ${d.id === G.activeTerminal ? `<button data-act="back">Terminale dön</button>` : `<button class="buy" data-act="switch" data-id="${d.id}">Bu terminale geç</button>`}`;
+        <li>Yükseltme maliyeti ×${d.devCost}</li></ul>`;
+    actions = d.id === G.activeTerminal
+      ? `<button data-act="back">Terminale dön</button>`
+      : `<button class="buy" data-act="switch" data-id="${d.id}">Bu terminale geç</button>`;
   } else {
     const st = terminalStatus(d.id), prof = CONFIG.profiles[d.profile];
-    html = `<div class="name">${escHtml(d.name)}</div>
-      <ul><li>Fiyat: ${fmtTL(d.price)}</li>
+    html = `<ul><li>Fiyat: ${fmtTL(d.price)}</li>
         <li>WC: ${escHtml(wcSummary(prof.wc))}</li>
         <li>Oto yıkama: ${prof.carWash.unlocked ? escHtml(CONFIG.carWashTiers.find(x => x.tier === prof.carWash.tier).name) : "yok"}</li>
         <li>Başlangıç itibarı ${prof.rep} · yükseltmeler ×${d.devCost}</li></ul>
       <div>Şartlar:</div>
-      <ul>${st.reqs.length ? st.reqs.map(r => `<li class="${r.met ? "ok" : "no"}">${r.met ? "✓" : "✗"} ${escHtml(r.text)}</li>`).join("") : `<li class="ok">✓ Şart yok</li>`}</ul>
-      <button class="buy" data-act="buyTerminal" data-id="${d.id}" ${st.ok ? "" : `disabled title="${escHtml(st.reason)}"`}>Satın al · ${fmtTL(d.price)}</button>
+      <ul>${st.reqs.length ? st.reqs.map(r => `<li class="${r.met ? "ok" : "no"}">${r.met ? "✓" : "✗"} ${escHtml(r.text)}</li>`).join("") : `<li class="ok">✓ Şart yok</li>`}</ul>`;
+    actions = `<button class="buy" data-act="buyTerminal" data-id="${d.id}" ${st.ok ? "" : `disabled title="${escHtml(st.reason)}"`}>Satın al · ${fmtTL(d.price)}</button>
       ${st.ok ? "" : `<div class="why">${escHtml(st.reason)}</div>`}`;
   }
-  if (mapMsg) html += `<div class="msg ${mapMsg.ok ? "good" : "bad"}" role="status">${escHtml(mapMsg.text)}</div>`;
+  if (mapMsg) actions += `<div class="msg ${mapMsg.ok ? "good" : "bad"}" role="status">${escHtml(mapMsg.text)}</div>`;
   $("mapDetail").innerHTML = html;
+  $("mapActions").innerHTML = actions;
+  if (mapPanelOpen) positionMapPanel();
+}
+
+function positionMapPanel() {
+  if (!mapPanelOpen || !mapSel) return;
+  const panel = $("mapPanel"), stage = panel.parentElement.getBoundingClientRect();
+  const canvasRect = canvas.getBoundingClientRect(), node = mapPos(termDef(mapSel).map);
+  const x = canvasRect.left - stage.left + (node.x + offX) * canvasRect.width / Wdyn;
+  const y = canvasRect.top - stage.top + (node.y + offY) * canvasRect.height / Hdyn;
+  const ringRadius = 27 * canvasRect.width / Wdyn;
+  const pad = 8, left = Math.max(pad, x + ringRadius);
+  const requestedWidth = stage.width * 0.4;
+  const availableWidth = stage.width - left - 60;
+  const panelWidth = Math.max(120, Math.min(requestedWidth, availableWidth));
+  panel.style.width = `${panelWidth}px`;
+  const w = panel.offsetWidth, h = panel.offsetHeight;
+  const top = clamp(y - h / 2, 60, Math.max(60, stage.height - h - pad));
+  const ringHeight = ringRadius * 2;
+  const notchTop = clamp(y - top - ringRadius, 14, Math.max(14, h - ringHeight - 14));
+  panel.style.left = `${left}px`;
+  panel.style.right = "auto";
+  panel.style.top = "auto";
+  panel.style.bottom = `${Math.max(pad, stage.height - top - h)}px`;
+  panel.style.setProperty("--map-notch-top", `${notchTop}px`);
+  panel.style.setProperty("--map-notch-height", `${ringHeight}px`);
+}
+
+function setMapPanelOpen(on) {
+  mapPanelOpen = !!on && mapOpen;
+  $("mapPanel").classList.toggle("hidden", !mapPanelOpen);
+  if (mapPanelOpen) renderMapPanel();
 }
 
 function setMapOpen(on) {
@@ -3794,13 +4098,18 @@ function setMapOpen(on) {
     mapMsg = null;
   }
   mapOpen = on;
-  $("mapPanel").classList.toggle("hidden", !on);
+  mapPanelOpen = on;
+  $("mapPanel").classList.toggle("hidden", !mapPanelOpen);
   $("mapBtn").classList.toggle("on", on);
   $("btnShop").classList.toggle("hidden", on);
   if (on) renderMapPanel();
 }
 
-function mapSelect(id) { mapSel = id; mapMsg = null; renderMapPanel(); }
+function mapSelect(id) {
+  mapSel = id; mapMsg = null;
+  if (!mapPanelOpen) setMapPanelOpen(true);
+  else renderMapPanel();
+}
 
 function mapAction(btn) {
   if (btn.dataset.sel) { mapSelect(btn.dataset.sel); return; }
@@ -3855,8 +4164,14 @@ function drawOutdoor() {
   drawRestStop();
   drawRoads();
   for (const c of cars) drawCar(c);
-  for (const b of buses) drawBus(b);
-  for (const b of buses) for (const p of b.pax) if (p.state !== "bus" && !isIndoorPax(p)) drawPax(p);
+  // Depth-sort buses and walking passengers together: people behind a bus are
+  // occluded by it, while people in front naturally draw over it.
+  const lotActors = [];
+  for (const b of buses) lotActors.push({ y: b.cy - Math.sin(b.ang) * b.len / 2, draw: () => drawBus(b) });
+  for (const b of buses) for (const p of b.pax)
+    if (p.state !== "bus" && !isIndoorPax(p)) lotActors.push({ y: p.y, draw: () => drawPax(p) });
+  lotActors.sort((a, b) => a.y - b.y);
+  for (const actor of lotActors) actor.draw();
 
   // night overlay + lights
   if (nf > 0.05) {
@@ -4096,36 +4411,24 @@ function drawLot() {
   ctx.fillStyle = "rgba(0,0,0,0.2)";
   ctx.fillRect(-offX, LOT.top + 5, Wdyn, 2);
 
-  // painted stalls, open toward the road
-  const paint = `rgba(255, 214, 90, ${0.78 - nf * 0.2})`;
-  ctx.strokeStyle = paint;
-  ctx.lineWidth = 3;
-  ctx.lineJoin = "round";
-  ctx.beginPath();
-  for (const s of BAY_SLOTS) {
-    const l = s.cx - 36, r = s.cx + 36;
-    ctx.moveTo(l, LOT.bot - 8); ctx.lineTo(l, LOT_NOSE); ctx.lineTo(r, LOT_NOSE); ctx.lineTo(r, LOT.bot - 8);
-  }
-  ctx.stroke();
-  ctx.lineJoin = "miter";
+  // Painted bus bays: the built spaces are bright, while future bays remain dim.
+  const active = new Set(activeParkingSlots()), paint = `rgba(255, 214, 90, ${0.78 - nf * 0.2})`;
   ctx.textAlign = "center";
   ctx.font = "bold 16px system-ui";
+  ctx.lineJoin = "round";
   BAY_SLOTS.forEach((s, i) => {
+    const isOpen = active.has(i), l = s.cx - 36, r = s.cx + 36;
+    ctx.strokeStyle = isOpen ? paint : `rgba(155, 165, 180, ${0.24 - nf * 0.08})`;
+    ctx.lineWidth = isOpen ? 3 : 1.5;
+    ctx.beginPath();
+    ctx.moveTo(l, LOT.bot - 8); ctx.lineTo(l, LOT_NOSE); ctx.lineTo(r, LOT_NOSE); ctx.lineTo(r, LOT.bot - 8);
+    ctx.stroke();
     ctx.fillStyle = mix("#c9ced6", "#40464f", nf * 0.7);
     rr(ctx, s.cx - 22, LOT_NOSE + 8, 44, 6, 2); ctx.fill();
-    ctx.fillStyle = paint;
-    ctx.fillText(String(i + 1), s.cx, LOT.bot - 18);
+    ctx.fillStyle = isOpen ? paint : `rgba(180, 188, 200, ${0.3 - nf * 0.1})`;
+    ctx.fillText(isOpen ? String(activeParkingSlots().indexOf(i) + 1) : "·", s.cx, LOT.bot - 18);
   });
-
-  // painted label + arrow toward the stalls
-  ctx.textAlign = "left";
-  ctx.fillStyle = `rgba(255, 214, 90, ${0.42 - nf * 0.12})`;
-  ctx.font = "900 20px system-ui";
-  ctx.fillText("OTOBÜS PARKI", 240, 250);
-  ctx.beginPath();
-  ctx.moveTo(250, 272); ctx.lineTo(340, 272); ctx.lineTo(340, 264); ctx.lineTo(360, 278);
-  ctx.lineTo(340, 292); ctx.lineTo(340, 284); ctx.lineTo(250, 284);
-  ctx.closePath(); ctx.fill();
+  ctx.lineJoin = "miter";
 
   for (const lx of LAMPS) drawLampPost(lx, LOT.top + 3, nf);
 }
@@ -4238,6 +4541,19 @@ function drawRestStop() {
   ctx.fillRect(685, 145, 10, 10);
   ctx.fillStyle = "#e8c26a";
   ctx.fillRect(693, 157, 2, 5);
+  if (!LOKANTA_OPEN) {
+    // Closed shutter: the diner is visible, but guests cannot enter it.
+    ctx.fillStyle = "#765334";
+    ctx.fillRect(681, 140, 18, 30);
+    ctx.fillStyle = "#4c3524";
+    for (let y = 143; y < 169; y += 5) ctx.fillRect(682, y, 16, 2);
+    ctx.fillStyle = "#d92332";
+    rr(ctx, 678, 146, 24, 9, 2); ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 6px system-ui";
+    ctx.textAlign = "center";
+    ctx.fillText("KAPALI", 690, 152.5);
+  }
   // roof sign with chasing marquee bulbs
   ctx.fillStyle = "#2b2117";
   rr(ctx, 660, 90, 90, 22, 5); ctx.fill();
@@ -4449,12 +4765,7 @@ function drawCounterIn() {
   // the wooden teller counter: a raised guest-side ledge (guests stand behind
   // it) and your desktop running down to the bottom of the view, stopping
   // short of both side passages
-  const gap = Wdyn * SIDE_GAP;
-  let L = -offX + gap, R = -offX + Wdyn - gap;
-  if (dk > 1) {
-    L = Math.max(L, 480 + (DESK_ULTRA.L - 508.5) * dk);
-    R = Math.min(R, 480 + (DESK_ULTRA.R - 508.5) * dk);
-  }
+  const { L, R } = counterBounds();
   const CW = R - L, B = H + offY;
   const top = d.y + 8;                                              // desktop starts under the ledge face
   const wood = ctx.createLinearGradient(0, top, 0, B);
@@ -5599,6 +5910,17 @@ function drawWCInterior() {
   ctx.fillStyle = "#3d465e";
   rr(ctx, 0, 84, 324, 162, 6); ctx.fill();
   rr(ctx, 320 + STALL_AISLE, 84, 324, 162, 6); ctx.fill();
+  // A small fee sign hangs in the central aisle between the two rows of toilets.
+  ctx.fillStyle = "#3b2020";
+  rr(ctx, 327, 119, 74, 48, 3); ctx.fill();
+  ctx.fillStyle = "#d92332";
+  rr(ctx, 330, 122, 68, 42, 2); ctx.fill();
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 18px sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("WC", 364, 133.5);
+  ctx.fillText("20 ₺", 364, 152.5);
   for (let i = 0; i < WC_STALLS; i++) {
     const bx = stallLx(i);
     const s = facilities.T.spots[i];
@@ -5784,7 +6106,7 @@ function drawWCInterior() {
   drawCounterInPrompts();
   // draw bills on top of the counter
   for (const b of buses) for (const p of b.pax) {
-    if (atCounter(p) && holdsBill(p)) {
+    if (atCounter(p) && holdsBill(p) && !receiptFlightEnds.has(p)) {
       const k = wcPaxK(p.y, p.x);
       const x = p.x, y = p.y;
       const s = k * ((PAX_TYPES[p.type] || PAX_TYPES.m).scale);
@@ -5792,6 +6114,7 @@ function drawWCInterior() {
       drawHeldBill(x + 5 * s, billY, 0.6 * s, BILL_COLORS[p.bill] || "#c9c2a8", p.bill);
     }
   }
+  drawChangeBillFlights();
   // the caught runaway scrubs in front of everything (drawn from the sequence
   // itself, so they stay visible even if their bus has already pulled out)
   drawScrub();
@@ -5874,19 +6197,40 @@ function drawWCInterior() {
 }
 
 // "+₺20" / "−₺1.000" rising from (x, y) for each recent booking at this terminal.
+function drawChangeBillFlights() {
+  const now = performance.now(), duration = CHANGE_BILL_FLIGHT_DURATION;
+  changeBillFlights = changeBillFlights.filter(f => now - f.t0 < duration);
+  for (const f of changeBillFlights) {
+    const age = now - f.t0;
+    if (age < 0) continue;
+    const t = clamp(age / duration, 0, 1), ease = t * t * (3 - 2 * t);
+    const x = lerp(f.from.x, f.to.x, ease);
+    const y = lerp(f.from.y, f.to.y, ease) - Math.sin(Math.PI * t) * 52;
+    const u = lerp(f.fromU, f.toU, ease), alpha = t > 0.82 ? (1 - t) / 0.18 : 1;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(x, y);
+    ctx.rotate(lerp(-0.3, -0.12, ease));
+    drawHeldBill(0, 0, u, BILL_COLORS[f.d] || "#c9c2a8", f.d);
+    ctx.restore();
+  }
+}
+
 function drawCashFloats(x, y) {
   const now = performance.now();
-  cashFloats = cashFloats.filter(f => now - f.t0 < 1400);
+  cashFloats = cashFloats.filter(f => now - f.t0 < CASH_FLOAT_DURATION);
   ctx.save();
   ctx.font = "bold 13px system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.shadowColor = "rgba(0,0,0,0.8)";
   ctx.shadowBlur = 3;
   cashFloats.forEach((f, k) => {
-    const u = (now - f.t0) / 1400;
+    if (now < f.t0) return;
+    const u = (now - f.t0) / CASH_FLOAT_DURATION;
+    const stack = (cashFloats.length - 1 - k) * 22;
     ctx.globalAlpha = 1 - u * u;
     ctx.fillStyle = f.amount >= 0 ? "#7dffa8" : "#ff8a8a";
-    ctx.fillText(`${f.amount >= 0 ? "+" : "−"}${fmtTL(Math.abs(f.amount))}`, x, y - u * 34 - (cashFloats.length - 1 - k) * 4);
+    ctx.fillText(`${f.amount >= 0 ? "+" : "−"}${fmtTL(Math.abs(f.amount))}`, x, y - u * 34 - stack);
   });
   ctx.restore();
 }
@@ -6117,93 +6461,94 @@ function drawBusSide(b, alpha) {
   ctx.restore();
 }
 
-// Rear + top view — a parked bus, nose pointing away from us. We see the
-// roof (lighter panel, AC units, windshield at the far end) and the back of
-// the bus (rear window, route display, tail lights) at the near end.
+// High overhead view of a parked bus, nose pointing away from us, with a
+// shallow rear-facing panel visible along the near edge. Wheels and front face stay hidden.
 function drawBusRearTop(b, alpha) {
   const len = b.len, nf = nightFactor();
   const cx = 0, top = -len / 2, bot = len / 2; // local frame: nose up, rotated to the heading below
   const r = Math.min(12, len / 4);
-  const slant = 6; // slight perspective taper: the far (top) end reads narrower
-  const tl = cx - 27, tr = cx + 27;   // front end, 54 wide
-  const bl = cx - 33, br = cx + 33;   // rear end, 66 wide
+  const tl = cx - 33, tr = cx + 33; // constant 66 px body width from nose to rear
+  const bl = tl, br = tr;
   ctx.save();
   ctx.translate(b.cx, b.cy);
   ctx.rotate(b.ang + Math.PI / 2);
   ctx.globalAlpha = alpha;
   ctx.fillStyle = "rgba(0,0,0,0.25)";
-  rr(ctx, bl + 4, top + 6, br - bl, len, r); ctx.fill();
-  // wheels peeking past the body on both axles
-  ctx.fillStyle = "#141821";
-  for (const wy of [top + 24, bot - 26]) {
-    const f = (wy - top) / len;
-    const xl = tl + (bl - tl) * f;
-    const xr = tr + (br - tr) * f;
-    ctx.fillRect(xl - 7, wy - 10, 9, 20);
-    ctx.fillRect(xr - 2, wy - 10, 9, 20);
-  }
-  // body — a tapered, rounded slab (66 wide at the rear, 54 at the front)
-  ctx.fillStyle = `hsl(${b.hue}, 52%, ${52 - nf * 15}%)`;
+  ctx.beginPath(); ctx.ellipse(cx + 5, 6, 37, len / 2 - 2, 0, 0, 7); ctx.fill();
+  // The tires stay fully beneath the body in this overhead view.
+  // body — a rectangular slab with a sunlit roof edge and shaded flanks
+  const bodyG = ctx.createLinearGradient(-35, 0, 35, 0);
+  bodyG.addColorStop(0, `hsl(${b.hue}, 44%, ${38 - nf * 12}%)`);
+  bodyG.addColorStop(0.2, `hsl(${b.hue}, 52%, ${55 - nf * 15}%)`);
+  bodyG.addColorStop(0.52, `hsl(${b.hue}, 58%, ${61 - nf * 16}%)`);
+  bodyG.addColorStop(0.82, `hsl(${b.hue}, 48%, ${50 - nf * 14}%)`);
+  bodyG.addColorStop(1, `hsl(${b.hue}, 42%, ${35 - nf * 10}%)`);
+  ctx.fillStyle = bodyG;
   ctx.beginPath();
   ctx.moveTo(tl + r, top);
   ctx.lineTo(tr - r, top);
-  ctx.quadraticCurveTo(tr, top, tr + slant * r / len, top + r);
-  ctx.lineTo(br + slant * (bot - r - top) / len, bot - r);
+  ctx.quadraticCurveTo(tr, top, tr, top + r);
+  ctx.lineTo(br, bot - r);
   ctx.quadraticCurveTo(br, bot, br - r, bot);
   ctx.lineTo(bl + r, bot);
   ctx.quadraticCurveTo(bl, bot, bl, bot - r);
-  ctx.lineTo(tl - slant * (bot - r - top) / len, top + r);
+  ctx.lineTo(tl, top + r);
   ctx.quadraticCurveTo(tl, top, tl + r, top);
   ctx.closePath(); ctx.fill();
-  // windshield at the far (front) end — darkens with grime, gleams once washed
-  const dirt = b.washDone ? 0 : (b.wash ? b.wash.g.reduce((a, v) => a + v, 0) / b.wash.g.length : 0.7);
-  ctx.fillStyle = mix(mix("#cfe8ff", "#26364e", nf * 0.8), "#70542c", dirt * 0.8);
-  rr(ctx, cx - 24, top + 8, 48, 15, 5); ctx.fill();
-  // the roof — a lighter panel, this is the "top of the bus"
+  ctx.strokeStyle = "rgba(16, 22, 34, 0.52)"; ctx.lineWidth = 1.5; ctx.stroke();
+  // narrow roof-edge highlights make the taper and side shoulders read clearly
+  ctx.strokeStyle = "rgba(255,255,255,0.36)"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(tl + 3, top + 12); ctx.lineTo(bl + 2, bot - 13); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(tr - 3, top + 12); ctx.lineTo(br - 2, bot - 13); ctx.stroke();
+  // Keep the nose end as a plain roof surface in overhead view: no front face
+  // or windshield is visible from this camera angle.
+  // the roof: enamel panel and trim seams; no windshield or side windows from overhead
   ctx.fillStyle = `hsl(${b.hue}, 44%, ${64 - nf * 16}%)`;
   rr(ctx, cx - 24, top + 27, 48, len - 72, 8); ctx.fill();
-  ctx.fillStyle = "rgba(255,255,255,0.14)";
-  rr(ctx, cx - 22, top + 29, 10, len - 76, 5); ctx.fill();
-  // AC units along the roof
-  ctx.fillStyle = `hsl(${b.hue}, 30%, ${34 - nf * 10}%)`;
+  ctx.strokeStyle = "rgba(27, 39, 52, 0.38)"; ctx.lineWidth = 1;
+  rr(ctx, cx - 24, top + 27, 48, len - 72, 8); ctx.stroke();
+  ctx.fillStyle = "rgba(255,255,255,0.18)";
+  rr(ctx, cx - 21, top + 30, 7, len - 78, 4); ctx.fill();
+  // panel seams and a long center rib on the roof
+  ctx.strokeStyle = "rgba(48, 62, 73, 0.28)"; ctx.lineWidth = 0.8;
+  ctx.beginPath(); ctx.moveTo(cx, top + 29); ctx.lineTo(cx, bot - 48); ctx.stroke();
+  for (const sy of [top + 33, bot - 52]) {
+    ctx.beginPath(); ctx.moveTo(cx - 22, sy); ctx.lineTo(cx + 22, sy); ctx.stroke();
+  }
+  // twin roof air-conditioning pods with intake grilles
   for (let ay = top + 40; ay < bot - 64; ay += 46) {
-    rr(ctx, cx - 16, ay, 32, 16, 3); ctx.fill();
+    const pod = ctx.createLinearGradient(0, ay, 0, ay + 17);
+    pod.addColorStop(0, `hsl(${b.hue}, 26%, ${43 - nf * 10}%)`);
+    pod.addColorStop(1, `hsl(${b.hue}, 24%, ${28 - nf * 7}%)`);
+    ctx.fillStyle = "rgba(0,0,0,0.2)"; rr(ctx, cx - 17, ay + 2, 34, 17, 4); ctx.fill();
+    ctx.fillStyle = pod; rr(ctx, cx - 16, ay, 32, 15, 4); ctx.fill();
+    ctx.strokeStyle = "rgba(235,242,245,0.3)"; ctx.lineWidth = 0.8;
+    rr(ctx, cx - 16, ay, 32, 15, 4); ctx.stroke();
+    ctx.fillStyle = "rgba(18, 27, 38, 0.75)";
+    for (let vy = ay + 3; vy < ay + 13; vy += 3) {
+      ctx.fillRect(cx - 13, vy, 7, 1); ctx.fillRect(cx + 6, vy, 7, 1);
+    }
   }
-  // boarding door, right side near the front (matches the side-view door)
-  ctx.fillStyle = `hsl(${b.hue}, 30%, ${30 - nf * 10}%)`;
-  ctx.fillRect(cx + 26, top + 32, 6, 40);
-  // rear window, just below the roof
-  ctx.fillStyle = mix("#cfe8ff", "#26364e", nf * 0.8);
-  rr(ctx, cx - 20, bot - 42, 40, 8, 3); ctx.fill();
-  // rear route display
-  ctx.fillStyle = "#1d2333";
-  rr(ctx, cx - 22, bot - 32, 44, 11, 3); ctx.fill();
-  ctx.fillStyle = "#ffd36b";
-  ctx.font = "bold 8px system-ui";
-  ctx.textAlign = "center";
-  ctx.fillText(`${b.from[0]} → ${b.to[0]}`, cx, bot - 23.5);
-  ctx.textAlign = "left";
-  // rear bumper + tail lights
-  ctx.fillStyle = `hsl(${b.hue}, 40%, ${30 - nf * 12}%)`;
-  ctx.fillRect(bl + 3, bot - 13, 60, 9);
-  if (nf > 0.4 || b.brake) {
-    ctx.fillStyle = `rgba(255, 80, 60, ${b.brake ? 0.6 : 0.45 * nf})`; // soft glow
-    rr(ctx, cx - 30, bot - 15, 20, 13, 5); ctx.fill();
-    rr(ctx, cx + 10, bot - 15, 20, 13, 5); ctx.fill();
-  }
-  ctx.fillStyle = b.brake ? "#ff3b2e" : nf > 0.4 ? "#ff6355" : "#c9352f";
-  ctx.fillRect(cx - 26, bot - 11, 10, 5);
-  ctx.fillRect(cx + 16, bot - 11, 10, 5);
-  if (b.rev) { // reverse lamps
-    ctx.fillStyle = "#f4f7ff";
-    ctx.fillRect(cx - 14, bot - 11, 6, 5);
-    ctx.fillRect(cx + 8, bot - 11, 6, 5);
-  }
-  if (b.blink && blinkOn()) { // left indicator, front and rear corners
-    ctx.fillStyle = "#ffb52e";
-    ctx.fillRect(bl + 1, bot - 12, 5, 7);
-    ctx.fillRect(tl, top + 4, 5, 6);
-  }
+  // rear-facing band: a small amount of rear fascia is visible beneath the roof
+  const rearFaceY = bot - 28;
+  const rearG = ctx.createLinearGradient(0, rearFaceY, 0, bot);
+  rearG.addColorStop(0, `hsl(${b.hue}, 38%, ${36 - nf * 12}%)`);
+  rearG.addColorStop(1, `hsl(${b.hue}, 34%, ${23 - nf * 7}%)`);
+  ctx.fillStyle = rearG;
+  ctx.fillRect(cx - 32, rearFaceY, 64, 28);
+  ctx.strokeStyle = "rgba(255,255,255,0.22)"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(cx - 31, rearFaceY + 1); ctx.lineTo(cx + 31, rearFaceY + 1); ctx.stroke();
+  // rear window set into the visible back panel
+  ctx.fillStyle = "rgba(12, 20, 32, 0.92)";
+  rr(ctx, cx - 18, rearFaceY + 3, 36, 8, 2); ctx.fill();
+  ctx.fillStyle = "rgba(190, 220, 235, 0.35)";
+  ctx.fillRect(cx - 14, rearFaceY + 4, 18, 1.5);
+  // small tail lamps and a bumper, confined to the rear face
+  ctx.fillStyle = nf > 0.4 ? "#ff6258" : "#c9352f";
+  rr(ctx, cx - 29, bot - 9, 7, 6, 2); ctx.fill();
+  rr(ctx, cx + 22, bot - 9, 7, 6, 2); ctx.fill();
+  ctx.fillStyle = `hsl(${b.hue}, 25%, ${24 - nf * 7}%)`;
+  ctx.fillRect(cx - 32, bot - 3, 64, 3);
   ctx.restore();
 }
 
@@ -6721,6 +7066,19 @@ function renderShop() {
     nextWash ? [`Sonraki: ${nextWash.icon} ${nextWash.name}`, ...washBenefits(nextWash)] : [], nextWash && carWashStatus(t.id, nextWash.tier),
     nextWash && `data-act="wash" data-tier="${nextWash.tier}"`, nextWash && tierCost(t.id, nextWash), haveWash ? "Yükselt" : "Kur");
 
+  const currentSpaces = parkingSpaces(t.sim);
+  const nextLot = CONFIG.parkingLots.find(x => x.spaces > currentSpaces);
+  let parkingCard = "";
+  if (S.view === "out") {
+    const lotStatus = nextLot && parkingUpgradeStatus(t.id, nextLot.spaces);
+    const lotLines = [`${currentSpaces} / ${PARKING_SLOT_COUNT} park yeri açık`, `Toplam hizmet verilen otobüs: ${t.sim.busesServed || 0}`];
+    if (nextLot) lotLines.push(`Sonraki: ${nextLot.spaces} park yeri · ${nextLot.minBuses} otobüs ve ${fmtTL(tierCost(t.id, nextLot))} gerekir`);
+    parkingCard = card(nextLot ? "" : "owned", `🚌 Otobüs otoparkı · ${currentSpaces} yer`,
+      { text: nextLot ? "şu an" : "en yüksek", cls: "cur" }, lotLines,
+      lotStatus && !lotStatus.ok ? lotStatus.reason : "",
+      nextLot ? `<button class="buy" data-act="parking" data-spaces="${nextLot.spaces}" ${lotStatus.ok ? "" : `disabled title="${escHtml(lotStatus.reason)}"`}>Alanı genişlet · ${fmtTL(tierCost(t.id, nextLot))}</button>` : "");
+  }
+
   let maint = "";
   const sys = autoSystems(t);
   if (!sys.length) maint = card("locked", "⚙️ Otomasyon yok", null, ["Bakım yalnızca otomatik sistemler için gerekir (yarı otomatik tuvaletler, yıkama 4+)"], "", "");
@@ -6743,17 +7101,20 @@ function renderShop() {
   const msg = `<div class="shopMsg ${shopMsg ? (shopMsg.ok ? "good" : "bad") : ""}" role="status">${shopMsg ? escHtml(shopMsg.text) : ""}</div>`;
   if (S.view === "wc") { $("shopBody").innerHTML = msg + wcSections; return; }
   if (S.view === "wash") { $("shopBody").innerHTML = `${msg}<div class="shopSection"><h2>OTO YIKAMA</h2>${washCards}</div>`; return; }
-  $("shopBody").innerHTML = `
-    ${msg}
-    ${sys.length ? `<div class="shopSection"><h2>BAKIM</h2>${maint}</div>` : ""}
+  if (S.view === "out") { $("shopBody").innerHTML = msg + parkingCard + `${sys.length ? `<div class="shopSection"><h2>BAKIM</h2>${maint}</div>` : ""}
     <div class="shopSection"><h2>OTO YIKAMA</h2>${washCards}</div>
-    ${sys.length ? "" : `<div class="shopSection"><h2>BAKIM</h2>${maint}</div>`}`;
+    ${sys.length ? "" : `<div class="shopSection"><h2>BAKIM</h2>${maint}</div>`}`; return; }
+  $("shopBody").innerHTML = `${msg}<div class="shopSection"><h2>OTO YIKAMA</h2>${washCards}</div>${sys.length ? `<div class="shopSection"><h2>BAKIM</h2>${maint}</div>` : ""}`;
 }
 
 function shopAction(btn) {
   const a = btn.dataset.act;
   let res;
-  if (a === "wc") {
+  if (a === "parking") {
+    const spaces = +btn.dataset.spaces;
+    res = upgradeParkingLot(G.activeTerminal, spaces);
+    if (res.ok) res.text = `✓ Otopark ${spaces} yere genişletildi (−${fmtTL(-res.tx.amount)})`;
+  } else if (a === "wc") {
     const def = wcLevel(btn.dataset.track, +btn.dataset.tier);
     res = purchaseUpgrade(G.activeTerminal, btn.dataset.track, +btn.dataset.tier);
     if (res.ok) res.text = `✓ ${def.name} kuruldu (−${fmtTL(-res.tx.amount)})`;
@@ -6799,9 +7160,10 @@ function showIntro(first) {
   $("modalBody").innerHTML = `
     <div class="big"><strong>${DEST_A}</strong> ile <strong>${DEST_B}</strong> arasındaki her tur otobüsünün güvendiği mola yerini sen işletiyorsun.</div>
     <p>🚌 Otobüsler mola vermek için otoparkına girer. Yolcular acıkır, susar ve <strong>tuvalet</strong> için can atar.</p>
-    <p>🍔 Lokantadaki yemek ve içecekler <strong>bedava</strong> — otobüs beklerken misafirler yer, içer ve etrafta dolaşır.</p>
+    <p>🅿️ Oyun <strong>2 otobüs park yeriyle</strong> başlar. İşletme panelinden otoparkı 4, 6, 8 ve en fazla 10 yere genişletebilirsin; ilk genişleme terminalin <strong>20 otobüse hizmet vermesinden</strong> sonra açılır.</p>
+    <p>🍔 Lokanta başlangıçta <strong>kapalıdır</strong>; misafirler içeri giremez ve yemek ya da içecek servisi alamaz.</p>
     <p>⏱ Otobüsler yaklaşık <strong>30 dakika</strong> mola verir — terminalde en fazla bir saat kalabilirler. Kalkış vakti gelince <strong>WC ödeme sırasındaki</strong> misafirlere ödemeyi bitirmeleri için <strong>5–10 dakika</strong> tanınır; sıra hâlâ duruyorsa <strong>ödemeden sırayı terk edip</strong> otobüse binerler ve otobüs kalkar.</p>
-    <p>🕐 Zaman <strong>sıkıştırılmıştır</strong> — 1× hızda bir oyun saati gerçekte 6 dakika sürer, yani bir oyun günü yaklaşık 2,4 gerçek saattir. Otobüsler, yemekler ve sıralar oyun içi temposunu korur.</p>
+    <p>🕐 Zaman <strong>sıkıştırılmıştır</strong> — 1× hızda bir oyun saati gerçekte 6 dakika sürer, yani bir oyun günü yaklaşık 2,4 gerçek saattir. Otobüsler, tuvaletler ve sıralar oyun içi temposunu korur.</p>
     <p>🚻 Tuvalet <strong>${fmtTL(CONFIG.economy.toiletFee)}</strong>; ücret ziyaretten <em>sonra</em> gişede ödenir — ve gişe <strong>sensin</strong>. <strong>İçeri girmek için WC binasına ${act}</strong>: içinde biri varken <strong>her kabinin kapısı kapanır</strong> (bir ziyaret oyun içinde 1–10 dakika sürer) ve <strong>her kabinin kendi temizliği vardır</strong> — kirli kabin ziyaretin puanını düşürür, misafirler hep <strong>en temiz boş kabini</strong> seçer (çok pis olanı kimse kullanmaz).</p>
     <p>💳 İçeride işini bitiren her misafir gişedeki sıraya girer ve sana bir banknot uzatır. Doğru para üstünü vermek için <strong>açık kasa çekmecesindeki gözlere ${act}</strong> (₺10 / ₺20 / ₺50) — ve <strong>misafirler banknotları sayar</strong>: aynı tutarı daha az banknotla vermek daha iyi puan alır (₺30'u 10+20 olarak vermek şıktır, 10+10+10 bir avuç kâğıttır; ₺80 için 10+20+50, 10×8'den iyidir). <strong>Tam ${fmtTL(CONFIG.economy.toiletFee)}</strong> veren misafirlerin sana ihtiyacı yok: <strong>kendi ikinci sıralarında</strong> durur, kendileri öder ve yan geçitten çıkarlar — para üstü yok, kolonya yok, tıklama yok. Eksik ya da hiç verilmeyen para üstü diğer misafirleri mutsuz eder. ${hasCalc() ? "Gişedeki <strong>hesap makinesi</strong> verilecek para üstünü gösterir." : "Henüz <strong>hesap makinen yok</strong> — para üstünü kafandan hesapla (₺20 düş)."}</p>
     ${hasCologne() ? `<p>💨 Gişede ${bottleMax()} ml'lik bir şişe <strong>limon kolonyası</strong> durur. Öndeki misafir öderken ellerine biraz dökmek için <strong>şişeye ${act}</strong>. Para üstü eline geçer geçmez yan geçitten çıkar (tam ₺20 sırası kendi kendine öder — kolonya ana sıranın öndeki misafiri içindir), o yüzden erken dök. Şişe gece yarısı dolar.</p>` : ""}
@@ -6819,6 +7181,208 @@ function showIntro(first) {
   showModal();
 }
 
+function startWcIntro() {
+  if (G.flags.wcIntroStep !== 0) return;
+  G.flags.wcIntroStep = 1;
+  arrivalInfoKind = "wcIntro-toilets";
+  arrivalInfoOpen = true;
+  save();
+}
+
+function wcIntroTargetRect() {
+  if (arrivalInfoKind === "wcIntro-toilets") {
+    const x1 = stallSx(0), x2 = stallSx(STALL_ROW_W);
+    const y1 = stallSy(84), y2 = stallSy(246);
+    return { x: x1 - 8, y: y1 - 8, w: x2 - x1 + 16, h: y2 - y1 + 16 };
+  }
+  if (arrivalInfoKind === "wcIntro-brush") {
+    const st = toolStations()[0];
+    return { x: st.x - 10, y: st.y - 10, w: st.w + 20, h: st.h + 20 };
+  }
+  const r = deskRect(COUNTER_IN.desk, "drawer");
+  const { L, R } = counterBounds();
+  return { x: L - 8, y: r.y - 8, w: R - L + 16, h: r.h + 16 };
+}
+
+function maybeShowArrivalInfo() {
+  if (arrivalInfoOpen || modalOpen || paused || shopOpen || mapOpen || S.view !== "out") return;
+  if (!G.flags.arrivalInfoSeen) {
+    if (performance.now() < arrivalInfoDelayUntil) return;
+    const bus = buses.find(b => b.state === "drive" && b.cx + b.len / 2 >= -offX && b.cx - b.len / 2 <= Wdyn - offX);
+    if (!bus) return;
+    arrivalInfoKind = "arrival";
+    arrivalInfoBusId = bus.id;
+    arrivalInfoOpen = true;
+  } else if (!G.flags.wcInfoSeen && buses.some(b => b.state === "stop")) {
+    arrivalInfoKind = "wc";
+    arrivalInfoBusId = null;
+    arrivalInfoOpen = true;
+  }
+}
+
+function dismissArrivalInfo() {
+  if (!arrivalInfoOpen) return;
+  if (arrivalInfoKind.startsWith("wcIntro-")) {
+    const next = G.flags.wcIntroStep + 1;
+    G.flags.wcIntroStep = next;
+    if (next < 4) arrivalInfoKind = [null, null, "wcIntro-brush", "wcIntro-counter"][next];
+    else arrivalInfoOpen = false;
+    arrivalInfoBusId = null;
+    save();
+    return;
+  }
+  arrivalInfoOpen = false;
+  if (arrivalInfoKind === "wc") G.flags.wcInfoSeen = true;
+  else G.flags.arrivalInfoSeen = true;
+  arrivalInfoBusId = null;
+  save();
+}
+
+function arrivalInfoLayout() {
+  const isIntro = arrivalInfoKind.startsWith("wcIntro-");
+  if (isIntro) {
+    const w = 430, h = 132, left = -offX + 8, right = Wdyn - offX - w - 8;
+    const target = wcIntroTargetRect();
+    let x = Wdyn / 2 - w / 2, y;
+    if (arrivalInfoKind === "wcIntro-toilets") {
+      y = target.y + target.h + 12; // directly below the highlighted stall row
+    } else if (arrivalInfoKind === "wcIntro-brush") {
+      x = target.x + target.w + 12; // beside the highlighted cleaning tool
+      if (x > right) x = target.x - w - 12;
+      y = target.y + target.h / 2 - h / 2;
+    } else {
+      y = target.y - h - 12; // directly above the highlighted counter
+    }
+    x = clamp(x, left, right);
+    y = clamp(y, -offY + 8, H + offY - h - 8);
+    return { isIntro, target, x, y, w, h, button: { x: x + w / 2 - 62, y: y + 90, w: 124, h: 32 } };
+  }
+  const isWc = arrivalInfoKind === "wc";
+  const bus = isWc ? null : buses.find(b => b.id === arrivalInfoBusId);
+  const w = 430, h = 132, tail = 14;
+  if (isWc) {
+    const targetY = WC_BUILDING.y + WC_BUILDING.h / 2;
+    const x = WC_BUILDING.x - w - tail - 8;
+    const y = clamp(targetY - h / 2, -offY + 8, H + offY - h - tail - 8);
+    return { bus, isWc, x, y, w, h, tail, tipX: WC_BUILDING.x - 8, tipY: targetY, button: { x: x + w / 2 - 62, y: y + 90, w: 124, h: 32 } };
+  }
+  const left = -offX + 8, right = Wdyn - offX - w - 8;
+  const centerX = bus ? bus.cx : Wdyn / 2;
+  const x = clamp(centerX - w / 2, left, right);
+  const busTop = bus
+    ? bus.cy - (Math.abs(Math.sin(bus.ang)) * bus.len / 2 + Math.abs(Math.cos(bus.ang)) * 33)
+    : H / 2;
+  const y = clamp(busTop - h - tail - 8, -offY + 8, H + offY - h - tail - 8);
+  return { bus, isWc, x, y, w, h, tail, tipX: clamp(centerX, x + 24, x + w - 24), tipY: y + h + tail, button: { x: x + w / 2 - 62, y: y + 90, w: 124, h: 32 } };
+}
+
+function drawArrivalInfo() {
+  if (!arrivalInfoOpen) return;
+  const { isIntro, target, bus, isWc, x, y, w, h, tail, tipX, tipY, button } = arrivalInfoLayout();
+  ctx.save();
+  if (isIntro) {
+    // Even-odd fill leaves the current tutorial target bright beneath the dim overlay.
+    ctx.beginPath();
+    ctx.rect(-offX, -offY, Wdyn, Hdyn + offY);
+    ctx.rect(target.x, target.y, target.w, target.h);
+    ctx.fillStyle = "rgba(5, 8, 16, 0.76)";
+    ctx.fill("evenodd");
+    ctx.strokeStyle = "#ffd36b"; ctx.lineWidth = 2;
+    rr(ctx, target.x, target.y, target.w, target.h, 8); ctx.stroke();
+
+    const copy = arrivalInfoKind === "wcIntro-toilets"
+      ? ["Tuvaletler", "Misafirler temiz ve boş kabinleri kullanır.", "Her kabinin temizliğini buradan takip et."]
+      : arrivalInfoKind === "wcIntro-brush"
+        ? ["Temizlik aleti", "Aleti alıp kirlenen kabinlerde sürükle.", "İçinde misafir olan kabin temizlenemez."]
+        : ["Gişe", "Tuvalet ücreti burada ödenir.", "Doğru para üstünü verip misafirleri uğurla."];
+    ctx.fillStyle = "rgba(16, 22, 35, 0.98)";
+    rr(ctx, x, y, w, h, 14); ctx.fill();
+    ctx.strokeStyle = "#f2c66d"; ctx.lineWidth = 2;
+    rr(ctx, x, y, w, h, 14); ctx.stroke();
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = "#ffd36b"; ctx.font = "bold 21px system-ui";
+    ctx.fillText(copy[0], x + w / 2, y + 25);
+    ctx.fillStyle = "#f4f6fb"; ctx.font = "15px system-ui";
+    ctx.fillText(copy[1], x + w / 2, y + 53);
+    ctx.fillText(copy[2], x + w / 2, y + 72);
+    ctx.fillStyle = "#d92332"; rr(ctx, button.x, button.y, button.w, button.h, 8); ctx.fill();
+    ctx.fillStyle = "#fff"; ctx.font = "bold 15px system-ui";
+    ctx.fillText("Anladım", button.x + button.w / 2, button.y + button.h / 2);
+    ctx.restore();
+    return;
+  }
+  // Outdoor tutorial bubbles continue below.
+  ctx.fillStyle = "rgba(5, 8, 16, 0.76)";
+  ctx.fillRect(-offX, -offY, Wdyn, Hdyn + offY);
+  if (bus) drawBus(bus);
+  if (isWc) {
+    ctx.save();
+    ctx.beginPath(); ctx.rect(WC_BUILDING.x - 8, WC_BUILDING.y - 10, WC_BUILDING.w + 16, WC_BUILDING.h + 18); ctx.clip();
+    drawRestStop();
+    ctx.restore();
+  }
+
+  // Speech bubble: the bus tip points down; the WC tip points toward the building.
+  ctx.beginPath();
+  if (isWc) {
+    const cy = tipY - y;
+    ctx.moveTo(x + 14, y);
+    ctx.lineTo(x + w - 14, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + 14);
+    ctx.lineTo(x + w, y + h - 14);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - 14, y + h);
+    ctx.lineTo(x + 14, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - 14);
+    ctx.lineTo(x, y + 14);
+    ctx.quadraticCurveTo(x, y, x + 14, y);
+    ctx.closePath();
+    // Side tail is drawn separately so it can point at the WC facade.
+    ctx.fillStyle = "rgba(16, 22, 35, 0.98)";
+    ctx.fill();
+    ctx.strokeStyle = "#f2c66d"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x + w - 2, y + cy - 11); ctx.lineTo(tipX, tipY); ctx.lineTo(x + w - 2, y + cy + 11); ctx.closePath();
+    ctx.fillStyle = "rgba(16, 22, 35, 0.98)"; ctx.fill();
+    ctx.strokeStyle = "#f2c66d"; ctx.stroke();
+  } else {
+    ctx.moveTo(x + 14, y);
+    ctx.lineTo(x + w - 14, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + 14);
+    ctx.lineTo(x + w, y + h - 14);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - 14, y + h);
+    ctx.lineTo(tipX + 11, y + h);
+    ctx.lineTo(tipX, tipY);
+    ctx.lineTo(tipX - 11, y + h);
+    ctx.lineTo(x + 14, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - 14);
+    ctx.lineTo(x, y + 14);
+    ctx.quadraticCurveTo(x, y, x + 14, y);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(16, 22, 35, 0.98)"; ctx.fill();
+    ctx.strokeStyle = "#f2c66d"; ctx.lineWidth = 2; ctx.stroke();
+  }
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#ffd36b";
+  ctx.font = "bold 21px system-ui";
+  ctx.fillText(isWc ? "WC binası" : "İlk otobüsün geliyor!", x + w / 2, y + 25);
+  ctx.fillStyle = "#f4f6fb";
+  ctx.font = "15px system-ui";
+  if (isWc) {
+    ctx.fillText("Yolcular tuvalet için buraya gelir.", x + w / 2, y + 53);
+  } else {
+    ctx.fillText("Otobüsler terminalinde mola verir.", x + w / 2, y + 53);
+    ctx.fillText("Yolculara hizmet için hazır ol.", x + w / 2, y + 72);
+  }
+  ctx.fillStyle = "#d92332";
+  rr(ctx, button.x, button.y, button.w, button.h, 8); ctx.fill();
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 15px system-ui";
+  ctx.fillText("Anladım", button.x + button.w / 2, button.y + button.h / 2);
+  ctx.restore();
+}
+
 /* ------------------------------ Main loop --------------------------- */
 let last = performance.now();
 function frame(now) {
@@ -6833,12 +7397,14 @@ function frame(now) {
   const timeDt = Math.min(86400, elapsed) * speed;
   if (viewFade > 0) viewFade = Math.max(0, viewFade - raw * 3); // transition flash fades even while paused
   mapZoom = clamp(mapZoom + (mapOpen ? 1 : -1) * raw * 2.5, 0, 1); // ~0.4 s zoom, also while paused
-  if (!paused && !modalOpen && !shopOpen) { // the business panel holds the clock while you shop
+  if (!paused && !modalOpen && !shopOpen && !arrivalInfoOpen) { // panels and one-time tips hold the clock
     const dt = raw * speed;
     advanceSimulation(dt, timeDt);
     stepScrub(Math.min(0.25, elapsed)); // real seconds — the scrub ignores the speed tier
   }
+  maybeShowArrivalInfo();
   drawScene();
+  drawArrivalInfo();
   updateHUD();
   requestAnimationFrame(frame);
 }
@@ -6846,7 +7412,8 @@ function frame(now) {
 /* ------------------------------- Init ------------------------------- */
 function init() {
   const loaded = load();
-  openingBus(); // drawn behind the welcome screen, rolling in the moment play starts
+  arrivalInfoDelayUntil = performance.now() + 1000;
+  openingBus(); // the first bus starts rolling in as play begins
 
   const burgerMenu = $("burgerMenu");
   const burgerBackdrop = $("burgerBackdrop");
@@ -6897,7 +7464,10 @@ function init() {
     save();
   };
   $("mapBtn").onclick = () => setMapOpen(!mapOpen);
-  $("btnMapClose").onclick = () => setMapOpen(false);
+  $("btnMapClose").onclick = () => setMapPanelOpen(false);
+  document.addEventListener("pointerdown", e => {
+    if (mapPanelOpen && !$("mapPanel").contains(e.target)) setMapPanelOpen(false);
+  }, true);
   $("mapPanel").addEventListener("click", e => {
     const btn = e.target.closest("button[data-sel], button[data-act]");
     if (btn && !btn.disabled) mapAction(btn);
@@ -6944,6 +7514,7 @@ function init() {
     // scrub/spray must start from the tap, not wherever the pointer last moved.
     pointer.x = x; pointer.y = y;
     downClient = { x: e.clientX, y: e.clientY };
+    if (arrivalInfoOpen) return; // the tutorial allows only its Anladım button
     // a press in the wash view starts a scrub/spray; holding the cleaning hose
     // sprays the stall under the pointer (per-cell cooldowns throttle the work)
     if (mapOpen) return; // the map only takes taps
@@ -6956,6 +7527,7 @@ function init() {
     if (e.pointerType !== "mouse" && activePointer !== e.pointerId) return;
     const { x, y } = toGame(e);
     pointer.x = x; pointer.y = y;
+    if (arrivalInfoOpen) { if (e.pointerType === "mouse") canvas.style.cursor = "default"; return; }
     if (activePointer === e.pointerId) {
       // a held scrub/spray — the per-cell cooldown inside washApply throttles it
       if (S.view === "wash" && pointerDown) washApply(x, y);
@@ -6966,7 +7538,7 @@ function init() {
     const hit = (r, pad = 2) => x >= r.x - pad && x <= r.x + r.w + pad && y >= r.y - pad && y <= r.y + r.h + pad;
     let hot;
     if (S.view === "out") {
-      hot = hit(WC_BUILDING) || carWashOpen() && buses.some(z => z.state === "stop" && !z.washDone
+      hot = (G.flags.firstBusParked && hit(WC_BUILDING)) || carWashOpen() && buses.some(z => z.state === "stop" && !z.washDone
         && x >= z.cx - 36 - 2 && x <= z.cx + 36 + 2 && y >= LOT_NOSE - 2 && y <= z.cy + z.len / 2 + 2);
     } else if (S.view === "wash") {
       hot = hit(WASH.brush) || hit(WASH.hose) || hit(WASH.exit);
@@ -7017,6 +7589,13 @@ function init() {
   function routePress(x, y, isMouse) {
     const scale = canvas.getBoundingClientRect().width / Wdyn; // CSS px per logical px
     const padMin = isMouse ? 0 : clamp(10 / scale, 4, 16);
+    if (arrivalInfoOpen) {
+      const { button } = arrivalInfoLayout();
+      const onButton = x >= button.x - padMin && x <= button.x + button.w + padMin &&
+        y >= button.y - padMin && y <= button.y + button.h + padMin;
+      if (onButton) dismissArrivalInfo();
+      return; // only the explicit button dismisses the tip; clicks elsewhere can't activate scene items
+    }
     if (mapOpen) { const id = mapNodeAt(x, y, padMin); if (id) mapSelect(id); return; }
     const hit = (r, pad = 2) => {
       const p = Math.max(pad, padMin);
@@ -7076,8 +7655,9 @@ function init() {
     evaders: () => buses.flatMap(b => b.pax).filter(p => p.unpaid),   // every guest who used the WC and never paid
     runaways: () => buses.flatMap(b => b.pax).filter(p => p.runaway), // running for the exit right now: the catchable ones
     game: () => G, loaded, save, shopOpen: () => shopOpen, renderShop,
+    parkingSpaces, activeParkingSlots, parkingUpgradeStatus, upgradeParkingLot,
     toastLog: () => toastLog, runtimeOf: id => runtime[id], boundId: () => boundId,
-    mapOpen: () => mapOpen, mapZoom: () => mapZoom, mapSel: () => mapSel, setMapOpen,
+    mapOpen: () => mapOpen, mapPanelOpen: () => mapPanelOpen, mapZoom: () => mapZoom, mapSel: () => mapSel, setMapOpen, setMapPanelOpen,
     mapNode: id => mapPos(termDef(id).map), mapState,
     sim: () => S, buses: () => buses, facilities: () => facilities,
     // drive the scheduler directly: `sec` real seconds at the current speed tier, in 1/30 s frames
@@ -7096,6 +7676,7 @@ function init() {
     bayCenter: i => { const r = stallBay(i); return { x: r.x + r.w / 2, y: r.y + r.h / 2 }; },
   };
   window.addEventListener("keydown", e => {
+    if (arrivalInfoOpen) return; // the tip closes only from its on-screen button
     // the panel owns the keyboard while open (Tab / Enter / Space work its buttons)
     if (shopOpen) { if (e.key === "Escape" || e.key === "u" || e.key === "U") closeShop(); return; }
     if ((e.key === "u" || e.key === "U") && !modalOpen && !mapOpen) { openShop(); return; }
@@ -7127,8 +7708,14 @@ function init() {
   window.addEventListener("beforeunload", save);
   document.addEventListener("visibilitychange", () => { if (document.hidden) { releasePointer(); save(); } });
 
-  if (loaded.status === "new") { paused = true; showIntro(true); }
-  else if (loaded.status !== "loaded") showLoadNotice(loaded);
+  if (S.view === "wc") {
+    if (G.flags.wcIntroStep === 0) startWcIntro();
+    else if (G.flags.wcIntroStep < 4) {
+      arrivalInfoKind = [null, "wcIntro-toilets", "wcIntro-brush", "wcIntro-counter"][G.flags.wcIntroStep];
+      arrivalInfoOpen = true;
+    }
+  }
+  if (loaded.status !== "new" && loaded.status !== "loaded") showLoadNotice(loaded);
 
   requestAnimationFrame(frame);
 }

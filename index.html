@@ -23,15 +23,18 @@
       <button id="cashChip" title="Şirket kasası — İşletme paneli (U)" aria-label="Şirket kasası, işletme panelini aç">₺0</button>
       <button id="btnBurger" class="icon" aria-label="Menü" title="Menüyü Aç/Kapat">☰</button>
     </div>
-    <button id="mapBtn" class="icon" title="Bölge haritası (M)" aria-label="Bölge haritası">🗺</button>
-    <button id="btnShop" class="icon" title="Yükseltmeler ve ekipman (U)" aria-label="İşletme">🏗</button>
+    <div id="sideControls">
+      <button id="mapBtn" class="icon" title="Bölge haritası (M)" aria-label="Bölge haritası">🗺</button>
+      <button id="btnShop" class="icon" title="Yükseltmeler ve ekipman (U)" aria-label="İşletme">🛠️</button>
+      <button id="btnPause" class="icon" title="Duraklat (Boşluk)" aria-label="Oyunu duraklat">⏸</button>
+    </div>
     <div id="mapPanel" class="hidden" role="region" aria-label="Bölge haritası">
       <div class="mapHead">
-        <strong>🗺 Bölge haritası</strong>
-        <button id="btnMapClose" class="icon" title="Terminale dön (M / Esc)" aria-label="Terminale dön">✕</button>
+        <strong id="mapTitle">Bölge haritası</strong>
+        <button id="btnMapClose" class="icon" title="Harita panelini kapat" aria-label="Harita panelini kapat">✕</button>
       </div>
-      <div id="mapList"></div>
       <div id="mapDetail"></div>
+      <div id="mapActions"></div>
     </div>
     <div id="burgerBackdrop" class="hidden"></div>
     <div id="burgerMenu" class="hidden">
@@ -54,7 +57,6 @@
         <div class="burgerSection">
           <div class="burgerSectionTitle">KONTROLLER</div>
           <div class="burgerControls">
-            <button id="btnPause" title="Duraklat (Boşluk)">⏸</button>
             <button id="btnSpeed" title="Oyun hızı (1/10/100/200)">1×</button>
             <button id="btnReset" title="Oyunu sıfırla">↺</button>
             <button id="btnHelp" title="Nasıl oynanır">?</button>
