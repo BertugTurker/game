@@ -9,7 +9,7 @@ The in-game text is Turkish.
 ## How it works
 
 ### Buses, guests, clock
-- 🚌 Buses stop for a layover of about **30 minutes** (a full hour in the terminal is the hard cap). **Each terminal's own reputation** sets how often buses come (every ~1.2–2 h at rep 0, every 9–15 min at rep 100) and how full they are, so a busy terminal runs several buses at once.
+- 🚌 Buses stop for a layover of about **30 minutes** (a full hour in the terminal is the hard cap). **Each terminal's own reputation** sets how often buses come (about every 5–8 game minutes at rep 0, 2–5 minutes at rep 100). A parking lot is never left empty for more than 10 game minutes, and usually refills sooner.
 - 🕐 One in-game hour takes **6 real minutes at 1×**. Speed tiers are 1× / 10× / 100× / 200×. The simulation keeps counting while the tab is in the background.
 - 🍔 Guests eat for free at the diner (3 seats) and wander the lot.
 - ★ **Reputation (0–100, per terminal)** comes from guest and bus ratings: cleanliness, waiting, change, cologne, washes. Breakdowns cost 2 reputation.

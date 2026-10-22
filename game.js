@@ -76,11 +76,11 @@ const COUNTER_IN = {
   // the open cash drawer — three bill trays; the change click targets are the
   // FULL drawn body of each tray (chipHit below), not just the inner rect
   chips: [
-    { d: 10, x: 360, y: 384, w: 76, h: 98, color: BILL_COLORS[10], label: "₺10" },
-    { d: 20, x: 442, y: 384, w: 76, h: 98, color: BILL_COLORS[20], label: "₺20" },
-    { d: 50, x: 524, y: 384, w: 76, h: 98, color: BILL_COLORS[50], label: "₺50" },
+    { d: 10, x: 360, y: 384, w: 76, h: 98, color: BILL_COLORS[10], label: "10₺" },
+    { d: 20, x: 442, y: 384, w: 76, h: 98, color: BILL_COLORS[20], label: "20₺" },
+    { d: 50, x: 524, y: 384, w: 76, h: 98, color: BILL_COLORS[50], label: "50₺" },
   ],
-  bottle: { x: 318, y: 310, w: 26, h: 52 },   // Turkish cologne on the counter
+  bottle: { x: 318, y: 288, w: 26, h: 52 },   // Turkish cologne standing on the countertop
   desk:   { x: 96, y: 352, w: 768, h: 188 },  // the wooden counter — 10% of the view stays open on each side (the entrances)
   intercom: { x: 790, y: 394, w: 44, h: 62 }, // tea intercom at the right end of the counter (click to order a fresh tea)
   hose:   { x: 18, y: 238, w: 60, h: 96 },   // faucet + coiled hose left of the stall row (x/y track the view — see resize)
@@ -100,18 +100,21 @@ const chipHit = c => ({ x: c.x - 4, y: c.y - 4, w: c.w + 8, h: c.h + 22 });
 // Ultra-wide stages: a taller, narrower counter with its items drawn 1.5x,
 // packed closer together (per-item x shifts, in base coords) and centered.
 const ULTRA_ASPECT = 2.0;
-const DESK_SHIFT = { calc: 25, bottle: 0, drawer: 0, tea: -25, intercom: -60 };
+const DESK_SHIFT = { calc: 25, bottle: 0, drawer: 0, tea: -25, coins: -43, intercom: -60 };
 const DESK_ULTRA_K = 1.3;
 const DESK_ULTRA = { L: 226.5, R: 790.5 }; // the counter's ends around the scaled items, in base coords
 const DRAWER_BOT = 530;                  // drawer body + shadow bottom, base coords — pinned just inside the frame
 let deskK = 1;                           // DESK_ULTRA_K on ultra-wide (set in resize)
+const COUNTER_TOP_HEIGHT = 34;
+const COUNTER_BILL_U = 5; // enlarged portrait notes on the countertop
+const COUNTER_BILL_OFFSET = 72;
 // [scale, tx, ty] for an item: x' = tx + x*scale, y' = ty + y*scale
 function deskXf(item) {
   if (deskK === 1) return [1, 0, 0];
   return [deskK, 480 + ((DESK_SHIFT[item] || 0) - 508.5) * deskK, H - 4 - DRAWER_BOT * deskK];
 }
 function counterBounds() {
-  const gap = Wdyn * SIDE_GAP;
+  const gap = Wdyn * SIDE_GAP * 0.75; // widen the visible counter while preserving guest passage space
   let L = -offX + gap, R = -offX + Wdyn - gap;
   if (deskK > 1) {
     L = Math.max(L, 480 + (DESK_ULTRA.L - 508.5) * deskK);
@@ -119,6 +122,46 @@ function counterBounds() {
   }
   return { L, R };
 }
+
+function counterTopBackEdgeY() {
+  const [, , dty] = deskXf();
+  return dty + COUNTER_IN.desk.y * deskK - 11 - COUNTER_TOP_HEIGHT * deskK;
+}
+function counterFrontDepthY() {
+  const [, , dty] = deskXf();
+  return dty + (COUNTER_IN.desk.y + 5) * deskK;
+}
+function counterGuestStandY() {
+  return counterFrontDepthY(); // guests stand at the counter's front edge; the ledge hides their lower bodies
+}
+function counterTopBillY() {
+  return counterTopBackEdgeY() + COUNTER_TOP_HEIGHT * deskK / 2;
+}
+function counterExactBillX() {
+  const tray = COUNTER_IN.chips.find(c => c.d === 20);
+  return deskRect({ x: tray.x + tray.w / 2, y: tray.y, w: 0, h: 0 }, "drawer").x;
+}
+
+// Broad countertop surface behind the front-facing cash drawer fascia.
+function drawCounterTopArea() {
+  const [, , dty] = deskXf();
+  const dY = dty + COUNTER_IN.desk.y * deskK;
+  const { L, R } = counterBounds(), h = COUNTER_TOP_HEIGHT * deskK;
+  const y = dY - 11 - h; // overlap the ledge edge slightly so the top and front stay joined
+  // Match the same warm timber used on the counter face, with only a gentle
+  // highlight on the back edge so the worktop reads as part of one counter.
+  const wood = ctx.createLinearGradient(0, y, 0, y + h);
+  wood.addColorStop(0, "#8f6b3c");
+  wood.addColorStop(0.55, "#7a5a32");
+  wood.addColorStop(1, "#8a6838");
+  ctx.fillStyle = wood;
+  ctx.fillRect(L, y, R - L, h);
+  ctx.fillStyle = "rgba(255, 232, 184, 0.2)";
+  ctx.fillRect(L, y, R - L, 1.5 * deskK);
+  ctx.fillStyle = "rgba(66, 43, 22, 0.14)";
+  ctx.fillRect(L, y + h * 0.55, R - L, deskK);
+}
+
 function deskRect(r, item) {
   const [s, tx, ty] = deskXf(item);
   return { x: tx + r.x * s, y: ty + r.y * s, w: r.w * s, h: r.h * s };
@@ -127,8 +170,8 @@ function withDesk(item, fn) {
   const [s, tx, ty] = deskXf(item);
   ctx.save(); ctx.translate(tx, ty); ctx.scale(s, s); fn(); ctx.restore();
 }
-const PAY_SPOT = { x: 560, y: 357 };           // where the front guest stands
-const PAY_SPOT2 = { x: 462, y: 357 };          // the exact-₺20 line's own spot, left of the main one
+const PAY_SPOT = { x: 560, y: counterGuestStandY() }; // customer line stays behind the far countertop edge
+const PAY_SPOT2 = { x: 462, y: counterGuestStandY() }; // exact-₺20 line
 const WC_BUILDING = { x: 808, y: 92, w: 86, h: 80 }; // outdoor hit rect: click to enter
 // Car wash view geometry — a close-up of the parked bus's front. The
 // windshield is a cols×rows cell grid; each cell tracks its own dirt and soap.
@@ -294,7 +337,141 @@ const CONFIG = {
 const SAVE_KEY = CONFIG.save.key;
 
 /* ---------------------------- Small utils --------------------------- */
-const fmtTL = n => "₺" + Math.round(n).toLocaleString("tr-TR");
+const fmtTL = n => Math.round(n).toLocaleString(gameLanguage === "en" ? "en-US" : "tr-TR") + "₺";
+const fmtCashChip = fmtTL;
+const LANGUAGE_KEY = "mola-yeri-language";
+let gameLanguage = "tr";
+try { gameLanguage = localStorage.getItem(LANGUAGE_KEY) === "en" ? "en" : "tr"; } catch (e) { /* storage may be disabled */ }
+const ENGLISH = [
+  ["Bölge haritası", "Regional map"], ["Harita panelini kapat", "Close map"], ["Menüyü Aç/Kapat", "Open/close menu"], ["Menü", "Menu"],
+  ["Şirket kasası — İşletme paneli (U)", "Company cash — Business panel (U)"], ["Şirket kasası, işletme panelini aç", "Company cash; open business panel"],
+  ["Bugün hizmet verilen misafir", "Guests served today"], ["Bulunduğun terminal", "Current terminal"], ["Gün ve saat", "Day and time"],
+  ["DURUM", "STATUS"], ["KONTROLLER", "CONTROLS"], ["⚙️ Otomasyon yok", "⚙️ No automation installed"], ["Kur ·", "Install ·"], ["İtibar — itibar yükseldikçe daha çok otobüs uğrar", "Reputation — higher reputation brings more buses"],
+  ["Oyun hızı (1/10/100/200)", "Game speed (1/10/100/200)"], ["Oyunu sıfırla", "Reset game"], ["Nasıl oynanır", "How to play"],
+  ["Test için: kasaya 100.000₺ ekle", "Test: add 100,000₺ to cash"], ["Cihazı yatay çevir", "Rotate your device"], ["Mola Yeri geniş ekran için tasarlandı", "Layover Lane is designed for a wide screen"],
+  ["Kapat", "Close"], ["Kapat (Esc)", "Close (Esc)"], ["Oyunun dilini değiştir", "Change game language"], ["Yükseltmeler ve ekipman (U)", "Upgrades and equipment (U)"],
+  ["Oyunu duraklat", "Pause game"], ["İşletme", "Business"], ["Geliştirmeler", "Upgrades"], ["Yükselt", "Upgrade"], ["Yükseltme", "Upgrade"],
+  ["Satın al", "Buy"], ["Kur", "Build"], ["şu an", "current"], ["en yüksek", "max level"], ["Sonraki:", "Next:"],
+  ["OTO YIKAMA", "CAR WASH"], ["BAKIM", "MAINTENANCE"], ["Otopark", "Parking lot"], ["Alanı genişlet", "Expand parking"],
+  ["park yeri", "parking space"], ["park yeri açık", "parking spaces open"], ["Toplam hizmet verilen otobüs:", "Total buses served:"],
+  ["Günlük bakım", "Routine maintenance"], ["Bakım yap", "Maintain"], ["Onar", "Repair"], ["Onarılana kadar bu iş elle yapılır", "This system must be operated manually until repaired"],
+  ["Sistemler:", "Systems:"], ["Sonraki bakım:", "Next maintenance:"], ["İşletme gideri:", "Operating cost:"], ["gece yarısı", "at midnight"],
+  ["Otomasyon yok", "No automation"], ["Bakım yalnızca otomatik sistemler için gerekir", "Maintenance is only required for automated systems"],
+  ["₺ eksik", "₺ short"], ["Bakım gerekmiyor", "Maintenance not needed"], ["arızalı", "broken"], ["kuruldu", "installed"], ["onarılana kadar", "until repaired"],
+  ["Çay", "Tea"], ["çay", "tea"], ["Kolonya", "Cologne"], ["kolonya", "cologne"], ["Tuvalet", "Toilet"], ["tuvalet", "toilet"],
+  ["Tuvaletler", "Toilets"], ["Misafir", "Guest"], ["misafir", "guest"], ["misafirler", "guests"], ["Otobüs", "Bus"], ["otobüs", "bus"], ["otobüsler", "buses"],
+  ["Kabin", "Stall"], ["kabin", "stall"], ["kabinler", "stalls"], ["para üstü", "change"], ["Oto yıkama", "Car wash"], ["oto yıkama", "car wash"],
+  ["KAPALI", "CLOSED"], ["LOKANTA", "DINER"], ["TURİSTİK", "TOURIST"], ["LİMON KOLONYASI", "LEMON COLOGNE"], ["ELİNDE", "IN HAND"],
+  ["ELİNDE — basılı tut & sürükle", "IN HAND — hold & drag"], ["KİR ", "GRIME "], ["KÖPÜK ", "FOAM "], ["ÇIKIŞ", "EXIT"],
+  ["para üstü!", "change!"], ["kolonya!", "cologne!"], ["kapı kapalı", "door closed"], ["girmek için dokun", "tap to enter"], ["girmek için tıkla", "click to enter"],
+  ["🗺 BÖLGE HARİTASI", "🗺 REGIONAL MAP"], ["— bir terminale dokun", "— tap a terminal"], ["— bir terminale tıkla", "— click a terminal"],
+  ["🚪 ÇIKIŞ (E)", "🚪 EXIT (E)"], ["WC binası", "Restroom"], ["İlk otobüsün geliyor!", "Your first bus is arriving!"],
+  ["Yolcular tuvalet için buraya gelir.", "Passengers come here to use the restroom."], ["Otobüsler terminalinde mola verir.", "Buses stop at your terminal."], ["Yolculara hizmet için hazır ol.", "Get ready to serve passengers."],
+  ["Anladım", "Got it"], ["Devam", "Continue"], ["İşe dön", "Back to work"], ["Dükkânı aç!", "Open the shop!"],
+  ["🎉 ", "🎉 "], [" artık senin", " is now yours"], ["arızalandı — onarılana kadar elle çalış", "has broken down — operate it manually until repaired"],
+  ["⚠️ Kayıt sorunu", "⚠️ Save problem"], ["💾 Kaydın aktarıldı", "💾 Save migrated"], ["Kayıt okunamadı", "Save could not be read"],
+  ["✨ Ön cam pırıl pırıl!", "✨ The windshield is sparkling clean!"], ["😖 Tuvalet pis, misafir gitti", "😖 The restroom is dirty; the guest left"],
+  ["🏃 Misafir ödemeden kaçıyor!", "🏃 A guest is leaving without paying!"], ["😠 Misafir ödemeden gitti", "😠 A guest left without paying"],
+  ["⏱ Süre doldu, otobüs kalkıyor", "⏱ Time is up; the bus is leaving"], ["🤏 Bozuk para fark edildi", "🤏 Incorrect change noticed"],
+  ["🧴 Kolonya bitti — gece dolar", "🧴 Cologne is empty — refills overnight"], ["🍵 Taze çay geldi!", "🍵 Fresh tea is ready!"], ["🍵 Çayın zaten yolda", "🍵 Your tea is already on its way"], ["🍵 Çay geliyor!", "🍵 Tea is on its way!"],
+  ["WC açılması için ilk otobüsün gelmesi gerekiyor", "The first bus must arrive before the restroom opens"],
+  ["şirket kasası", "company cash"], ["Terminale dön", "Return to terminal"], ["Bu terminale geç", "Switch to this terminal"], ["Satın al ·", "Buy ·"],
+  ["KABİN SAYISI", "STALL COUNT"], ["2 kabin", "2 stalls"], ["4 kabin", "4 stalls"], ["6 kabin", "6 stalls"], ["8 kabin", "8 stalls"], ["10 kabin", "10 stalls"],
+  ["TUVALETLER", "TOILETS"], ["İlkel alaturka tuvaletler", "Basic squat toilets"], ["Modern klozetler", "Modern toilets"], ["Yarı otomatik tuvaletler", "Semi-automatic toilets"], ["Tam otomatik tuvaletler", "Fully automatic toilets"],
+  ["TEMİZLİK EKİPMANI", "CLEANING EQUIPMENT"], ["Küçük el fırçası", "Small hand brush"], ["Uzun saplı fırça", "Long-handled brush"], ["Paspas seti", "Mop kit"], ["Hortum", "Hose"],
+  ["KOLONYA", "COLOGNE"], ["Kolonya yok", "No cologne"], ["Limon kolonyası", "Lemon cologne"], ["Büyük şişe kolonya", "Large cologne bottle"], ["Lüks lavanta kolonyası", "Luxury lavender cologne"],
+  ["HESAP MAKİNESİ", "CALCULATOR"], ["Hesap makinesi yok", "No calculator"], ["Hesap makinesi", "Calculator"], ["Çay yok", "No tea"], ["Çay saati", "Tea service"],
+  ["Elle yıkama", "Manual wash"], ["Gelişmiş yıkama ekipmanı", "Advanced wash equipment"], ["İleri yıkama ekipmanı", "Professional wash equipment"], ["Yarı otomatik yıkama", "Semi-automatic wash"], ["Tam otomatik yıkama", "Fully automatic wash"],
+  ["Bolu Dağı Mola Yeri", "Bolu Mountain Rest Stop"], ["Gerede Mola Yeri", "Gerede Rest Stop"], ["Tosya Dinlenme Tesisi", "Tosya Rest Area"], ["Samsun Sahil Tesisi", "Samsun Coastal Rest Stop"],
+  ["Mola Yeri — Otobüs Mola Tesisi Simülatörü", "Layover Lane — Bus Rest Stop Simulator"], ["MOLA YERİ", "LAYOVER LANE"], ["Mola Yeri", "Layover Lane"],
+  ["Yükseltince ", "Upgrade to "] , ["yeni kabinler tertemiz açılır", "new stalls open spotless"], ["park yeri açık", "parking spaces open"],
+  ["gün", "day"], ["Dünya", "World"], ["girmek", "enter"], ["itibar", "reputation"], ["daha iyisi", "or better"], ["En az", "At least"], ["şimdi:", "current:"], ["Bir terminalinde", "At one terminal:"],
+  ["Bütün oyun sıfırlansın mı? Kayıtlı oyunun silinecek.", "Reset the entire game? Your saved progress will be deleted."],
+  ["Gün ", "Day "], ["gün tamamlandı", "day complete"], ["günlük", "daily"], ["gün sonra", "days later"], ["alaturka", "squat"], ["Yere gömülü alaturka taşlar", "Basic squat toilets"],
+  ["Modern klozetler — alaturkanın yerine, hepsi tertemiz", "Modern toilets replace the squat toilets; all start spotless"], ["Her tuvalet puanı", "Satisfaction per restroom visit"],
+  ["Ziyaret başına kir", "Dirt per visit"], ["Daha dayanıklı: ziyaret başına kir", "More durable: dirt per visit"], ["Rutin temizlik kendiliğinden — arızalar ve bakım sende", "Routine cleaning is automatic — breakdowns and maintenance are your responsibility"],
+  ["Temizlik ve gişe kendiliğinden — periyodik bakım sende", "Cleaning and checkout are automatic — periodic maintenance is your responsibility"],
+  ["Daha geniş temizlik alanı", "Wider cleaning area"], ["Gişede kolonya yok", "No cologne at the counter"], ["Gişede ", "At the counter: "], [" ml'lik şişe (gece yarısı dolar)", " ml bottle (refills at midnight)"],
+  ["Dökülen her kolonya misafir puanına +", "Each cologne application adds +"], ["Gişedeki ekranda verilecek para üstü yazar", "The counter display shows the change due"], ["Para üstünü kafandan hesaplarsın", "Calculate the change yourself"],
+  ["Gişede çay yapabilirsin — molaları daha keyifli hale getirir", "Serve tea at the counter to make breaks more pleasant"], ["Çay yapma olanaği yok", "Tea service is unavailable"],
+  ["Park etmiş otobüse dokun: uzun saplı fırçayla köpükle, hortumla durula", "Tap a parked bus: soap the windshield with the long brush, then rinse with the hose"],
+  ["Biten her yıkama", "Each completed wash earns"], [" kazandırır", ""], ["İtibar şartı yok — sadece kasa", "No reputation requirement — cash only"],
+  ["Yıkama ücreti", "Wash fee"], ["Daha geniş fırça ve hortum", "Wider brush and hose"], ["Daha güçlü köpük ve durulama — daha az geçiş", "Stronger soap and rinse — fewer passes"],
+  ["İtibar +", "Reputation +"], ["otobüs memnuniyeti +", "bus satisfaction +"], ["Yıkamanın bir kısmı kendiliğinden — arızalar ve bakım sende", "Some washing is automatic — breakdowns and maintenance are your responsibility"],
+  ["Otobüsler kendiliğinden yıkanır — periyodik bakım sende", "Buses are washed automatically — periodic maintenance is your responsibility"],
+  ["sahip", "owned"], ["satılık", "for sale"], ["kilitli", "locked"], ["İstanbul", "Istanbul"], ["İzmir", "Izmir"], ["Diyarbakır", "Diyarbakir"], ["Otomatik tuvaletler", "Automated toilets"], ["Otomatik yıkama", "Automated wash"],
+  ["ÇAY", "TEA"], ["K A R A D E N İ Z", "B L A C K  S E A"], ["A K D E N İ Z", "M E D I T E R R A N E A N"], ["E G E", "A E G E A N"],
+  ["Günlük bakım zamanı", "Routine maintenance is due"], ["GECİKTİ", "OVERDUE"], ["durum %", "condition %"], ["Önceki:", "Previous:"], ["Daha geniş", "Wider"],
+  ["yeni kabinler tertemiz açılır", "new stalls open spotless"], ["park yeri açık", "parking spaces open"],
+  ["Bugün:", "Today:"], ["Yükseltme maliyeti", "Upgrade cost"], ["Başlangıç itibarı", "Starting reputation"], ["yükseltmeler", "upgrades"],
+  ["Şartlar:", "Requirements:"], ["Fiyat:", "Price:"], [": yok", ": unavailable"], ["/sn temizlik", "/s cleaning"], ["(önceki:", "(previous:"],
+  ["Misafirler", "Guests"], ["misafirler", "guests"], ["misafirler temiz ve boş kabinleri kullanır.", "Guests use clean, unoccupied stalls."], ["Her kabinin temizliğini buradan takip et.", "Check each stall's cleanliness here."],
+  ["Hizmet verilen otobüs", "Buses served"], ["Hizmet verilen misafir", "Guests served"], ["Gelir", "Revenue"], ["Gider", "Expenses"], ["Bütün terminaller: gelir / gider", "All terminals: revenue / expenses"], ["Dökülen kolonya", "Cologne used"], ["Yıkanan ön cam", "Windshields washed"], ["Kaçırılan ", "Missed "], ["ücret", "fee"], ["Yakalanan kaçak", "Runaways caught"], ["Ort. memnuniyet", "Avg. satisfaction"], ["İtibar", "Reputation"], ["Ünün yayılıyor — yarın daha büyük otobüsler bekle.", "Your reputation is spreading — expect bigger buses tomorrow."], ["Zor bir gündü. Tuvaletleri temiz tut.", "A tough day. Keep the restrooms clean."], ["Mola Yeri'nde sakin bir gün.", "A quiet day at Layover Lane."], ["güne devam", "continue the day"],
+  ["misafirler temiz ve boş kabinleri kullanır.", "Guests use clean, unoccupied stalls."], ["Temizlik aleti", "Cleaning tool"], ["Aleti alıp kirlenen kabinlerde sürükle.", "Pick up the tool and drag it over dirty stalls."], ["İçinde misafir olan kabin temizlenemez.", "You cannot clean an occupied stall."],
+  ["Gişe", "Counter"], ["Tuvalet ücreti burada ödenir.", "The restroom fee is paid here."], ["Doğru para üstünü verip misafirleri uğurla.", "Give the correct change and send guests on their way."],
+  ["🧽 YAKALANDI — bütün tuvaletleri ovuyor", "🧽 CAUGHT — scrubbing every restroom"], ["✨ BÜTÜN TUVALETLER PIRIL PIRIL ✨", "✨ ALL RESTROOMS SPOTLESS ✨"],
+  ["🧽 Yakalandın! Tuvalet senin!", "🧽 Caught! The restroom is yours!"], ["✨ Tuvaletler pırıl pırıl!", "✨ The restrooms are sparkling clean!"],
+  ["Kabin pırıl pırıl!", "The stall is sparkling clean!"], ["Çayın zaten yolda", "Your tea is already on its way"], ["Çay geliyor!", "Tea is on its way!"], ["Çay için kasada", "Not enough cash for tea:"],
+  ["Oto yıkama yok", "No car wash"], ["ile kurulabilir", "to build it"], [" test parası", " test cash"], ["test parası", "test cash"],
+];
+ENGLISH.sort((a, b) => b[0].length - a[0].length);
+const ENGLISH_EXACT = new Map(ENGLISH);
+const ENGLISH_ASCII = ENGLISH.filter(([tr]) => !/[çğıöşüÇĞİÖŞÜİ]/.test(tr));
+function translateText(value) {
+  let text = String(value);
+  if (gameLanguage !== "en") return text;
+  if (ENGLISH_EXACT.has(text)) return ENGLISH_EXACT.get(text);
+  if (/^[-+]?\d[\d.,]*₺ eksik$/.test(text)) return text.replace(" eksik", " short");
+  if (!/[çğıöşüÇĞİÖŞÜİ]/.test(text)) {
+    if (!/[A-Za-z]/.test(text)) return text;
+    for (const [tr, en] of ENGLISH_ASCII) text = text.replaceAll(tr, en);
+    return text;
+  }
+  for (const [tr, en] of ENGLISH) text = text.replaceAll(tr, en);
+  return text;
+}
+function applyLanguageToShell() {
+  if (gameLanguage !== "en") return;
+  document.documentElement.lang = "en";
+  document.title = translateText(document.title);
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) walker.currentNode.nodeValue = translateText(walker.currentNode.nodeValue);
+  for (const el of document.body.querySelectorAll("*")) for (const attr of el.attributes)
+    if (["title", "aria-label", "placeholder"].includes(attr.name)) attr.value = translateText(attr.value);
+  const description = document.querySelector('meta[name="description"]');
+  if (description) description.content = translateText(description.content);
+}
+function startLanguageObserver() {
+  if (gameLanguage !== "en") return;
+  const translateNode = node => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const next = translateText(node.nodeValue);
+      if (next !== node.nodeValue) node.nodeValue = next;
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    for (const attr of ["title", "aria-label", "placeholder"]) {
+      const value = node.getAttribute(attr);
+      if (value != null) {
+        const next = translateText(value);
+        if (next !== value) node.setAttribute(attr, next);
+      }
+    }
+    for (const child of node.childNodes) translateNode(child);
+  };
+  const observer = new MutationObserver(records => {
+    for (const record of records) {
+      if (record.type === "characterData") translateNode(record.target);
+      else if (record.type === "attributes") translateNode(record.target);
+      else for (const node of record.addedNodes) translateNode(node);
+    }
+  });
+  observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["title", "aria-label", "placeholder"] });
+}
+const nativeFillText = CanvasRenderingContext2D.prototype.fillText;
+CanvasRenderingContext2D.prototype.fillText = function(text, ...args) {
+  return nativeFillText.call(this, translateText(text), ...args);
+};
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const rand  = (a, b) => a + Math.random() * (b - a);
 const randInt = (a, b) => Math.floor(rand(a, b + 1));
@@ -359,17 +536,10 @@ let toolInHand = null; // the hose station (COUNTER_IN.hose) whose hose is in ha
 let hoseCd = new Array(WC_STALLS).fill(0);      // last spray timestamp per stall (performance.now)
 let hoseGleam = new Array(WC_STALLS).fill(0);   // per stall: when it last hit 100 (sparkle burst)
 let lastHoseToast = 0;
-let cashFloats = [];         // queued "+₺20" / "−₺1.000" money pops
 let changeBillFlights = [];  // bills handed from the drawer to the customer
 const CHANGE_BILL_FLIGHT_DURATION = 650, CHANGE_BILL_STAGGER = 180;
 const changePaymentFlights = new WeakMap(); // final change bill arrival times
 const receiptFlightEnds = new WeakMap(); // keep paid guests at the counter until their bill reaches the drawer
-const CASH_FLOAT_DURATION = 1400, CASH_FLOAT_STAGGER = 260;
-function enqueueCashFloat(amount) {
-  const now = performance.now(), last = cashFloats[cashFloats.length - 1];
-  const t0 = Math.max(now, last ? last.t0 + CASH_FLOAT_STAGGER : now);
-  cashFloats.push({ amount, t0 });
-}
 let lastDirtyToast = 0;      // throttle for the "too filthy to use" toasts
 let lastEvadeToast = 0;      // throttle for the "trying to escape" toasts
 // The caught runaway's cleaning sequence: { pax, t, from, foam } — t counts
@@ -841,7 +1011,6 @@ function applyTransaction(kind, amount, terminalId = null, note = "", mandatory 
   if (co.ledger.length > CONFIG.economy.ledgerMax) co.ledger.splice(0, co.ledger.length - CONFIG.economy.ledgerMax);
   const t = terminalId && G.terminals[terminalId];
   if (t) { if (amount > 0) t.sim.stats.revenue += amount; else t.sim.stats.expenses -= amount; }
-  if (terminalId === G.activeTerminal) enqueueCashFloat(amount);
   return tx;
 }
 
@@ -872,7 +1041,10 @@ function wcUpgradeStatus(id, track, level) {
   if (level <= t.wc[track]) return { ok: false, reason: "Sahipsin", def, owned: true };
   if (level !== t.wc[track] + 1) return { ok: false, reason: `Önce: ${wcLevel(track, level - 1).name}`, def };
   const minServed = def.minServed || 0;
-  if (S.stats.served < minServed) return { ok: false, reason: `${minServed - S.stats.served} misafir daha hizmet gerek`, def };
+  if (S.stats.served < minServed) {
+    const remaining = minServed - S.stats.served;
+    return { ok: false, reason: gameLanguage === "en" ? `Serve ${remaining} more guests` : `${remaining} misafir daha hizmet gerek`, def };
+  }
   const cost = tierCost(id, def);
   if (G.company.cash < cost) return { ok: false, reason: `${fmtTL(cost - G.company.cash)} eksik`, def, cost };
   return { ok: true, def, cost };
@@ -889,8 +1061,10 @@ function parkingUpgradeStatus(id, spaces) {
   if (spaces <= current) return { ok: false, reason: "Sahipsin", def: next, owned: true };
   const expected = CONFIG.parkingLots.find(x => x.spaces > current);
   if (next !== expected) return fail(`Önce ${expected.spaces} park yeri açılmalı`);
-  if ((t.sim.busesServed || 0) < next.minBuses)
-    return { ok: false, reason: `${next.minBuses - (t.sim.busesServed || 0)} otobüse daha hizmet ver`, def: next };
+  if ((t.sim.busesServed || 0) < next.minBuses) {
+    const remaining = next.minBuses - (t.sim.busesServed || 0);
+    return { ok: false, reason: gameLanguage === "en" ? `Serve ${remaining} more buses` : `${remaining} otobüse daha hizmet ver`, def: next };
+  }
   const cost = tierCost(id, next);
   if (G.company.cash < cost) return { ok: false, reason: `${fmtTL(cost - G.company.cash)} eksik`, def: next, cost };
   return { ok: true, def: next, cost };
@@ -963,12 +1137,19 @@ function terminalRequirements(id) {
   const r = (termDef(id) || {}).requires || {}, own = ownedTerminals(), out = [];
   if (r.minRep != null) {
     const best = Math.max(0, ...own.map(t => t.sim.rep));
-    out.push({ text: `Bir terminalinde itibar ${r.minRep}+ (en iyisi: ${Math.round(best)})`, met: best >= r.minRep });
+    out.push({ text: gameLanguage === "en"
+      ? `Reputation ${r.minRep}+ at one terminal (best: ${Math.round(best)})`
+      : `Bir terminalinde itibar ${r.minRep}+ (en iyisi: ${Math.round(best)})`, met: best >= r.minRep });
   }
-  if (r.minOwned != null) out.push({ text: `En az ${r.minOwned} terminal (şimdi: ${own.length})`, met: own.length >= r.minOwned });
+  if (r.minOwned != null) out.push({ text: gameLanguage === "en"
+    ? `At least ${r.minOwned} ${r.minOwned === 1 ? "terminal" : "terminals"} (current: ${own.length})`
+    : `En az ${r.minOwned} terminal (şimdi: ${own.length})`, met: own.length >= r.minOwned });
   if (r.minToiletStyle != null) {
     const best = Math.max(...own.map(t => t.wc.style));
-    out.push({ text: `Bir terminalde ${wcLevel("style", r.minToiletStyle).name} ya da daha iyisi`, met: best >= r.minToiletStyle });
+    const styleName = wcLevel("style", r.minToiletStyle).name;
+    out.push({ text: gameLanguage === "en"
+      ? `At one terminal: ${translateText(styleName)} or better`
+      : `Bir terminalde ${styleName} ya da daha iyisi`, met: best >= r.minToiletStyle });
   }
   return out;
 }
@@ -979,7 +1160,7 @@ function terminalStatus(id) {
   if (!def) return fail("Böyle bir terminal yok");
   if (ownedTerminal(id)) return { ok: false, reason: "Sahipsin", def, owned: true, reqs: [] };
   const reqs = terminalRequirements(id), unmet = reqs.find(x => !x.met);
-  if (unmet) return { ok: false, reason: `Şart: ${unmet.text}`, def, reqs };
+  if (unmet) return { ok: false, reason: gameLanguage === "en" ? `Requirement: ${unmet.text}` : `Şart: ${unmet.text}`, def, reqs };
   if (G.company.cash < def.price) return { ok: false, reason: `${fmtTL(def.price - G.company.cash)} eksik`, def, reqs };
   return { ok: true, def, reqs };
 }
@@ -1015,7 +1196,6 @@ function switchTerminal(id) {
   G.activeTerminal = id;
   bindTerminal(id);
   S.view = "out"; S.washBus = null;
-  cashFloats = [];
   viewFade = 1;
   save();
   return { ok: true };
@@ -1212,22 +1392,18 @@ function rollPaxType() {
   return r < 0.37 ? "m" : r < 0.74 ? "w" : "k";
 }
 
-// How long a stall may sit empty before the next bus is pulled in ahead of
-// schedule (the backstop in stepTerminal()). At rep 0 that's 2 h — the terminal may
-// be quiet, but a bus still visits at least every other hour. At rep 100 it's
-// 30 min: a busy terminal's stalls never sit empty for longer than that.
+// How long a bay may sit empty before the vacancy backstop dispatches a bus.
+// Dispatch at 8 minutes to leave time for the incoming bus to reach the lot,
+// keeping the actual empty stretch safely below the 10-minute limit.
 function maxGap() {
-  return lerp(2, 0.5, S.rep / 100); // 2 h (rep 0) .. 30 min (rep 100)
+  return 8 / 60; // game hours
 }
 
 function busInterval() {
-  // Reputation sets bus traffic. At rep 0 the terminal is sparse: a visit
-  // every 1.2–2 in-game hours (never more than 2 h apart). At rep 100, every
-  // 9–15 minutes — far faster than the ~30-minute layover — so buses
-  // accumulate and the whole lot stays moving, several at once. Mid rep
-  // interpolates. Deliberately shorter than maxGap(): the 30-minute vacancy
-  // backstop stays a safety net, not the heartbeat.
-  return clamp(rand(0.6, 1) * lerp(2, 0.25, S.rep / 100), 0.1, 2);
+  // Keep arrivals frequent at every reputation: about 5–8 game minutes at
+  // rep 0, falling to about 2–5 minutes at rep 100. The vacancy backstop is
+  // still there in case a scheduled arrival is delayed or blocked.
+  return lerp(rand(0.08, 0.13), rand(0.04, 0.09), S.rep / 100);
 }
 
 // opening: the new game's first bus appears on the lane just short of the
@@ -1261,7 +1437,7 @@ function spawnBus(reserved = null, opening = false) {
     pax,
   };
   buses.push(b);
-  toast(`🚌 ${DEST_A}'dan ${n} yolcu`, "");
+  toast(gameLanguage === "en" ? `🚌 ${DEST_A} · ${n} passengers` : `🚌 ${DEST_A}'dan ${n} yolcu`, "");
 }
 
 // A brand-new company's opening bus, once — the flag is saved, so a reload never replays it.
@@ -1286,7 +1462,7 @@ function makePax() {
     stall: -1,               // WC stall slot pinned for the current serveT visit (-1 = none)
     patience: 0, waitReal: 0, idleT: 0,
     sat: null, refuseR: false, refuseT: false, wcUsed: false, // this visit was a toilet visit (rep weighs it 2×)
-    bill: null, owed: 0, changeGiven: 0, changeNotes: [],  // the ₺20 payment ritual (changeNotes = each bill handed back)
+    bill: null, owed: 0, changeGiven: 0, changeNotes: [], receivedChangeNotes: [],  // change bills handed back and the ones that have arrived
     unpaid: false,   // used the WC and never paid the ₺20 (any reason)
     runaway: false,  // skipped the counter and is running for the exit — catchable
                      // only while still inside the WC (state "leaveC")
@@ -1459,29 +1635,19 @@ function beginEnter(b, slot) {
 function planStopVisitors(b, resuming = false) {
   const candidates = b.pax.filter(p => p.state === "bus");
   for (const p of b.pax) { p.disembark = false; p.forceToilet = false; }
-  // About 30% leave in the first staggered wave for varied activities. Select
-  // additional riders so at least half the entire bus gets a WC visit.
+  // Half the passengers step off as soon as the bus parks. Randomize their
+  // order and leave 0.5–3 real seconds between each passenger.
   for (let i = candidates.length - 1; i > 0; i--) {
     const j = randInt(0, i); [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
   }
-  const toiletCount = Math.min(candidates.length, Math.ceil(b.pax.length * 0.5));
-  const activityCount = Math.min(candidates.length, Math.max(1, Math.round(b.pax.length * 0.30)));
-  const wcInFirstWave = Math.min(toiletCount, Math.ceil(activityCount / 2));
-  const firstWave = candidates.slice(0, activityCount);
-  const extraWc = candidates.slice(activityCount, activityCount + toiletCount - wcInFirstWave);
+  const count = Math.min(candidates.length, Math.ceil(b.pax.length * 0.5));
   const now = resuming ? G.clock.time : b.stopStart;
-  const duration = resuming ? Math.max(0, b.stopEnd - now) : b.stopEnd - b.stopStart;
-  const firstWindow = resuming ? Math.min(duration * 0.2, 0.06) : duration * 0.25;
-  const secondWindow = resuming ? Math.min(duration * 0.2, 0.05) : duration * 0.17;
-  firstWave.forEach((p, i) => {
-    p.disembark = true;
-    p.forceToilet = i < wcInFirstWave;
-    p.offAt = now + firstWindow * (i + 1) / (firstWave.length + 1);
-  });
-  extraWc.forEach((p, i) => {
+  let offAt = now;
+  candidates.slice(0, count).forEach(p => {
     p.disembark = true;
     p.forceToilet = true;
-    p.offAt = now + firstWindow + secondWindow * (i + 1) / (extraWc.length + 1);
+    offAt += rand(0.5, 3) / SECONDS_PER_HOUR;
+    p.offAt = offAt;
   });
 }
 
@@ -1507,9 +1673,8 @@ function finishEnter(b) {
   if (!G.flags.firstBusParked) { G.flags.firstBusParked = true; save(); }
 }
 
-// At each stop about 30% of passengers leave in a staggered first wave for
-// the WC, wandering, or the Lokanta if it is open. More riders leave later so
-// at least half of every bus is directed to the WC.
+// At each stop, half the passengers disembark in a quick staggered sequence
+// and are directed to the WC.
 function guaranteeWc(b) {
   const claim = b.pax.filter(p => p.disembark && p.forceToilet);
   if (!claim.length) return;
@@ -1535,7 +1700,7 @@ function endStop(b) {
   b.mv = { s: 0, sx: b.cx, sy: b.cy };
   b.v = 0; b.rev = true;
   for (const p of b.pax) {
-    if (p.state === "serveR" || p.state === "serveT" || p.state === "scrubC") continue; // let them finish, they'll board after
+    if (p.state === "serveR" || p.state === "serveT" || p.state === "scrubC" || p.state === "selfDripC") continue; // let them finish, they'll board after
     if (p.state === "queueC" || p.state === "payC" || p.state === "doneC" || p.state === "dripC" ||
         p.state === "queueC2" || p.state === "payC2") continue; // still at the counter — they'll finish & board after
     if (p.state === "leaveC") { p.x = 852; p.y = 169; p.runaway = false; goDoor(p, b); continue; } // at the exit door — out & sprint for the bus
@@ -1574,9 +1739,9 @@ function finishExit(b) {
 // promised; if that bay fills first, it falls back to normal first-fit.
 // `slack` is how far past a turn-in point still counts (a coarse step at a
 // high speed tier can jump far past it in one go).
-function baySlotFor(b, slack) {
+function baySlotFor(b, slack, cx = b.cx) {
   const free = i => !buses.some(o => o !== b && (o.state === "stop" || o.state === "enter") && o.slot === i);
-  const ok = i => free(i) && b.cx <= enterGeom(b, i).x0 + slack;
+  const ok = i => free(i) && cx <= enterGeom(b, i).x0 + slack;
   if (b.forcedSlot != null && ok(b.forcedSlot)) return b.forcedSlot; // != null: plain schedule buses carry null, and null >= 0 is true in JS
   for (const i of activeParkingSlots()) if (ok(i)) return i;
   return -1;
@@ -2984,7 +3149,6 @@ function drawWashView() {
   ctx.font = "11px system-ui, sans-serif";
   ctx.fillStyle = "rgba(255, 211, 107, 0.9)";
   ctx.fillText(`${washDef().name} · ücret ${fmtTL(washDef().fee)}`, P.x + 16, P.y + 88, P.w - 32);
-  drawCashFloats(W / 2, 120);
 
   // sparkles over a finished windshield
   if (w.done) {
@@ -3037,12 +3201,13 @@ function enterCounter(p) {
   p.owed = p.bill - CONFIG.economy.toiletFee;
   p.changeGiven = 0;
   p.changeNotes = [];
+  p.receivedChangeNotes = [];
   p.cologne = false;
   p.colognePrev = null;
   p.payT = 0; p.doneT = 0; p.dripT = 0;
   p.feePaid = false; // this visit's fee is booked once, in finalizePayment
-  // An exact ₺20 bill needs no change, no cologne, no clicks: this guest
-  // joins the separate exact-pay line (queue2) and settles on their own.
+  // An exact 20₺ bill needs no change or player input. Eligible guests may
+  // choose to splash themselves with cologne after they finish paying.
   p.auto = p.owed <= 0;
   const q = p.auto ? facilities.C.queue2 : facilities.C.queue;
   p.patience = 12 + 5 * q.length; // further back = more patience
@@ -3057,9 +3222,9 @@ function stepCounter(timeDt) {
 }
 
 // One payment line at the counter. `auto` is the separate exact-₺20 line:
-// it needs no player at all — no change to hand back, no cologne to offer,
-// and the front guest settles on their own at their own spot (updatePax
-// counts payT there and finalizes). Every other rule is shared: the line
+// it needs no player at all: there is no change to hand back, eligible guests may
+// use cologne themselves, and the front guest settles at their own spot. updatePax
+// counts payT there and finalizes. Every other rule is shared: the line
 // loses 1/s of patience (0.5/s once settled at the counter), and a guest
 // mid-transaction (payC / payC2) has handed over their bill, so patience is
 // frozen while they settle.
@@ -3177,6 +3342,14 @@ function finalizePayment(p) {
     if (i >= 0) { q.splice(i, 1); break; }
   }
   collectPayment(p);
+  if (p.auto && hasCologne() && S.bottle > 0 && Math.random() < 0.6) {
+    p.cologne = true;
+    p.state = "selfDripC";
+    p.dripT = 0.8;
+    S.bottle = Math.max(0, S.bottle - rand(8, 14));
+    S.stats.cologne++;
+    return; // self-splash after payment, then head out
+  }
   // Teach the crisp-change rule: the same total in more bills rates worse.
   if (p.owed > 0 && p.changeGiven === p.owed &&
       (p.changeNotes || []).length > minNotes(p.owed))
@@ -3224,23 +3397,21 @@ function animateChangeBill(d, guest) {
   const tray = COUNTER_IN.chips.find(c => c.d === d);
   if (!tray) return;
   const source = deskRect({ x: tray.x + tray.w / 2, y: tray.y + (tray.h + 20) / 2, w: 0, h: 0 }, "drawer");
-  const k = wcPaxK(guest.y, guest.x) * ((PAX_TYPES[guest.type] || PAX_TYPES.m).scale);
-  const billY = guest.y - (deskK > 1 ? 9.5 : 6.5) * k;
+  const from = { x: guest.x - COUNTER_BILL_OFFSET, y: counterTopBillY() };
   const now = performance.now(), previous = changeBillFlights[changeBillFlights.length - 1];
   const t0 = Math.max(now, previous ? previous.t0 + CHANGE_BILL_STAGGER : now);
-  changeBillFlights.push({ d, from: { x: source.x, y: source.y }, to: { x: guest.x + 5 * k, y: billY }, fromU: 4.2, toU: 2.5, t0 });
+  changeBillFlights.push({ d, guest, from: { x: source.x, y: source.y }, to: from, fromU: 4.2, toU: COUNTER_BILL_U, angleFrom: Math.PI / 2, angleTo: Math.PI / 2, t0 });
   return t0 + CHANGE_BILL_FLIGHT_DURATION;
 }
 
 function animateReceivedBill(guest) {
   if (guest.bill == null) return null;
   const tray = COUNTER_IN.chips.find(c => c.d === guest.bill) || COUNTER_IN.chips[COUNTER_IN.chips.length - 1];
-  const k = wcPaxK(guest.y, guest.x) * ((PAX_TYPES[guest.type] || PAX_TYPES.m).scale);
-  const from = { x: guest.x + 5 * k, y: guest.y - (deskK > 1 ? 9.5 : 6.5) * k };
+  const from = { x: guest.auto ? counterExactBillX() : guest.x + COUNTER_BILL_OFFSET, y: counterTopBillY() };
   const to = deskRect({ x: tray.x + tray.w / 2, y: tray.y + (tray.h + 20) / 2, w: 0, h: 0 }, "drawer");
   const now = performance.now(), previous = changeBillFlights[changeBillFlights.length - 1];
   const t0 = Math.max(now, previous ? previous.t0 + CHANGE_BILL_STAGGER : now);
-  changeBillFlights.push({ d: guest.bill, from, to: { x: to.x, y: to.y }, fromU: 0.6 * k, toU: 1.8, t0 });
+  changeBillFlights.push({ d: guest.bill, from, to: { x: to.x, y: to.y }, fromU: COUNTER_BILL_U, toU: 4.2, angleFrom: Math.PI / 2, angleTo: Math.PI / 2, t0 });
   return t0 + CHANGE_BILL_FLIGHT_DURATION;
 }
 
@@ -3249,7 +3420,6 @@ function giveChange(d) {
   const front = facilities.C.queue[0];
   if (!front || front.state !== "payC" || !atPaySpot(front) || front.changeGiven >= front.owed) return;
   const flightEnd = animateChangeBill(d, front);
-  enqueueCashFloat(-d);
   if (!Array.isArray(front.changeNotes)) front.changeNotes = []; // saves from before note tracking
   front.changeNotes.push(d);
   front.changeGiven += d;
@@ -3406,26 +3576,22 @@ function stepTerminal(dt, timeDt) {
   const capacity = parkingSpaces();
   const parked = buses.filter(b => b.state === "stop" || b.state === "enter").length;
   const inbound = buses.some(b => b.state === "drive" && !b.stoppedOnce && b.cx < 700);
-  // Two triggers: the rep-scaled schedule, and a vacancy backstop — a stall
-  // that has sat empty longer than maxGap() pulls the next bus in right now.
-  // At rep 100 that's 30 min (a busy terminal's stalls stay filled); at rep 0
-  // the 2 h window stays looser than the 1.2–2 h schedule, so a quiet
-  // terminal keeps breathing (visits at least every other hour).
-  let vacantTooLong = -1; // stall that has been vacant longest, past its maxGap() deadline
+  // A vacant bay dispatches a replacement after 8 game minutes at the latest,
+  // leaving time for it to arrive before the 10-minute empty-lot cap.
+  let vacantTooLong = -1; // bay that has been vacant longest, past its backstop
   if (S.slotVacantSince) for (const i of activeParkingSlots()) {
     const v = S.slotVacantSince[i];
     if (v == null || !reached(v + maxGap())) continue;
-    // (G.clock.time - v) wraps midnight safely: a stall can't sit vacant >12 h (the
-    // backstop fires at <= 2 h), so the +24 modulo is the true elapsed time.
+    // (G.clock.time - v) wraps midnight safely: a bay can't sit vacant >12 h
+    // (the backstop fires at 8 minutes), so the +24 modulo is the true elapsed time.
     if (vacantTooLong < 0 ||
         (G.clock.time - v + 24) % 24 < (G.clock.time - S.slotVacantSince[vacantTooLong] + 24) % 24) vacantTooLong = i;
   }
   openingBus();
   const scheduleDue = reached(S.nextBusAt);
   if ((scheduleDue || vacantTooLong >= 0) && parked < capacity && !inbound && buses.length < capacity) {
-    // A backstop bus is promised the stall that went quiet longest, so the
-    // 30-minute guarantee lands on the right stall (baySlotFor honors
-    // forcedSlot); a plain schedule bus takes the first free stall it reaches.
+    // The 8-minute backstop reserves the bay that went quiet longest (baySlotFor
+    // honors forcedSlot); a scheduled bus takes the first free stall it reaches.
     spawnBus(vacantTooLong >= 0 ? vacantTooLong : null);
     S.nextBusAt = G.clock.time + busInterval();
   }
@@ -3443,15 +3609,17 @@ function stepTerminal(dt, timeDt) {
         b.v = b.v < vT ? Math.min(vT, b.v + BUS_ACC * dt) : Math.max(vT, b.v - 3 * BUS_BRAKE * dt);
       }
       const step = b.v * dt;
-      b.cx += step;
+      const si = !b.stoppedOnce ? baySlotFor(b, step + 2, b.cx + step) : -1;
+      const entry = si >= 0 ? enterGeom(b, si) : null;
+      const trafficWait = !!entry && b.cx + step >= entry.x0 && carsBlockBusCrossing(entry.x0, entry.tx, b.len);
+      if (trafficWait) {
+        b.cx = Math.min(b.cx, entry.x0 - 1);
+        b.v = 0; b.brake = true;
+      } else b.cx += step;
       b.cy = lerp(b.cy, LANE_CY, Math.min(1, dt * 3));
       b.ang = lerp(b.ang, 0, Math.min(1, dt * 5));
-      // Entry is purely geometric (baySlotFor: the bus has reached a free
-      // bay's turn-in point) — no time gate, so entry works at any time scale.
-      if (!b.stoppedOnce) {
-        const si = baySlotFor(b, step + 2);
-        if (si >= 0 && b.cx >= enterGeom(b, si).x0) beginEnter(b, si);
-      }
+      // Yield to cars already crossing the driveway, then commit to the turn.
+      if (!b.stoppedOnce && !trafficWait && entry && b.cx >= entry.x0) beginEnter(b, si);
       // Only cull buses still driving: a coarse step (a 100x/200x frame on a
       // busy tab moves a bus 185·10 = 1850px) can carry an inbound bus past
       // every bay threshold AND the removal line in the same step — the
@@ -3526,9 +3694,14 @@ function stepTerminal(dt, timeDt) {
       if (done) finishEnter(b);
     } else { // "exit" — backing out of the stall onto the lane
       const g = exitGeom(b);
-      const done = moveAlong(b, dt, g.L, BUS_REV_V, 30, 45);
-      Object.assign(b, exitPose(g, b.mv.s));
-      if (done) finishExit(b);
+      const crossingX = g.sx - g.R;
+      if ((b.mv.s || 0) <= 0.001 && carsBlockBusCrossing(crossingX, g.sx, b.len)) {
+        b.v = 0; b.brake = true; // wait until the road crossing clears
+      } else {
+        const done = moveAlong(b, dt, g.L, BUS_REV_V, 30, 45);
+        Object.assign(b, exitPose(g, b.mv.s));
+        if (done) finishExit(b);
+      }
     }
     // passengers
     for (const p of b.pax) updatePax(p, b, dt, timeDt);
@@ -3655,6 +3828,11 @@ function updatePax(p, bus, dt, timeDt = dt) {
     if (Math.hypot(p.x - sx, p.y - sy) < 8) p.inStall = true;
     return;
   }
+  if (p.state === "selfDripC") {
+    p.dripT -= timeDt;
+    if (p.dripT <= 0) finishVisit(p, finalSat(p), true);
+    return;
+  }
   if (p.state === "queueC2" || p.state === "payC2") {
     // The exact-₺20 line — the player never touches it: its own queue slots,
     // its own pay spot, its own payment (see enterCounter / stepCQueue).
@@ -3746,16 +3924,53 @@ function riseNeeds(p, timeDt) {
 
 /* ------------------------------- Cars ------------------------------- */
 let carTimer = 3;
+const ROAD_CAR_LENGTH = 52, ROAD_CAR_GAP = 18, ROAD_CROSS_BUFFER = 28;
+function carsBlockBusCrossing(left, right, busLen) {
+  const leftClear = left - busLen / 2 - ROAD_CROSS_BUFFER - ROAD_CAR_LENGTH;
+  const rightClear = right + busLen / 2 + ROAD_CROSS_BUFFER;
+  return cars.some(c => c.x <= rightClear && c.x + ROAD_CAR_LENGTH >= leftClear);
+}
+function activeBusRoadCrossings() {
+  const crossings = [];
+  for (const b of buses) {
+    if (b.state === "enter") {
+      const g = enterGeom(b, b.slot);
+      crossings.push({ b, left: g.x0, right: g.tx, waitingExit: false, queueTail: null });
+    } else if (b.state === "exit") {
+      const g = exitGeom(b);
+      crossings.push({ b, left: g.sx - g.R, right: g.sx, waitingExit: (b.mv.s || 0) <= 0.001, queueTail: null });
+    }
+  }
+  return crossings;
+}
 function updateCars(dt) {
   carTimer -= dt;
   if (carTimer <= 0) {
     carTimer = rand(4, 9);
     cars.push({ x: Wdyn - offX + 40, y: 462, hue: randInt(0, 359), v: -rand(120, 190) });
   }
-  for (let i = cars.length - 1; i >= 0; i--) {
-    cars[i].x += cars[i].v * dt;
-    if (cars[i].x < -offX - 80) cars.splice(i, 1);
+  const crossings = activeBusRoadCrossings();
+  // Process the lead car first so every queued follower preserves a safe gap.
+  const orderedCars = [...cars].sort((a, b) => a.x - b.x);
+  for (const c of orderedCars) {
+    let nextX = c.x + c.v * dt, hold = false;
+    for (const crossing of crossings) {
+      const leftClear = crossing.left - crossing.b.len / 2 - ROAD_CROSS_BUFFER - ROAD_CAR_LENGTH;
+      const rightClear = crossing.right + crossing.b.len / 2 + ROAD_CROSS_BUFFER;
+      if (c.x > rightClear) {
+        const stopX = crossing.queueTail == null ? rightClear + 1 : crossing.queueTail;
+        nextX = Math.max(stopX, nextX);
+        crossing.queueTail = nextX + ROAD_CAR_LENGTH + ROAD_CAR_GAP;
+      } else if (c.x + ROAD_CAR_LENGTH >= leftClear) {
+        if (crossing.waitingExit) {
+          // Let a car already crossing clear first; queue the next car behind it.
+          crossing.queueTail = Math.max(crossing.queueTail || 0, c.x + ROAD_CAR_LENGTH + ROAD_CAR_GAP);
+        } else hold = true;
+      }
+    }
+    c.x = hold ? c.x : nextX;
   }
+  for (let i = cars.length - 1; i >= 0; i--) if (cars[i].x < -offX - 80) cars.splice(i, 1);
 }
 
 /* ------------------------------ Rendering --------------------------- */
@@ -3799,6 +4014,8 @@ function resize() {
   COUNTER_IN.exit.x = W + offX - COUNTER_IN.exit.w - 18;
   COUNTER_IN.exit.y = H + offY - COUNTER_IN.exit.h - 18;
   deskK = a > ULTRA_ASPECT ? DESK_ULTRA_K : 1;
+  PAY_SPOT.y = counterGuestStandY();
+  PAY_SPOT2.y = PAY_SPOT.y;
   if (Math.abs(Wdyn - lastWdyn) + Math.abs(Hdyn - lastHdyn) > 2) {
     seedStars();
     lastWdyn = Wdyn; lastHdyn = Hdyn;
@@ -4181,7 +4398,6 @@ function drawOutdoor() {
   }
 
   drawWcPrompt(); // after the overlay — the nudge stays bright at night
-  drawCashFloats(851, 84);
   drawWashHint(); // ditto — a dusty parked bus hints at the wash
 }
 
@@ -4724,11 +4940,11 @@ function shade(hex, f) {                                            // f<0 darke
 
 // A landscape banknote held in a guest's hand, centered on (cx, cy) and u px
 // per unit (the note is 16u x 8u) — a mini of the drawer's drawNote look.
-function drawHeldBill(cx, cy, u, color, d) {
+function drawHeldBill(cx, cy, u, color, d, rotation = 0) {
   const w = 16 * u, h = 8 * u, x = -w / 2, y = -h / 2;
   ctx.save();
   ctx.translate(cx, cy);
-  ctx.rotate(-0.18);
+  ctx.rotate(rotation);
   ctx.fillStyle = "rgba(0, 0, 0, 0.3)";
   rr(ctx, x + 0.4 * u, y + 0.5 * u, w, h, 0.5 * u); ctx.fill();
   ctx.fillStyle = shade(color, 0.4);                                // paper + pale margin
@@ -4812,12 +5028,14 @@ function drawCounterIn() {
   ctx.fillStyle = "rgba(0, 0, 0, 0.3)";
   ctx.fillRect(L, d.y - 3, CW, 1);
   ctx.fillRect(L, top - 1, CW, 1);
-  for (const [x, dir] of [[L, 1], [R, -1]]) {                      // the counter's cut ends
+  drawCounterTopArea(); // foreground occlusion keeps guests behind the counter edge
+  const counterBackY = d.y - 11 - COUNTER_TOP_HEIGHT * deskK;
+  for (const [x, dir] of [[L, 1], [R, -1]]) {                      // continuous cut ends from tabletop to front
     const eg = ctx.createLinearGradient(x, 0, x + dir * 10, 0);
     eg.addColorStop(0, "rgba(0, 0, 0, 0.55)");
     eg.addColorStop(1, "rgba(0, 0, 0, 0)");
     ctx.fillStyle = eg;
-    ctx.fillRect(Math.min(x, x + dir * 10), d.y - 12, 10, B - d.y + 12);
+    ctx.fillRect(Math.min(x, x + dir * 10), counterBackY, 10, B - counterBackY);
   }
   // the open cash drawer
   function drawNote(x, y, w, h, color, d) {
@@ -4905,6 +5123,7 @@ function drawCounterIn() {
     ctx.textAlign = "left";
   }
   withDesk("drawer", drawDrawer);
+  withDesk("coins", drawCounterCoins); // loose change is always on the counter, independent of tea service
   // calculator, cologne
   function drawCalculator() {
     softShadow(218, 396, 66, 68, 6, 8, 4);                          // calculator
@@ -5083,7 +5302,7 @@ function drawCoinStack(x, by, coins) {
   ctx.beginPath(); ctx.ellipse(x + 2, by + 1.5, coins[0].rx + 3, 4.5, 0, 0, 7); ctx.fill();
   coins.forEach((c, i) => {
     const y = by - i * t - t, ry = c.rx * 0.38;
-    const jx = x + ((i * 7) % 3 - 1) * 0.8;        // a slightly uneven pile
+    const jx = x;                                      // coins stack straight, without an uneven offset
     ctx.fillStyle = shade(c.rim, -0.4);            // milled edge
     ctx.beginPath(); ctx.ellipse(jx, y + t, c.rx, ry, 0, 0, Math.PI); ctx.fill();
     ctx.fillRect(jx - c.rx, y, c.rx * 2, t);
@@ -5101,13 +5320,16 @@ function drawCoinStack(x, by, coins) {
   });
 }
 
+function drawCounterCoins() {
+  // Loose change sits in its own spot, separate from the tea glass and intercom.
+  drawCoinStack(733, 331, [COIN_SILVER(9.5), COIN_BRASS(9), COIN_SILVER(9), COIN_1TL]);
+  drawCoinStack(750, 336, [COIN_SILVER(9.5), COIN_SILVER(9), COIN_BRASS(8.5), COIN_SILVER(9), COIN_BRASS(9), COIN_1TL]);
+  drawCoinStack(767, 332, [COIN_BRASS(8), COIN_BRASS(7.5)]);
+}
+
 function drawTea() {
   const cx = 690, by = 470;                      // glass center x, glass bottom y
   const f = clamp(S.tea, 0, 1);
-  // loose change on the counter behind the glass
-  drawCoinStack(cx - 22, by - 84, [COIN_SILVER(9.5), COIN_BRASS(9), COIN_SILVER(9), COIN_1TL]);
-  drawCoinStack(cx - 6, by - 78, [COIN_SILVER(9.5), COIN_SILVER(9), COIN_BRASS(8.5), COIN_SILVER(9), COIN_BRASS(9), COIN_1TL]);
-  drawCoinStack(cx + 20, by - 82, [COIN_BRASS(8), COIN_BRASS(7.5)]);
   // saucer
   ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
   ctx.beginPath(); ctx.ellipse(cx, by + 4, 30, 8, 0, 0, 7); ctx.fill();
@@ -5398,10 +5620,11 @@ function drawHoseStation(st) {
 // in over the last FRONT_R px of their walk so nobody pops in size.
 const FRONT_BOOST = 0.6, FRONT_R = 25;
 function wcPaxK(y, x) {
-  const y0 = stallSy(224), t = (y - y0) / (PAY_SPOT.y - y0);
+  const y0 = stallSy(224), frontY = counterFrontDepthY();
+  const t = (y - y0) / (frontY - y0);
   const k = clamp(2.5 + 2.5 * t, 2.5, 6);
   if (x == null) return k;
-  const d = Math.min(Math.hypot(x - PAY_SPOT.x, y - PAY_SPOT.y), Math.hypot(x - PAY_SPOT2.x, y - PAY_SPOT2.y));
+  const d = Math.min(Math.hypot(x - PAY_SPOT.x, y - frontY), Math.hypot(x - PAY_SPOT2.x, y - frontY));
   return k * (1 + FRONT_BOOST * Math.max(0, 1 - d / FRONT_R));
 }
 
@@ -5891,7 +6114,7 @@ function drawWCInterior() {
   // tiles share the guests' depth scale (wcPaxK): 48 px at the counter, shrinking
   // linearly toward a horizon above the stall row where the scale would hit 0
   {
-    const TILE = 48, y0 = stallSy(224), yRef = PAY_SPOT.y;
+    const TILE = 48, y0 = stallSy(224), yRef = counterFrontDepthY();
     const yh = 2 * y0 - yRef, dRef = yRef - yh, vx = Wdyn / 2 - offX;
     const yTop = yWall, yBot = H + offY, r = 1 + TILE / dRef;
     ctx.beginPath();
@@ -5920,7 +6143,7 @@ function drawWCInterior() {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText("WC", 364, 133.5);
-  ctx.fillText("20 ₺", 364, 152.5);
+  ctx.fillText("20₺", 364, 152.5);
   for (let i = 0; i < WC_STALLS; i++) {
     const bx = stallLx(i);
     const s = facilities.T.spots[i];
@@ -6054,7 +6277,7 @@ function drawWCInterior() {
   }
   // the guests — scaled by depth (wcPaxK)
   // (whoever's turn it is at the counter is held back and drawn on top of everyone)
-  const atCounter = p => p.state === "payC" || p.state === "doneC" || p.state === "dripC" || p.state === "payC2";
+  const atCounter = p => p.state === "payC" || p.state === "doneC" || p.state === "dripC" || p.state === "selfDripC" || p.state === "payC2";
   for (const b of buses) for (const p of b.pax)
     if (isIndoorPax(p) && p.state !== "scrubC" && !atCounter(p)) drawPax(p, wcPaxK(p.y, p.x));
   // the stall doors close while someone is inside — drawn AFTER the guests so
@@ -6106,12 +6329,15 @@ function drawWCInterior() {
   drawCounterInPrompts();
   // draw bills on top of the counter
   for (const b of buses) for (const p of b.pax) {
-    if (atCounter(p) && holdsBill(p) && !receiptFlightEnds.has(p)) {
-      const k = wcPaxK(p.y, p.x);
-      const x = p.x, y = p.y;
-      const s = k * ((PAX_TYPES[p.type] || PAX_TYPES.m).scale);
-      const billY = S.view === "wc" && deskK > 1 ? y - 9.5 * s : y - 6.5 * s;
-      drawHeldBill(x + 5 * s, billY, 0.6 * s, BILL_COLORS[p.bill] || "#c9c2a8", p.bill);
+    if (atCounter(p) && !receiptFlightEnds.has(p)) {
+      const x = p.x;
+      if (holdsBill(p) || p.state === "dripC")
+        drawHeldBill(p.auto ? counterExactBillX() : x + COUNTER_BILL_OFFSET, counterTopBillY(), COUNTER_BILL_U, BILL_COLORS[p.bill] || "#c9c2a8", p.bill, Math.PI / 2);
+      // Returned change is stacked on the counter top beside the guest's bill.
+      if (["payC", "doneC", "dripC"].includes(p.state)) {
+        (p.receivedChangeNotes || []).forEach((d, i) =>
+          drawHeldBill(x - COUNTER_BILL_OFFSET, counterTopBillY() - i * 2, COUNTER_BILL_U, BILL_COLORS[d] || "#c9c2a8", d, Math.PI / 2));
+      }
     }
   }
   drawChangeBillFlights();
@@ -6191,7 +6417,6 @@ function drawWCInterior() {
     ctx.fillText("✨", stallCx(i), stallSy(100));
     ctx.textAlign = "left";
   }
-  drawCashFloats(PAY_SPOT.x + 90, 330);
   // exit door button + waiting-for-toilet queue badge — drawn last so nothing covers it
   drawWcExitDoor();
 }
@@ -6199,6 +6424,14 @@ function drawWCInterior() {
 // "+₺20" / "−₺1.000" rising from (x, y) for each recent booking at this terminal.
 function drawChangeBillFlights() {
   const now = performance.now(), duration = CHANGE_BILL_FLIGHT_DURATION;
+  for (const f of changeBillFlights) {
+    if (f.landed || now - f.t0 < duration) continue;
+    f.landed = true;
+    if (f.guest) {
+      if (!Array.isArray(f.guest.receivedChangeNotes)) f.guest.receivedChangeNotes = [];
+      f.guest.receivedChangeNotes.push(f.d);
+    }
+  }
   changeBillFlights = changeBillFlights.filter(f => now - f.t0 < duration);
   for (const f of changeBillFlights) {
     const age = now - f.t0;
@@ -6210,29 +6443,10 @@ function drawChangeBillFlights() {
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.translate(x, y);
-    ctx.rotate(lerp(-0.3, -0.12, ease));
+    ctx.rotate(lerp(f.angleFrom, f.angleTo, ease));
     drawHeldBill(0, 0, u, BILL_COLORS[f.d] || "#c9c2a8", f.d);
     ctx.restore();
   }
-}
-
-function drawCashFloats(x, y) {
-  const now = performance.now();
-  cashFloats = cashFloats.filter(f => now - f.t0 < CASH_FLOAT_DURATION);
-  ctx.save();
-  ctx.font = "bold 13px system-ui, sans-serif";
-  ctx.textAlign = "center";
-  ctx.shadowColor = "rgba(0,0,0,0.8)";
-  ctx.shadowBlur = 3;
-  cashFloats.forEach((f, k) => {
-    if (now < f.t0) return;
-    const u = (now - f.t0) / CASH_FLOAT_DURATION;
-    const stack = (cashFloats.length - 1 - k) * 22;
-    ctx.globalAlpha = 1 - u * u;
-    ctx.fillStyle = f.amount >= 0 ? "#7dffa8" : "#ff8a8a";
-    ctx.fillText(`${f.amount >= 0 ? "+" : "−"}${fmtTL(Math.abs(f.amount))}`, x, y - u * 34 - stack);
-  });
-  ctx.restore();
 }
 
 // Outdoor nudge for the WC building: red badge + pulsing hint.
@@ -6592,7 +6806,7 @@ function drawCar(c) {
 // Per-guest walk-cycle state, keyed by the live pax object so it never lands in saves.
 const paxAnim = new WeakMap();
 // states where the guest is dealing with you face to face, whatever way they last walked
-const PAX_FACE_STATES = new Set(["serveR", "payC", "doneC", "payC2", "dripC"]);
+const PAX_FACE_STATES = new Set(["serveR", "payC", "doneC", "payC2", "dripC", "selfDripC"]);
 // queued guests turn to face you once they've stopped walking to their slot
 const PAX_LINE_STATES = new Set(["queueC", "queueC2", "waitT", "waitR"]);
 function paxGait(p) {
@@ -6683,7 +6897,7 @@ function drawPax(p, k = 1) {
   let reach = null;
   if (p.state === "serveR") reach = { x: x + 5.2 * s, y: y - 8 * s };
   else if (holdsBill(p)) reach = { x: x + 4.6 * s, y: y - 7.2 * s };
-  else if (p.state === "dripC") reach = { x: x + 3.8 * s, y: y - 15 * s };
+  else if (p.state === "dripC" || p.state === "selfDripC") reach = { x: x + 3.8 * s, y: y - 15 * s };
   const armW = (isW ? 1.6 : 1.9) * s;
   const arm = (i, back) => {
     const ax = x + (side ? -0.3 : i * 3.3) * s, ay = shY;
@@ -6845,7 +7059,7 @@ function drawPax(p, k = 1) {
     ctx.fillStyle = "#ffd36b";
     ctx.beginPath(); ctx.arc(x + 6 * s, y - 8 * s, 2.5 * s, 0, 7); ctx.fill();
   }
-  if (p.state === "dripC") {
+  if (p.state === "dripC" || p.state === "selfDripC") {
     const f = clamp(1 - p.dripT / 0.8, 0, 1);
     ctx.fillStyle = "rgba(200, 130, 40, 0.9)";
     ctx.fillRect(x + 2.9 * s, y - 11 * s + f * 13 * s, 1.6 * s, 2.6 * s); // falling drop
@@ -6923,7 +7137,7 @@ function setCashChip(text, value) {
     d.className = "d";
     inner.textContent = c;
     d.append(inner);
-    const o = prev[prev.length - next.length + i]; // compare right-aligned so the ones stay put
+    const o = prev[prev.length - next.length + i];
     if (prev.length && o !== c && /\d/.test(c + (o || ""))) {
       d.classList.add(dir);
       inner.dataset.old = o || "";
@@ -6939,7 +7153,7 @@ function updateHUD() {
   $("repFill").style.width = S.rep + "%";
   setText("repNum", Math.round(S.rep));
   const attention = ownedTerminals().some(needsAttention);
-  setCashChip((attention ? "🔧 " : "") + fmtTL(G.company.cash), G.company.cash);
+  setCashChip((attention ? "🔧 " : "") + fmtCashChip(G.company.cash), G.company.cash);
   $("cashChip").classList.toggle("warn", attention);
   $("cashChip").classList.toggle("neg", G.company.cash < 0);
   setText("statCash", "💰 " + fmtTL(G.company.cash));
@@ -7155,6 +7369,27 @@ function showIntro(first) {
   const touch = coarseQ; // phones & tablets — say "tap" where the desktop says "click"
   const act = touch ? "dokun" : "tıkla";
   const tool = cleaningTool();
+  if (gameLanguage === "en") {
+    $("modalTitle").textContent = first ? "👋 Welcome to Layover Lane" : "How to play";
+    $("modalBox").classList.add("tall");
+    const action = touch ? "tap" : "click";
+    $("modalBody").innerHTML = `
+      <div class="big">You run a rest stop trusted by tour buses traveling between <strong>${DEST_A}</strong> and <strong>${DEST_B}</strong>.</div>
+      <p>🚌 Buses pull into your lot for a break. Passengers get hungry, thirsty, and need the restroom. They stay for about <strong>30 game minutes</strong> (up to one game hour).</p>
+      <p>🅿️ You start with <strong>2 parking spaces</strong>. Expand the lot to 4, 6, 8, then 10 spaces from the business panel. The first expansion unlocks after serving 20 buses.</p>
+      <p>🚻 Enter the restroom: ${action} its building. Each occupied stall closes its door and gets dirtier with every use. Guests choose the cleanest available stall; very dirty stalls are avoided. Clean stalls by dragging your <strong>${translateText(tool.name).toLowerCase()}</strong> over them.</p>
+      <p>💳 After using the restroom, guests join the counter queue and hand you a bill. ${touch ? "Tap" : "Click"} the cash drawer's 10₺, 20₺, or 50₺ trays to give the correct change. Fewer bills earn a better rating. Exact 20₺ guests use the separate queue and pay automatically.</p>
+      <p>💨 Offer lemon cologne to the guest at the counter for a satisfaction bonus. It refills at midnight. Tea can be ordered from the intercom at the far end of the counter.</p>
+      <p>🧽 Every visit dirties a stall. Upgrades in the business panel improve your toilets, cleaning equipment, cologne, calculator, and car wash. The game pauses while the panel is open.</p>
+      <p>🚌 Reputation affects bus traffic and passenger counts. Keep guests happy to attract more buses. A vacant parking bay dispatches a replacement bus within 8 game minutes; the lot should refill before 10 minutes.</p>
+      <p>⏱ Game time is compressed: at 1×, one game hour takes 6 real minutes. Use the pause and speed controls to manage the pace. Press <strong>E</strong> to leave an interior, or ${action} the exit button.</p>
+      <p>💰 Guest fees go into shared company cash. Spend it on upgrades, maintenance, and new terminals. Automated systems need daily maintenance and incur operating costs.</p>`;
+    $("modalBody").scrollTop = 0;
+    $("modalBtn").textContent = first ? "Open the shop!" : "Back to work";
+    $("modalBtn").onclick = () => hideModal();
+    showModal();
+    return;
+  }
   $("modalTitle").textContent = first ? "👋 Mola Yeri'ne hoş geldin" : "Nasıl oynanır";
   $("modalBox").classList.add("tall"); // both intro screens are scrollable
   $("modalBody").innerHTML = `
@@ -7165,8 +7400,8 @@ function showIntro(first) {
     <p>⏱ Otobüsler yaklaşık <strong>30 dakika</strong> mola verir — terminalde en fazla bir saat kalabilirler. Kalkış vakti gelince <strong>WC ödeme sırasındaki</strong> misafirlere ödemeyi bitirmeleri için <strong>5–10 dakika</strong> tanınır; sıra hâlâ duruyorsa <strong>ödemeden sırayı terk edip</strong> otobüse binerler ve otobüs kalkar.</p>
     <p>🕐 Zaman <strong>sıkıştırılmıştır</strong> — 1× hızda bir oyun saati gerçekte 6 dakika sürer, yani bir oyun günü yaklaşık 2,4 gerçek saattir. Otobüsler, tuvaletler ve sıralar oyun içi temposunu korur.</p>
     <p>🚻 Tuvalet <strong>${fmtTL(CONFIG.economy.toiletFee)}</strong>; ücret ziyaretten <em>sonra</em> gişede ödenir — ve gişe <strong>sensin</strong>. <strong>İçeri girmek için WC binasına ${act}</strong>: içinde biri varken <strong>her kabinin kapısı kapanır</strong> (bir ziyaret oyun içinde 1–10 dakika sürer) ve <strong>her kabinin kendi temizliği vardır</strong> — kirli kabin ziyaretin puanını düşürür, misafirler hep <strong>en temiz boş kabini</strong> seçer (çok pis olanı kimse kullanmaz).</p>
-    <p>💳 İçeride işini bitiren her misafir gişedeki sıraya girer ve sana bir banknot uzatır. Doğru para üstünü vermek için <strong>açık kasa çekmecesindeki gözlere ${act}</strong> (₺10 / ₺20 / ₺50) — ve <strong>misafirler banknotları sayar</strong>: aynı tutarı daha az banknotla vermek daha iyi puan alır (₺30'u 10+20 olarak vermek şıktır, 10+10+10 bir avuç kâğıttır; ₺80 için 10+20+50, 10×8'den iyidir). <strong>Tam ${fmtTL(CONFIG.economy.toiletFee)}</strong> veren misafirlerin sana ihtiyacı yok: <strong>kendi ikinci sıralarında</strong> durur, kendileri öder ve yan geçitten çıkarlar — para üstü yok, kolonya yok, tıklama yok. Eksik ya da hiç verilmeyen para üstü diğer misafirleri mutsuz eder. ${hasCalc() ? "Gişedeki <strong>hesap makinesi</strong> verilecek para üstünü gösterir." : "Henüz <strong>hesap makinen yok</strong> — para üstünü kafandan hesapla (₺20 düş)."}</p>
-    ${hasCologne() ? `<p>💨 Gişede ${bottleMax()} ml'lik bir şişe <strong>limon kolonyası</strong> durur. Öndeki misafir öderken ellerine biraz dökmek için <strong>şişeye ${act}</strong>. Para üstü eline geçer geçmez yan geçitten çıkar (tam ₺20 sırası kendi kendine öder — kolonya ana sıranın öndeki misafiri içindir), o yüzden erken dök. Şişe gece yarısı dolar.</p>` : ""}
+    <p>💳 İçeride işini bitiren her misafir gişedeki sıraya girer ve sana bir banknot uzatır. Doğru para üstünü vermek için <strong>açık kasa çekmecesindeki gözlere ${act}</strong> (10₺ / 20₺ / 50₺) — ve <strong>misafirler banknotları sayar</strong>: aynı tutarı daha az banknotla vermek daha iyi puan alır (30₺'u 10+20 olarak vermek şıktır, 10+10+10 bir avuç kâğıttır; 80₺ için 10+20+50, 10×8'den iyidir). <strong>Tam ${fmtTL(CONFIG.economy.toiletFee)}</strong> veren misafirlerin sana ihtiyacı yok: <strong>kendi ikinci sıralarında</strong> durur, kendileri öder ve yan geçitten çıkarlar — para üstü yok, kolonya yok, tıklama yok. Eksik ya da hiç verilmeyen para üstü diğer misafirleri mutsuz eder. ${hasCalc() ? "Gişedeki <strong>hesap makinesi</strong> verilecek para üstünü gösterir." : "Henüz <strong>hesap makinen yok</strong> — para üstünü kafandan hesapla (20₺ düş)."}</p>
+    ${hasCologne() ? `<p>💨 Gişede ${bottleMax()} ml'lik bir şişe <strong>limon kolonyası</strong> durur. Öndeki misafir öderken ellerine biraz dökmek için <strong>şişeye ${act}</strong>. Para üstü eline geçer geçmez yan geçitten çıkar (tam 20₺ sırası kendi kendine öder — kolonya ana sıranın öndeki misafiri içindir), o yüzden erken dök. Şişe gece yarısı dolar.</p>` : ""}
     <p>🍵 <strong>Çayın</strong> gişede durur ve yaklaşık 30 oyun dakikasında biter. Taze bir bardak istemek için gişenin sağ ucundaki <strong>interkoma ${act}</strong> — bardağı ${fmtTL(CONFIG.economy.teaPrice)}, 2 oyun dakikası içinde gelir.</p>
     <p>🚪 Dışarı çıkmak için üst çubuktaki <strong>🚪</strong> düğmesine ${act}${touch ? "" : " — ya da <strong>E</strong> tuşuna bas"}. Misafirler gişenin iki yanındaki geçitlerden girip çıkar.</p>
     <p>🧻 <strong>Her kabin her kullanımda biraz daha kirlenir</strong> (her kabinin üstündeki çubuğu izle). Kabinlerin iki yanındaki istasyondan <strong>${tool.name.toLocaleLowerCase("tr-TR")}</strong> aletini al ve <strong>${touch ? "parmağını basılı tutup" : "fareyi basılı tutup"} bir kabinin üzerinde sürükle</strong>, temizle — ama <strong>kapısı kapalı</strong> (içinde biri olan) bir kabin temizlenemez.${stallCount() < WC_STALLS ? ` Şimdilik <strong>${stallCount()} ${toiletDef().style === "alaturka" ? "alaturka " : ""}tuvaletin</strong> var; kalan bölmeler tahtayla kapalı. Kabin sayısı, tuvaletler, temizlik ekipmanı, kolonya ve hesap makinesi İşletme panelinden ayrı ayrı yükseltilir.` : ""}</p>
@@ -7411,6 +7646,8 @@ function frame(now) {
 
 /* ------------------------------- Init ------------------------------- */
 function init() {
+  applyLanguageToShell();
+  startLanguageObserver();
   const loaded = load();
   arrivalInfoDelayUntil = performance.now() + 1000;
   openingBus(); // the first bus starts rolling in as play begins
@@ -7431,6 +7668,17 @@ function init() {
   };
   $("btnBurgerClose").onclick = closeBurger;
   burgerBackdrop.onclick = closeBurger;
+  $("btnLanguage").textContent = gameLanguage === "en" ? "🌐 Türkçe" : "🌐 English";
+  $("btnLanguage").onclick = () => {
+    const next = gameLanguage === "en" ? "tr" : "en";
+    const question = gameLanguage === "en"
+      ? "Switch the game language to Turkish? The game will reload."
+      : "Oyunun dili İngilizceye çevrilsin mi? Oyun yeniden yüklenecek.";
+    if (!confirm(question)) return;
+    save();
+    try { localStorage.setItem(LANGUAGE_KEY, next); } catch (e) { /* still switch for this reload */ }
+    location.reload();
+  };
 
   $("btnPause").onclick = () => {
     paused = !paused;
@@ -7485,7 +7733,7 @@ function init() {
     showIntro(false);
   };
   $("btnReset").onclick = () => {
-    if (confirm("Bütün oyun sıfırlansın mı? Kayıtlı oyunun silinecek.")) resetGame();
+    if (confirm(translateText("Bütün oyun sıfırlansın mı? Kayıtlı oyunun silinecek."))) resetGame();
   };
   // ---- canvas input: pointer events (one code path for mouse + touch) ----
   // toGame maps a pointer event into logical scene coordinates: the 960×540

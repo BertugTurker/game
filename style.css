@@ -221,9 +221,6 @@ button.icon { width: 34px; height: 34px; padding: 0 2px; font-size: 15px; }
 #cashChip .d.down > i::before { top: 100%; }
 @keyframes digitUp { from { transform: translateY(100%); } }
 @keyframes digitDown { from { transform: translateY(-100%); } }
-@media (prefers-reduced-motion: reduce) {
-  #cashChip .d.up > i, #cashChip .d.down > i { animation: none; }
-}
 #cashChip.neg { color: var(--bad); }
 #cashChip.warn { border-color: var(--bad); animation: chipWarn 1.2s ease-in-out infinite; }
 @keyframes chipWarn { 50% { box-shadow: 0 0 0 4px rgba(255, 107, 107, 0.35), 0 4px 14px rgba(0,0,0,0.45); } }

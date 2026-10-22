@@ -7,7 +7,14 @@
 <title>Mola Yeri — Otobüs Mola Tesisi Simülatörü</title>
 <meta name="description" content="Her tur otobüsünün güvendiği mola yerini işlet: iki alaturka tuvalet ve bir el fırçasıyla başla, gişede para üstü ver, kazandığınla tesisini büyüt — daha iyi tuvaletler, ekipman, oto yıkama ve yeni terminaller.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚌</text></svg>">
-<link rel="manifest" href="manifest.json">
+<script>
+  if (location.protocol === "http:" || location.protocol === "https:") {
+    const appManifest = document.createElement("link");
+    appManifest.rel = "manifest";
+    appManifest.href = "manifest.json";
+    document.head.appendChild(appManifest);
+  }
+</script>
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -20,7 +27,7 @@
     <!-- Burger menu button and drawer -->
     <div id="headerBar">
       <div id="statServed" title="Bugün hizmet verilen misafir">👥 0</div>
-      <button id="cashChip" title="Şirket kasası — İşletme paneli (U)" aria-label="Şirket kasası, işletme panelini aç">₺0</button>
+      <button id="cashChip" title="Şirket kasası — İşletme paneli (U)" aria-label="Şirket kasası, işletme panelini aç">0₺</button>
       <button id="btnBurger" class="icon" aria-label="Menü" title="Menüyü Aç/Kapat">☰</button>
     </div>
     <div id="sideControls">
@@ -46,7 +53,7 @@
         <div class="burgerSection">
           <div class="burgerSectionTitle">DURUM</div>
           <div class="hud hudWrap">
-            <div class="stat" id="statCash" title="Şirket kasası — bütün terminaller ortak">₺0</div>
+            <div class="stat" id="statCash" title="Şirket kasası — bütün terminaller ortak">0₺</div>
             <div class="stat" id="statTerm" title="Bulunduğun terminal">—</div>
             <div class="stat" id="statClock" title="Gün ve saat">Gün 1 · 08:00</div>
             <div class="stat rep" title="İtibar — itibar yükseldikçe daha çok otobüs uğrar">
@@ -62,7 +69,10 @@
             <button id="btnHelp" title="Nasıl oynanır">?</button>
           </div>
           <div class="burgerControls">
-            <button id="btnTestCash" title="Test için: kasaya ₺100.000 ekle">🧪 +₺100.000</button>
+            <button id="btnLanguage" title="Oyunun dilini değiştir">🌐 English</button>
+          </div>
+          <div class="burgerControls">
+            <button id="btnTestCash" title="Test için: kasaya 100.000₺ ekle">🧪 +100.000₺</button>
           </div>
         </div>
       </div>
@@ -99,7 +109,7 @@
 
 <script src="game.js"></script>
 <script>
-  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+  if ("serviceWorker" in navigator && (location.protocol === "http:" || location.protocol === "https:")) navigator.serviceWorker.register("sw.js").catch(() => {});
 </script>
 </body>
 </html>

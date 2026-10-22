@@ -346,7 +346,7 @@ await test("Phase 3: failed purchases change nothing", async () => {
   await L(`(G.company.cash = 999, true)`);
   let before = await gSnap();
   let r = await L(`L.purchaseUpgrade("bolu", "style", 2)`);
-  check("modern toilets refused at ₺999, reason given", !r.ok && /₺1 eksik/.test(r.reason), r.reason);
+  check("modern toilets refused at ₺999, reason given", !r.ok && /1₺ eksik/.test(r.reason), r.reason);
   check("…and state is untouched", (await gSnap()) === before);
   await L(`(G.company.cash = 100000, true)`);
   before = await gSnap();
@@ -415,13 +415,13 @@ await test("Phase 3: business panel (keyboard + DOM)", async () => {
   check("the clock holds while the panel is open", (await L(`G.clock.time`)) === t0);
   const btn = (track, lvl) => `document.querySelector('#shopBody button[data-act=wc][data-track="${track}"][data-tier="${lvl}"]')`;
   const prices = await page.eval(`[...document.querySelectorAll("#shopBody button[data-act=wc]")].map(b => [b.dataset.track + b.dataset.tier, b.textContent])`);
-  const cfg = { count3: "₺1.600", style3: "₺10.000", tool4: "₺3.000", cologne3: "₺2.000" };
+  const cfg = { count3: "1.600₺", style3: "10.000₺", tool4: "3.000₺", cologne3: "2.000₺" };
   check("each displayed price matches the config", prices.length === 4 && prices.every(([k, txt]) => txt.endsWith(cfg[k])), JSON.stringify(prices));
   const wcH2 = await page.eval(`[...document.querySelectorAll("#shopBody h2")].map(h => h.textContent)`);
   check("one section per WC track, nothing else", wcH2.length === 5 && wcH2.every(t => t.startsWith("WC")), JSON.stringify(wcH2));
   await L(`(G.company.cash = 2999, L.renderShop(), true)`);
   const dis = await page.eval(`(() => { const b = ${btn("tool", 4)}; return { d: b.disabled, why: b.closest(".card").querySelector(".why").textContent }; })()`);
-  check("unaffordable: disabled with the reason shown", dis.d === true && dis.why === "₺1 eksik", JSON.stringify(dis));
+  check("unaffordable: disabled with the reason shown", dis.d === true && dis.why === "1₺ eksik", JSON.stringify(dis));
   check("stall count is one card with an upgrade button", (await page.eval(`[...document.querySelectorAll("#shopBody h2")].find(h => h.textContent === "WC · KABİN SAYISI").parentElement.querySelectorAll(".card").length`)) === 1
     && /^Yükselt/.test(await page.eval(`${btn("count", 3)}.textContent`)));
   check("toilets are one card that upgrades to the next level", (await page.eval(`[...document.querySelectorAll("#shopBody h2")].find(h => h.textContent === "WC · TUVALETLER").parentElement.querySelectorAll(".card").length`)) === 1
@@ -432,7 +432,7 @@ await test("Phase 3: business panel (keyboard + DOM)", async () => {
   check("clicking buy installs the hose (and only the hose)", (await L(`L.tool() === "hose" && L.activeStalls().length === 4 && G.company.cash === 0`)) === true);
   check("success message shown", /kuruldu/.test(await page.eval(`document.querySelector(".shopMsg").textContent`)));
   await sleep(100); // the HUD redraws on the next frame
-  check("cash chip shows company cash", (await page.eval(`document.getElementById("cashChip").textContent`)) === "₺0");
+  check("cash chip shows company cash", (await page.eval(`document.getElementById("cashChip").textContent`)) === "0₺");
   await page.eval(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); true`);
   check("Escape closes it", (await L(`L.shopOpen()`)) === false);
   await L(`(L.setView("out"), true)`);
@@ -468,7 +468,7 @@ await test("Phase 4: unlocking the car wash needs cash only", async () => {
   await L(`(G.company.cash = 7999, L.sim().rep = 0, true)`);
   let before = await L(`JSON.stringify({ c: G.company, w: G.terminals.bolu.carWash })`);
   let r = await L(`L.purchaseUpgrade("bolu", "carWash", 1)`);
-  check("₺7.999 is not enough, nothing changes", !r.ok && /₺1 eksik/.test(r.reason) && (await L(`JSON.stringify({ c: G.company, w: G.terminals.bolu.carWash })`)) === before, r.reason);
+  check("₺7.999 is not enough, nothing changes", !r.ok && /1₺ eksik/.test(r.reason) && (await L(`JSON.stringify({ c: G.company, w: G.terminals.bolu.carWash })`)) === before, r.reason);
   await L(`(G.company.cash = 100000, true)`);
   before = await L(`JSON.stringify({ c: G.company, w: G.terminals.bolu.carWash })`);
   r = await L(`L.purchaseUpgrade("bolu", "carWash", 2)`);
@@ -554,7 +554,7 @@ await test("Phase 4: panel and save/load", async () => {
   await L(`(G.company.cash = 8000, L.sim().rep = 0, true)`);
   await page.eval(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "u" })); true`);
   const prices = await page.eval(`[...document.querySelectorAll("#shopBody button[data-act=wash]")].map(b => [+b.dataset.tier, b.textContent, b.disabled])`);
-  check("car wash is one card offering the unlock at the config price", prices.length === 1 && prices[0][0] === 1 && prices[0][1] === "Kur · ₺8.000" && !prices[0][2], JSON.stringify(prices));
+  check("car wash is one card offering the unlock at the config price", prices.length === 1 && prices[0][0] === 1 && prices[0][1] === "Kur · 8.000₺" && !prices[0][2], JSON.stringify(prices));
   check("the card says no reputation is needed", /İtibar şartı yok/.test(await page.eval(`document.querySelector('#shopBody button[data-act=wash][data-tier="1"]').closest(".card").textContent`)));
   await page.eval(`document.querySelector('#shopBody button[data-act=wash][data-tier="1"]').click(); true`);
   check("clicking unlocks it", (await L(`G.terminals.bolu.carWash.unlocked && G.company.cash === 0`)) === true && /Oto yıkama kuruldu/.test(await page.eval(`document.querySelector(".shopMsg").textContent`)));
@@ -705,7 +705,7 @@ await test("Phase 5: automated car wash", async () => {
   await advanceHours(0.01, 10);
   maxBusy = await L(`L.buses().filter(b => b.state === "stop" && !b.washDone && b.autoWashT > 0).length`);
   check("full: several buses at once", maxBusy >= 2, `up to ${maxBusy} in parallel`);
-  check("maintenance cost covers both systems", (await L(`(() => { const m = G.terminals.bolu.maintenance; m.condition = 99; G.company.cash = 0; return L.maintenanceStatus("bolu").reason; })()`)) === "₺950 eksik");
+  check("maintenance cost covers both systems", (await L(`(() => { const m = G.terminals.bolu.maintenance; m.condition = 99; G.company.cash = 0; return L.maintenanceStatus("bolu").reason; })()`)) === "950₺ eksik");
 });
 
 await test("Phase 5: maintenance follows game time, not frames", async () => {
@@ -749,7 +749,7 @@ await test("Phase 6: regional map", async () => {
   await tap(n.x, n.y);
   check("tapping a node on the map selects it", (await L(`L.mapSel()`)) === "gerede");
   const txt = await panelText();
-  check("locked terminal shows price and unmet requirement", /₺15\.000/.test(txt) && /✗ Bir terminalinde itibar 40\+/.test(txt), txt.slice(0, 160));
+  check("locked terminal shows price and unmet requirement", /15\.000₺/.test(txt) && /✗ Bir terminalinde itibar 40\+/.test(txt), txt.slice(0, 160));
   check("its buy button is disabled with the reason", (await page.eval(`(() => { const b = document.querySelector('#mapDetail button[data-act=buyTerminal]'); return b.disabled && /Şart/.test(document.querySelector("#mapDetail .why").textContent); })()`)) === true);
   await key("ArrowRight");
   check("arrow keys move the selection", (await L(`L.mapSel()`)) === "tosya");
@@ -770,7 +770,7 @@ await test("Phase 6: buying a terminal", async () => {
   check("refused below the reputation requirement, nothing changes", !x.r.ok && /Şart/.test(x.r.reason) && x.same, x.r.reason);
   await L(`(L.sim().rep = 40, G.company.cash = 14999, true)`);
   x = await atomic(`L.unlockTerminal("gerede")`);
-  check("refused ₺1 short, nothing changes", !x.r.ok && /₺1 eksik/.test(x.r.reason) && x.same, x.r.reason);
+  check("refused ₺1 short, nothing changes", !x.r.ok && /1₺ eksik/.test(x.r.reason) && x.same, x.r.reason);
   x = await atomic(`L.unlockTerminal("atlantis")`);
   check("unknown terminal refused", !x.r.ok && x.same);
   x = await atomic(`L.unlockTerminal("bolu")`);
@@ -808,10 +808,10 @@ await test("Phase 6: switching terminals", async () => {
   // development cost ×1.2 at Gerede
   await L(`(G.company.cash = 1919, true)`);
   const st = await L(`L.wcUpgradeStatus("gerede", "count", 3)`);
-  check("Gerede's 6 stalls cost ₺1.920 (×1.2)", !st.ok && st.cost === 1920 && /₺1 eksik/.test(st.reason), JSON.stringify(st));
+  check("Gerede's 6 stalls cost ₺1.920 (×1.2)", !st.ok && st.cost === 1920 && /1₺ eksik/.test(st.reason), JSON.stringify(st));
   await L(`(L.setView("wc"), true)`);
   await key("u");
-  check("the panel shows that price", (await page.eval(`document.querySelector('#shopBody button[data-track="count"][data-tier="3"]').textContent`)).endsWith("₺1.920"));
+  check("the panel shows that price", (await page.eval(`document.querySelector('#shopBody button[data-track="count"][data-tier="3"]').textContent`)).endsWith("1.920₺"));
   await key("Escape");
   await L(`(L.setView("out"), true)`);
   await L(`(G.company.cash = 1920, true)`);
@@ -1373,13 +1373,12 @@ await test("cash chip rolls changed digits", async () => {
   const rolls = () => page.eval(`[...document.querySelectorAll("#cashChip .d")].map(d => d.className + ":" + d.textContent + ":" + (d.firstChild.dataset.old || "")).join(" ")`);
   await L(`(G.company.cash = 1390, true)`);
   await sleep(120);
-  globalThis.__shotRoll = await page.shot("cash-roll");
   const up = await rolls();
-  check("rising cash rolls only the changed digits up", up === "d:₺: d:1: d:.: d up:3:2 d up:9:0 d:0:", up);
+  check("rising cash rolls only the changed digits up", up === "d:1: d:.: d up:3:2 d up:9:0 d:0: d:₺:", up);
   await L(`(G.company.cash = 1200, true)`);
   await sleep(120);
-  check("falling cash rolls down", (await rolls()) === "d:₺: d:1: d:.: d down:2:3 d down:0:9 d:0:");
-  check("text is still plain for readers", (await page.eval(`document.getElementById("cashChip").textContent`)) === "₺1.200");
+  check("falling cash rolls down", (await rolls()) === "d:1: d:.: d down:2:3 d down:0:9 d:0: d:₺:");
+  check("text is still plain for readers", (await page.eval(`document.getElementById("cashChip").textContent`)) === "1.200₺");
 });
 await sleep(500);
 await page.eval(`document.getElementById("cashChip").click(); true`);
@@ -1389,7 +1388,7 @@ const shotShop = await page.shot("shop");
 printed = true;
 console.log(results.join("\n"));
 console.log(`\n${passed} passed, ${failed} failed`);
-console.log(`screenshots: ${[shotNotice, shotOut, shotWc, shotStartOut, shotStartWc, shotChip, shotShop, globalThis.__shotWash, globalThis.__shotMaint, globalThis.__shotMap, globalThis.__shotPhone, globalThis.__shotPhoneMap, globalThis.__shotPhoneShop, globalThis.__shotDrawer, globalThis.__shotRoll].join(", ")}`);
+console.log(`screenshots: ${[shotNotice, shotOut, shotWc, shotStartOut, shotStartWc, shotChip, shotShop, globalThis.__shotWash, globalThis.__shotMaint, globalThis.__shotMap, globalThis.__shotPhone, globalThis.__shotPhoneMap, globalThis.__shotPhoneShop, globalThis.__shotDrawer].join(", ")}`);
 for (const p of procs) try { p.kill(); } catch (e) {}
 await sleep(500);
 cleanup();
