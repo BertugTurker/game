@@ -648,4 +648,8 @@ button.icon { width: 34px; height: 34px; padding: 0 2px; font-size: 15px; }
 }
 @media (orientation: portrait) and (max-width: 700px) {
   #rotateHint { display: flex; }
+  /* While the rotate prompt is up, hide every control layered above it */
+  #headerBar, #sideControls, #mapPanel, #burgerBackdrop, #burgerMenu, #shop, #modal {
+    display: none !important;
+  }
 }
