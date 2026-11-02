@@ -231,11 +231,30 @@ button.icon { width: 34px; height: 34px; padding: 0 2px; font-size: 15px; }
 #sideControls {
   position: absolute;
   top: 60px;
+  bottom: 0;
   right: 12px;
   z-index: 999;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* height: calc(100% - 20px); */
+}
+#btnExit.hidden, #exitBadge.hidden { display: none; }
+#btnExit { position: relative; margin-top: auto; margin-bottom: 12px; }
+#exitBadge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  border: 1.5px solid rgba(0, 0, 0, 0.35);
+  background: #e33;
+  color: #fff;
+  font: bold 11px/16px system-ui, sans-serif;
+  text-align: center;
+  box-sizing: border-box;
 }
 #sideControls button {
   width: 40px;
@@ -247,6 +266,7 @@ button.icon { width: 34px; height: 34px; padding: 0 2px; font-size: 15px; }
 }
 #btnShop.hidden { display: none; }
 #mapBtn.on { border-color: var(--accent); }
+#mapBtn.hidden { display: none; }
 #mapPanel {
   position: absolute;
   top: auto;
@@ -321,30 +341,93 @@ button.icon { width: 34px; height: 34px; padding: 0 2px; font-size: 15px; }
   border: 1px solid #33406a;
   border-radius: 18px;
   box-shadow: 0 20px 60px rgba(0,0,0,0.5);
-  width: min(640px, 100%);
+  width: min(1040px, 100%);
+  height: min(640px, 100%);
   max-height: 100%;
   display: flex;
   flex-direction: column;
-  padding: 18px 22px;
+  padding: 12px 16px;
 }
 .shopHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-shrink: 0; }
 .shopHead h1 { margin: 0; font-size: 20px; }
 #shopBody {
-  overflow-y: auto;
   overscroll-behavior: contain;
-  margin-top: 12px;
+  margin-top: 8px;
   font-size: 13.5px;
   line-height: 1.45;
   color: var(--dim);
   scrollbar-width: thin;
   scrollbar-color: #3d4d75 rgba(13, 17, 32, 0.4);
 }
-.shopMsg { min-height: 20px; margin: 4px 0 8px; font-weight: 700; }
-.shopMsg:empty { display: none; }
-.shopMsg.good { color: var(--good); }
-.shopMsg.bad { color: var(--bad); }
-.shopSection { margin-top: 14px; }
-.shopSection h2 { font-size: 12px; letter-spacing: 1px; color: var(--dim); margin: 0 0 8px; }
+/* item tiles: one row of full-height vertical cards, three visible at a time, scroll sideways for the rest */
+#shopBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  padding-bottom: 6px;
+}
+#shopBody .card {
+  flex: 0 0 calc((100% - 30px) / 4);
+  min-width: 0;
+  height: 100%;
+  margin-bottom: 0;
+  padding: 12px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  scroll-snap-align: start;
+}
+#shopBody .card .art {
+  flex: 0 0 25%;
+  height: 25%;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 56px;
+  line-height: 1;
+  padding: 0;
+  border-radius: 10px;
+  background: radial-gradient(120px 80px at 50% 0%, #26334f, rgba(13, 17, 32, 0.4));
+}
+#shopBody .card canvas.art {
+  display: block;
+  flex: 0 0 25%;
+  width: 100%;
+  height: 25%;
+  min-height: 0;
+  object-fit: contain;
+  padding: 0;
+  border-radius: 10px;
+  background: radial-gradient(120px 80px at 50% 0%, #26334f, rgba(13, 17, 32, 0.4));
+}
+#shopBody .card .info {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  font-size: 12.5px;
+}
+#shopBody .card .details {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: #3d4d75 transparent;
+}
+#shopBody .card .name { font-size: 14px; line-height: 1.25; }
+#shopBody .card ul { font-size: 12px; padding-left: 16px; margin-top: 6px; }
+#shopBody .card .why { font-size: 11.5px; }
+#shopBody .card button { width: 100%; min-width: 0; padding: 8px; font-size: 13px; }
+#shopBody .card .done { text-align: center; font-weight: 700; font-size: 13px; color: var(--good); padding: 8px; border: 1px solid #2f6b45; border-radius: 8px; }
 .card {
   background: var(--panel2);
   border: 1px solid #2c3856;
@@ -370,6 +453,7 @@ button.icon { width: 34px; height: 34px; padding: 0 2px; font-size: 15px; }
   #shop { padding: 10px; }
   #shopBox { padding: 14px; border-radius: 14px; }
   .card { flex-direction: column; align-items: stretch; }
+  #shopBody .card { flex-basis: 72%; }
 }
 
 #burgerBackdrop {
