@@ -14,6 +14,12 @@ The in-game text is Turkish.
 - 🍔 Guests eat for free at the diner (3 seats) and wander the lot.
 - ★ **Reputation (0–100, per terminal)** comes from guest and bus ratings: cleanliness, waiting, change, cologne, washes. Breakdowns cost 2 reputation.
 
+### Traffic
+- One two-way road: rightbound traffic in the lower lane, leftbound in the upper one. Cars and buses keep to their lane and never pass anything going their way. They brake smoothly and queue behind whatever is ahead.
+- Buses arrive from either side and leave the way they came. **Only one bus maneuvers at a time**, either turning into a bay or reversing out of one. Any number can stay parked. Requests are served first come, first served. A waiting bus is skipped only while a later one stands in its way.
+- A bus that wants to park signals and asks for the parking reservation. It waits short of its turn-in point until it has the reservation and its turning path is clear. A bus that wants to leave waits in its bay until it has the departure reservation and its whole reversing path is clear.
+- While a bus maneuvers, it closes only the lane stretches its body will actually sweep. Traffic stops short of them and nothing else on the road is held up. For example, a leftbound bus turning in never stops rightbound cars.
+
 ### The toilets
 - Guests use a stall (1–10 game minutes), then queue at the counter to pay **₺20**. You take the bill and hand back change from the ₺10 / ₺20 / ₺50 trays. Guests count the bills: the same total in the fewest bills rates best (₺30 as 10+20 beats 10+10+10).
 - Guests with an exact ₺20 use their own **second line** and pay on their own.
@@ -91,6 +97,7 @@ A wash only pays if it finishes while the bus is still parked.
 | Click a **runaway** (inside) | Catch them — they scrub every toilet |
 | Click **brush** / **hose**, hold & drag on the windshield | Soap, then rinse |
 | ☰ menu | Status, pause, speed, help, reset, İşletme, Harita |
+| `T` | Traffic debug overlay: each bus's traffic phase and the lane stretches reserved for a maneuver |
 
 Everything works by touch: taps for clicks, hold-and-drag for cleaning and washing.
 
@@ -113,7 +120,8 @@ python3 -m http.server 8000   # then visit http://localhost:8000
 ## Tests
 
 ```sh
-node tests/run.mjs   # Node ≥ 22; uses your installed Google Chrome (CHROME=/path/to/chrome to override)
+node tests/run.mjs       # Node ≥ 22; uses your installed Google Chrome (CHROME=/path/to/chrome to override)
+node tests/traffic.mjs   # traffic, parking and departure scenarios (ONLY=<title part> runs a subset)
 ```
 
 The test runner has no dependencies. It serves the game with `python3 -m http.server`, drives headless Chrome over the DevTools protocol, and checks the game through `window.__Layover`. It also generates a real v6 save by running the original game from commit `26ebdd3`, so migration is tested against genuine data.
@@ -132,6 +140,13 @@ It covers about 345 checks across 16 areas:
 
 Screenshots go to `$TMPDIR/layover-shots`.
 
+`tests/traffic.mjs` steps the simulation one 1/30 s frame at a time with random traffic switched off. It sets up each scenario by hand: buses parking with cars queued behind, oncoming traffic, simultaneous requests, blocked reversing space, a bay taken first, the deadlock guard, and a 10-minute soak with random traffic. After every frame it checks:
+- at most one bus holds a maneuver reservation;
+- no two vehicles overlap on a lane, and none changes order;
+- nobody moves backwards;
+- nobody enters a reserved zone it could still stop short of;
+- nothing touches a maneuvering bus.
+
 ## Tech
 
 Vanilla HTML, CSS and JavaScript. One `<canvas>` scene plus a small DOM UI layer, with no dependencies and no build tools.
@@ -140,6 +155,7 @@ Vanilla HTML, CSS and JavaScript. One `<canvas>` scene plus a small DOM UI layer
 - `style.css`: dark theme
 - `game.js`: `CONFIG` (all prices and balance values), the authoritative state `G`, the simulation, rendering and input
 - `tests/run.mjs`: the browser test harness
+- `tests/traffic.mjs`: the traffic controller scenarios
 - `IMPLEMENTATION_PLAN.md`: how the progression was built, phase by phase
 
 ## On your phone

@@ -264,7 +264,6 @@ button.icon { width: 34px; height: 34px; padding: 0 2px; font-size: 15px; }
   border: 1px solid #33406a;
   box-shadow: 0 4px 14px rgba(0,0,0,0.45);
 }
-#btnShop.hidden { display: none; }
 #mapBtn.on { border-color: var(--accent); }
 #mapBtn.hidden { display: none; }
 #mapPanel {

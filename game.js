@@ -33,6 +33,7 @@
 
 /* ----------------------------- Config ------------------------------ */
 const W = 960, H = 540;
+const LOT_MIN_W = 1120; // minimum logical width: with the core centred, the visible right edge is (Wdyn + W) / 2 = 1040 — past bay 10
 // Widescreen: the logical canvas may extend beyond the 960×540 gameplay core.
 // Background layers (sky, ground, road, walls) fill the extra space; all
 // interactive content stays in the core, centered via offX/offY.
@@ -46,6 +47,8 @@ const LOT_NOSE = 182;                 // lot stalls: where a parked bus's nose p
 const PARKING_SLOT_COUNT = 10;
 const BAY_SLOTS = Array.from({ length: PARKING_SLOT_COUNT }, (_, i) => ({ cx: 170 + i * 84 })); // 10 parallel bus bays across the lot, 84px apart (a bus is 66px wide)
 const GRASS = { top: 88, bot: 170 };  // grass strip — the diner and WC stand on it
+const BUILD_LIFT = 28; // the diner and WC stand this far back from the lot: the strip in front of them is a walkway for guests
+const WALK_TOP = 170 - BUILD_LIFT; // the walkway starts at the diner and WC front wall
 const LOT   = { top: 170, bot: 432 }; // bus parking lot (asphalt), in front of the diner + WC
 const ROAD  = { top: 432, bot: 530 }; // main road (buses drive here — never park on it)
 
@@ -174,7 +177,7 @@ function withDesk(item, fn) {
 }
 const PAY_SPOT = { x: 560, y: counterGuestStandY() }; // customer line stays behind the far countertop edge
 const PAY_SPOT2 = { x: 462, y: counterGuestStandY() }; // exact-₺20 line
-const WC_BUILDING = { x: 808, y: 92, w: 86, h: 80 }; // outdoor hit rect: click to enter
+const WC_BUILDING = { x: 808, y: 92 - BUILD_LIFT, w: 86, h: 80 }; // outdoor hit rect: click to enter
 // Car wash view geometry — a close-up of the parked bus's front. The
 // windshield is a cols×rows cell grid; each cell tracks its own dirt and soap.
 const WASH = {
@@ -368,7 +371,7 @@ const ENGLISH = [
   ["🗺 BÖLGE HARİTASI", "🗺 REGIONAL MAP"], ["— bir terminale dokun", "— tap a terminal"], ["— bir terminale tıkla", "— click a terminal"],
   ["🚪 ÇIKIŞ (E)", "🚪 EXIT (E)"], ["Dışarı çık (E)", "Go outside (E)"], ["Dışarı çık", "Go outside"], ["WC binası", "Restroom"], ["İlk otobüsün geliyor!", "Your first bus is arriving!"],
   ["Yolcular tuvalet için buraya gelir.", "Passengers come here to use the restroom."], ["Otobüsler terminalinde mola verir.", "Buses stop at your terminal."], ["Yolculara hizmet için hazır ol.", "Get ready to serve passengers."],
-  ["Anladım", "Got it"], ["Park etmiş otobüse dokun:", "Tap a parked bus:"], ["uzun saplı fırçayla köpükle,", "soap it with the long brush,"], ["hortumla durula", "then rinse with the hose"], ["Terminallerini ve yolu buradan takip et.", "Follow your terminals and the route from here."], ["Yeni terminal de buradan satın alınır.", "New terminals are also bought from here."], ["Her terminalin yükseltmeleri burada.", "Upgrades for each terminal are here."], ["Tuvalet ve oto yıkama için ayrı ayrı yükselt.", "Upgrade toilets and car wash separately."], ["Devam", "Continue"], ["İşe dön", "Back to work"], ["Dükkânı aç!", "Open the shop!"],
+  ["Anladım", "Got it"], ["İşin bitince bu düğmeyle binadan çık.", "When you're done, leave the building with this button."], ["Otobüsler dışarıda seni bekliyor.", "Your buses are waiting for you outside."],["Park etmiş otobüse dokun:", "Tap a parked bus:"], ["uzun saplı fırçayla köpükle,", "soap it with the long brush,"], ["hortumla durula", "then rinse with the hose"], ["Terminallerini ve yolu buradan takip et.", "Follow your terminals and the route from here."], ["Yeni terminal de buradan satın alınır.", "New terminals are also bought from here."], ["Her terminalin yükseltmeleri burada.", "Upgrades for each terminal are here."], ["Tuvalet ve oto yıkama için ayrı ayrı yükselt.", "Upgrade toilets and car wash separately."], ["Devam", "Continue"], ["İşe dön", "Back to work"], ["Dükkânı aç!", "Open the shop!"],
   ["🎉 ", "🎉 "], [" artık senin", " is now yours"], ["arızalandı — onarılana kadar elle çalış", "has broken down — operate it manually until repaired"],
   ["⚠️ Kayıt sorunu", "⚠️ Save problem"], ["💾 Kaydın aktarıldı", "💾 Save migrated"], ["Kayıt okunamadı", "Save could not be read"],
   ["✨ Ön cam pırıl pırıl!", "✨ The windshield is sparkling clean!"], ["😖 Tuvalet pis, misafir gitti", "😖 The restroom is dirty; the guest left"],
@@ -568,7 +571,7 @@ function freshGame(profile = CONFIG.newGameProfile) {
     company: { cash: CONFIG.economy.startCash, nextTxId: 1, ledger: [], totals: {} },
     activeTerminal: start.id,
     terminals: {},
-    flags: { firstBusDone: false, firstBusParked: false, wcLockedToastSeen: false, arrivalInfoSeen: false, wcInfoSeen: false, wcIntroStep: 0, toolbarIntro: 0 },
+    flags: { firstBusDone: false, firstBusParked: false, wcLockedToastSeen: false, arrivalInfoSeen: false, wcInfoSeen: false, wcIntroStep: 0, toolbarIntro: 0, exitInfoSeen: false },
     migratedFrom: null,      // save version this game was migrated from (null = born on v7)
   };
   g.terminals[start.id] = freshTerminal(start.id, profile);
@@ -956,6 +959,7 @@ function fixupTerminal(t, v) {
   for (const b of buses) if ((b.state === "stop" || b.state === "enter") && b.slot != null) {
     if (taken.has(b.slot)) { b.slot = null; b.state = "drive"; b.stoppedOnce = true; } else taken.add(b.slot);
   }
+  for (const b of buses) syncPhase(b);
   // v3 outdoor pax were placed in the old apron band — teleport to their bus door
   if (v === 3) for (const b of buses) for (const p of b.pax)
     if (p.state === "walk" || p.state === "free" || p.state === "board") {
@@ -1416,16 +1420,20 @@ function busInterval() {
 // after play starts.
 // Buses that drive straight through the stop without pulling in. Each direction has its own lane.
 let throughTimer = 25;
+let autoTraffic = true; // random cars, through buses and scheduled arrivals (the traffic tests switch it off)
 function throughTick(dt) {
+  if (!autoTraffic) return;
   throughTimer -= dt;
   if (throughTimer > 0) return;
-  throughTimer = rand(25, 55);
   const dir = Math.random() < 0.5 ? 1 : -1;
   const len = BUS_KINDS.small.len;
+  const cx = dir > 0 ? -offX - len / 2 - 20 : Wdyn - offX + len / 2 + 20;
+  if (!laneEntryFree(dir, cx - len / 2, cx + len / 2, BUS_V)) { throughTimer = 0.5; return; } // its lane is backed up to the edge
+  throughTimer = rand(25, 55);
   buses.push({
     id: S.nextBusId++, kind: "small", len, hue: pick([8, 28, 145, 200, 260, 330]),
     from: DEST_A, to: DEST_B,
-    cx: dir > 0 ? -offX - len / 2 - 20 : Wdyn - offX + len / 2 + 20,
+    cx,
     cy: THROUGH_LANE[dir], ang: 0, dir, through: true,
     state: "drive", stopStart: 0, stopEnd: 0, stopElapsed: 0,
     boardWait: 0, boardGrace: 0, stoppedOnce: true, slot: null, forcedSlot: null,
@@ -1440,19 +1448,24 @@ function spawnBus(reserved = null, opening = false) {
   const def = BUS_KINDS[kind];
   const n = Math.max(20, Math.round(rand(def.pax[0], def.pax[1]) * (0.55 + S.rep / 130)));
   const hue = pick([8, 28, 145, 200, 260, 330]);
+  const cx = opening ? enterGeom({ len: def.len }, activeParkingSlots()[0]).x0 - CONFIG.firstBusLead
+    : dirIn > 0 ? -offX - def.len / 2 - rand(20, 160) // off the canvas edge, not the core edge
+    : Wdyn - offX + def.len / 2 + rand(20, 160);
+  if (!opening && !laneEntryFree(dirIn, cx - def.len / 2, cx + def.len / 2, BUS_V)) return false; // try again next step
   const pax = [];
   for (let i = 0; i < n; i++) pax.push(makePax());
   const b = {
     id: S.nextBusId++,
     kind, len: def.len, hue,
     from: DEST_A, to: DEST_B,
-    cx: opening ? enterGeom({ len: def.len }, activeParkingSlots()[0]).x0 - CONFIG.firstBusLead
-      : dirIn > 0 ? -offX - def.len / 2 - rand(20, 160) // off the canvas edge, not the core edge
-      : Wdyn - offX + def.len / 2 + rand(20, 160),
+    cx,
     cy: THROUGH_LANE[dirIn],
     ang: 0,
     dir: dirIn,
     state: "drive",
+    phase: PHASE.APPROACHING, // traffic phase (see the traffic controller)
+    reqSeq: null,             // its place in line for the maneuver reservation
+    parkSlot: null,           // the bay it holds the parking reservation for
     stopStart: 0, stopEnd: 0, stopElapsed: 0,
     boardWait: rand(0.3, 0.6),  // extra real seconds to linger once every pax is aboard
     boardGrace: 0,
@@ -1465,6 +1478,7 @@ function spawnBus(reserved = null, opening = false) {
   };
   buses.push(b);
   toast(gameLanguage === "en" ? `🚌 ${DEST_A} · ${n} passengers` : `🚌 ${DEST_A}'dan ${n} yolcu`, "");
+  return true;
 }
 
 // A brand-new company's opening bus, once — the flag is saved, so a reload never replays it.
@@ -1498,23 +1512,18 @@ function makePax() {
   };
 }
 
-// The boarding door, in world coords (rotates with the bus).
+// The boarding door, in world coords (rotates with the bus). It is always on
+// the bus's right-hand side: +y for a bus heading right, -y for one heading left.
 function doorPos(b) {
-  const lx = busDir(b) * (b.len / 2 - 39), ly = 47;
+  const lx = busDir(b) * (b.len / 2 - 19), ly = 47 * busDir(b); // the front door, under the windshield
   const c = Math.cos(b.ang), s = Math.sin(b.ang);
   return { x: b.cx + lx * c - ly * s, y: b.cy + lx * s + ly * c };
 }
 
-// True when every passenger is on board, or at the door about to step in.
-// A returning guest spends its last frame or two as "board" a few px from
-// the door before the arrival flip to "bus"; that counts as aboard, so the
-// departure gate never waits on a guest who is literally stepping in.
+// True only when every passenger is actually aboard (state "bus"). The bus
+// never pulls out while a guest is still walking for the door.
 function allAbroad(b) {
-  if (!b.pax.length) return true;
-  const d = doorPos(b);
-  return b.pax.every(p =>
-    p.state === "bus" ||
-    (p.state === "board" && Math.hypot(p.x - d.x, p.y - d.y) < 8));
+  return b.pax.every(p => p.state === "bus");
 }
 
 /* ---------------------------- Passengers ---------------------------- */
@@ -1539,9 +1548,10 @@ function enterPose(g, s) {
 }
 // Back-out: reverse straight a little, then reverse through a quarter-circle
 // (tail swinging west) so the bus ends on the lane facing east.
-function exitGeom(b) {
-  const d = 24, R = laneCy(b) - b.mv.sy - d;
-  return { sx: b.mv.sx, sy: b.mv.sy, d, R, L: d + R * Math.PI / 2, sg: busDir(b), laneY: laneCy(b) };
+// (sx, sy): the parked pose it backs out from — defaults to the one recorded when it started.
+function exitGeom(b, sx = b.mv.sx, sy = b.mv.sy) {
+  const d = 24, R = laneCy(b) - sy - d;
+  return { sx, sy, d, R, L: d + R * Math.PI / 2, sg: busDir(b), laneY: laneCy(b) };
 }
 function exitPose(g, s) {
   if (s <= g.d) return { cx: g.sx, cy: g.sy + s, ang: -g.sg * Math.PI / 2 };
@@ -1559,10 +1569,49 @@ function moveAlong(b, dt, L, vmax, acc, brake) {
   return b.mv.s >= L - 0.01;
 }
 
+// Buses never drive over a guest on foot. Guests aboard are inside the bus
+// and don't count; neither do indoor guests (the WC walls keep them clear).
+const PAX_CLEAR = 8; // px of clearance the bus body keeps around a guest
+function walkingPax() {
+  return buses.flatMap(o => o.pax).filter(p => p.state !== "bus" && !isIndoorPax(p));
+}
+// The first guest a bus body with this pose would cover, or null.
+function paxUnderPose(walkers, b, cx, cy, ang) {
+  if (!walkers.length) return null;
+  const c = Math.cos(ang), s = Math.sin(ang), hl = b.len / 2 + PAX_CLEAR, hw = 33 + PAX_CLEAR;
+  return walkers.find(p => {
+    const x = p.x - cx, y = p.y - cy;
+    return Math.abs(x * c + y * s) < hl && Math.abs(-x * s + y * c) < hw;
+  }) || null;
+}
+// A guest who has held a bus for a while (stuck on a route, or standing still in
+// the bus's path) steps sideways out of the bus's body, so the bus is never
+// stuck behind them for long — and still never drives over them.
+const PAX_SHOVE_AFTER = 1; // real seconds a bus may be held by one guest before they step aside
+function shoveOutOfBus(p) {
+  // nearest spot clear of every bus (including this one) — the guest may have been
+  // walled in between parked buses, where their route out is closed
+  const q = outsideBuses({ x: p.x, y: p.y }, outdoorBusObstacles());
+  p.x = q.x; p.y = q.y;
+}
+// Walks a bus from s0 to s1 in small steps (poseAt maps a position to its pose)
+// and returns how far it gets before its body would cover a guest.
+function sweepClear(b, walkers, s0, s1, poseAt) {
+  if (!walkers.length) return { s: s1, blocked: false, hit: null };
+  const n = Math.max(1, Math.ceil(Math.abs(s1 - s0) / 3));
+  for (let i = 1; i <= n; i++) {
+    const s = i === n ? s1 : s0 + (s1 - s0) * i / n;
+    const q = poseAt(s);
+    const hit = paxUnderPose(walkers, b, q.cx, q.cy, q.ang);
+    if (hit) return { s: s0 + (s1 - s0) * (i - 1) / n, blocked: true, hit }; // stop short of the guest
+  }
+  return { s: s1, blocked: false, hit: null };
+}
+
 // Outdoor walkers use bus-sized obstacles with a little personal-space padding.
 // A visibility graph around the bus corners routes paths without letting guests
 // cut through parked or moving buses, including on the way back to their door.
-const PAX_BUS_GAP = 9;
+const PAX_BUS_GAP = 3; // kept small: two buses in neighbouring bays leave an 18px gap, and a wider pad would wall guests off from their door
 function outdoorBusObstacles() {
   return buses.map(b => ({
     b, hl: b.len / 2 + PAX_BUS_GAP, hw: 33 + PAX_BUS_GAP,
@@ -1653,6 +1702,8 @@ function beginEnter(b, slot) {
   if (S.slotVacantSince) S.slotVacantSince[slot] = null; // stall is spoken for — the vacancy backstop drops
   b.stoppedOnce = true;
   b.state = "enter";
+  b.phase = PHASE.PARKING; // keeps the parking reservation until finishEnter
+  b.parkSlot = null;       // the reservation now lives in b.slot
   b.stopElapsed = 0; // terminal-dwell clock starts as the bus rolls in
   b.mv = { s: 0 };
   b.blink = true;
@@ -1683,6 +1734,8 @@ function finishEnter(b) {
   b.cx = g.tx; b.cy = g.ty; b.ang = -busDir(b) * Math.PI / 2;
   b.v = 0; b.brake = false; b.blink = false; b.mv = null;
   b.state = "stop";
+  b.phase = PHASE.PARKED; // fully stationary in the bay: the parking reservation is released
+  b.reqSeq = null;
   b.stopStart = G.clock.time;
   if (S.slotVacantSince) S.slotVacantSince[b.slot] = null; // stall filled
   // Planned layover: ~31 min (25–36 in-game minutes) from the moment the bus
@@ -1720,20 +1773,21 @@ function guaranteeWc(b) {
   }
 }
 
-const DEPART_GAP_HOURS = 5 / 60; // minimum game time between two buses pulling out (5 game minutes)
+// Called by the traffic controller once the bus holds the departure reservation
+// and its reversing path is clear: the bus starts backing out.
 function endStop(b) {
-  G.lastDepartAt = G.clock.time;
   if (b.slot != null && S.slotVacantSince) S.slotVacantSince[b.slot] = G.clock.time; // stall vacant — backstop clock starts
   b.exitSlot = b.slot; // the bay stays reserved while this bus backs out of it
   b.slot = null;
   b.state = "exit";
+  b.phase = PHASE.REVERSING;
   b.mv = { s: 0, sx: b.cx, sy: b.cy };
   b.v = 0; b.rev = true;
   for (const p of b.pax) {
     if (p.state === "serveR" || p.state === "serveT" || p.state === "scrubC" || p.state === "selfDripC") continue; // let them finish, they'll board after
     if (p.state === "queueC" || p.state === "payC" || p.state === "doneC" || p.state === "dripC" ||
         p.state === "queueC2" || p.state === "payC2") continue; // still at the counter — they'll finish & board after
-    if (p.state === "leaveC") { p.x = 852; p.y = 169; p.runaway = false; goDoor(p, b); continue; } // at the exit door — out & sprint for the bus
+    if (p.state === "leaveC") { p.x = 852; p.y = 169 - BUILD_LIFT; p.runaway = false; goDoor(p, b); continue; } // at the exit door — out & sprint for the bus
     if (p.state !== "bus") p.state = "board";
   }
   // reputation outcome
@@ -1758,6 +1812,8 @@ function finishExit(b) {
   b.cy = laneCy(b); b.ang = 0;
   b.mv = null; b.rev = false;
   b.state = "drive";
+  b.phase = PHASE.DEPARTING; // clear of the bay and on its lane: the departure reservation is released
+  b.reqSeq = null;
   b.v = 0;
   b.holdT = 0.7; // brake held, shift from reverse into drive, then pull away
 }
@@ -1770,9 +1826,11 @@ function finishExit(b) {
 // `slack` is how far past a turn-in point still counts (a coarse step at a
 // high speed tier can jump far past it in one go).
 function baySlotFor(b, slack, cx = b.cx) {
-  // a bay is taken by a bus parked or pulling in there, or by a bus still backing out of it (until it is on the road)
+  // a bay is taken by a bus parked or pulling in there, by a bus still backing out of it (until it is on
+  // the road), or by the bus holding the parking reservation for it
   const free = i => !buses.some(o => o !== b && (((o.state === "stop" || o.state === "enter") && o.slot === i)
-    || (o.state === "exit" && o.exitSlot === i && o.cy < ROAD.top)));
+    || (o.state === "exit" && o.exitSlot === i && o.cy < ROAD.top)
+    || (o.phase === PHASE.WAIT_PARK_CLEAR && o.parkSlot === i)));
   const ok = i => free(i) && busDir(b) * (cx - enterGeom(b, i).x0) <= slack;
   if (b.forcedSlot != null && ok(b.forcedSlot)) return b.forcedSlot; // != null: plain schedule buses carry null, and null >= 0 is true in JS
   const order = busDir(b) > 0 ? activeParkingSlots() : [...activeParkingSlots()].reverse();
@@ -1780,36 +1838,31 @@ function baySlotFor(b, slack, cx = b.cx) {
   return -1;
 }
 
-// Cruise speed for a bus on the lane: slow for the upcoming turn-in, and
-// keep a gap behind whatever is ahead (including a bus backing out of a stall).
+// The bay a bus on the road is heading for: the one it holds the parking
+// reservation for, else the first free one ahead (-1: none, or not visiting).
+function targetSlot(b, slack = 0, cx = b.cx) {
+  if (b.through || b.stoppedOnce || b.state !== "drive") return -1;
+  if (b.phase === PHASE.WAIT_PARK_CLEAR) return b.parkSlot;
+  return baySlotFor(b, slack, cx);
+}
+
+// Cruise speed for a bus on the lane: slow for the upcoming turn-in (and come
+// to a smooth stop short of it while it may not turn yet), and keep a gap
+// behind whatever is ahead on its lane.
 function driveTarget(b) {
   let vT = BUS_V;
   b.blink = false;
-  if (!b.stoppedOnce) {
-    const si = baySlotFor(b, 0);
-    if (si >= 0) {
-      const dist = enterGeom(b, si).x0 - b.cx;
-      vT = Math.min(vT, Math.sqrt(BUS_TURN_V * BUS_TURN_V + 2 * BUS_BRAKE * Math.max(0, dist)));
-      b.blink = dist < 260;
-    }
+  const si = targetSlot(b);
+  if (si >= 0) {
+    const dist = busDir(b) * (enterGeom(b, si).x0 - b.cx);
+    const go = b.phase === PHASE.WAIT_PARK_CLEAR && (dist > PARK_GATE_DIST || maneuverClear(b));
+    const vEnd = go ? BUS_TURN_V : 0; // rolls straight into the turn, or stops at the waiting position
+    vT = Math.min(vT, Math.sqrt(vEnd * vEnd + 2 * BUS_BRAKE * Math.max(0, dist - 1)));
+    b.blink = dist < PARK_REQUEST_DIST; // signalling the turn-in
   }
   const room = laneRoom(b);
   if (room < Infinity) vT = Math.min(vT, Math.max(0, room * 1.4));
   return vT;
-}
-
-// Would this bus, at pose `pose`, overlap a bus already driving on the road?
-function busBlocksBackingOut(b, pose) {
-  const half = (cx, cy, ang, len) => ({
-    hx: Math.abs(Math.cos(ang)) * len / 2 + Math.abs(Math.sin(ang)) * 33,
-    hy: Math.abs(Math.sin(ang)) * len / 2 + Math.abs(Math.cos(ang)) * 33,
-  });
-  const a = half(pose.cx, pose.cy, pose.ang, b.len), GAP = 12;
-  return buses.some(o => {
-    if (o === b || o.state !== "drive") return false;
-    const c = half(o.cx, o.cy, o.ang, o.len);
-    return Math.abs(pose.cx - o.cx) < a.hx + c.hx + GAP && Math.abs(pose.cy - o.cy) < a.hy + c.hy + GAP;
-  });
 }
 
 // Pass-through buses use their own lanes: right-to-left in the upper lane, left-to-right in the lower one.
@@ -1817,60 +1870,315 @@ const THROUGH_LANE = { 1: 476, "-1": 432 };
 const laneCy = b => THROUGH_LANE[busDir(b)]; // bus centre; its wheels sit ~30px lower, level with the cars in the same direction (left-going y 462, right-going y 514) // left-to-right: lower lane; right-to-left: upper lane, both kept on the asphalt
 const busDir = b => (b.dir || 1);
 
-// The edge of the nearest bus ahead of b on its own lane, in its travel direction
-// (Infinity / -Infinity if none). A bus never moves past it: buses on a lane keep their order.
-function laneLead(b) {
-  const dir = busDir(b);
-  let best = dir > 0 ? Infinity : -Infinity;
-  // the nearest edge in front of b: keep `best` as the closest one
-  const ahead = edge => (dir > 0 ? edge > b.cx : edge < b.cx);
-  const take = edge => { best = dir > 0 ? Math.min(best, edge) : Math.max(best, edge); };
-  for (const o of buses) {
-    if (o === b || o.state === "stop") continue;
-    const sameDir = busDir(o) === dir;
-    if (o.state === "enter" && o.slot != null) {
-      // turning into its bay: every bus on the road waits short of its turn-in point until it has parked
-      const g = enterGeom(o, o.slot), turnPt = g.x0;
-      const edge = dir > 0 ? turnPt - o.len / 2 : turnPt + o.len / 2;
-      if (ahead(edge)) take(edge);
-      continue;
-    }
-    if (o.state === "exit" && o.mv && Math.abs(o.cy - laneCy(o)) > 2) {
-      // still backing out of its bay: whichever way the bus on the road is going, it waits
-      // short of the spot where the leaving bus will cross into the lane (the bus's near edge)
-      // its sweep covers the whole stretch from the bay to the lane, so wait clear of all of it (plus the bus's half-width)
-      const g = exitGeom(o), lanePt = g.sx - g.sg * g.R;
-      const edge = dir > 0 ? Math.min(g.sx, lanePt) - 40 : Math.max(g.sx, lanePt) + 40;
-      if (ahead(edge)) take(edge);
-      continue;
-    }
-    // buses only queue behind buses going their own way; the other way is handled at the bay turn-in and exit points above
-    if (!sameDir) continue;
-    const c = Math.cos(o.ang), s = Math.sin(o.ang);
-    const ry = o.cy - s * o.len / 2;          // tail end of the other bus
-    // a bus turning into its bay still holds up the buses behind it until it has parked (state "stop")
-    if (dir > 0) {
-      const rearX = Math.min(o.cx, o.cx - c * o.len / 2) - 33 * Math.abs(s);
-      if (ahead(rearX)) take(rearX);
-    } else {
-      const frontX = Math.max(o.cx, o.cx + c * o.len / 2) + 33 * Math.abs(s);
-      if (ahead(frontX)) take(frontX);
-    }
-  }
-  // every bus on the road keeps behind the cars going its way on its lane (the bus's wheels sit ~30px below its centre)
-  for (const c of cars) {
-    if ((c.v > 0 ? 1 : -1) !== dir || Math.abs(c.y - (b.cy + 30)) > 25) continue;
-    const edge = dir > 0 ? c.x : c.x + ROAD_CAR_LENGTH; // the car's leading edge
-    if (ahead(edge)) take(edge);
-  }
-  return best;
+/* --------------------------- Traffic controller --------------------------- */
+// One two-way road: lane +1 (rightbound, lower: cars y 514, buses cy 476) and
+// lane -1 (leftbound, upper: cars y 462, buses cy 432). Every car and bus on
+// the road keeps to its lane and to its order on it — nothing ever passes
+// anything going its way. Everything that crosses lanes is decided here:
+//  • the maneuver reservation: ONE bus parks or ONE bus reverses out at a time.
+//    Parking and departure have separate owners (a bus in WAIT_PARK_CLEAR /
+//    PARKING, or in WAIT_DEPART_CLEAR / REVERSING) and they exclude each other.
+//    Requests are served first come, first served (b.reqSeq); a bus is passed
+//    over only while a later one stands in its way (see trafficControl), so no
+//    bus starves and the road can't deadlock. Parked buses hold nothing.
+//  • reserved zones: the stretch of each lane that the owner's body will sweep
+//    over for the rest of its maneuver (sampled from its real path). No vehicle
+//    enters a zone; one already inside (or too close to stop) drives out, and
+//    the maneuver starts only once the zones are empty. A lane the path never
+//    touches is never stopped, and a zone shrinks as the bus moves along.
+//  • the stop line every car and bus drives to: the vehicle ahead on its lane,
+//    or the near edge of a reserved zone (laneLimit).
+// The owners are derived from the buses' phases, so they survive a save/load
+// and each terminal has its own.
+const PHASE = {
+  APPROACHING: "APPROACHING",
+  WAIT_PARK_PERMIT: "WAITING_FOR_PARKING_PERMISSION",
+  WAIT_PARK_CLEAR: "WAITING_FOR_PARKING_CLEARANCE",
+  PARKING: "PARKING",
+  PARKED: "PARKED",
+  WAIT_DEPART_PERMIT: "WAITING_FOR_DEPARTURE_PERMISSION",
+  WAIT_DEPART_CLEAR: "WAITING_FOR_DEPARTURE_CLEARANCE",
+  REVERSING: "REVERSING",
+  DEPARTING: "DEPARTING",
+};
+// The phases each movement state allows (b.state drives the motion and the guests; b.phase the traffic).
+const PHASES_OF_STATE = {
+  drive: [PHASE.APPROACHING, PHASE.WAIT_PARK_PERMIT, PHASE.WAIT_PARK_CLEAR, PHASE.DEPARTING],
+  enter: [PHASE.PARKING],
+  stop: [PHASE.PARKED, PHASE.WAIT_DEPART_PERMIT, PHASE.WAIT_DEPART_CLEAR],
+  exit: [PHASE.REVERSING],
+};
+const PARK_REQUEST_DIST = 260; // a bus signals and asks for the parking reservation this far before its turn-in point
+const PARK_GATE_DIST = 60;     // the owner closes its turning area to traffic this close to the turn-in point
+const LANE_BAND = { 1: [482, 510], "-1": [430, 458] }; // y-extent of each lane's traffic: a turning bus whose body reaches into it occupies that lane
+const ZONE_PAD = 10;   // px kept clear around a maneuvering bus's swept path
+const BUS_GAP = 24;    // px a bus keeps behind whatever is ahead on its lane
+const MOVING = 5;      // px/s — slower than this, a vehicle counts as standing
+const CAR_ACC = 140, CAR_BRAKE = 240, CAR_HARD_BRAKE = 600, CAR_HEADWAY = 0.3; // px/s², s
+const BUS_HARD_BRAKE = 3 * BUS_BRAKE; // what driveTarget brakes at
+const vehGap = o => (o.car ? ROAD_CAR_GAP : BUS_GAP);
+const brakeDist = o => o.v * o.v / (2 * (o.car ? CAR_HARD_BRAKE : BUS_HARD_BRAKE));
+
+const isParkOwner = b => b.phase === PHASE.WAIT_PARK_CLEAR || b.phase === PHASE.PARKING;
+const isDepartOwner = b => b.phase === PHASE.WAIT_DEPART_CLEAR || b.phase === PHASE.REVERSING;
+const isPermitWaiter = b => b.phase === PHASE.WAIT_PARK_PERMIT || b.phase === PHASE.WAIT_DEPART_PERMIT;
+function trafficOwners() {
+  return { park: buses.find(isParkOwner) || null, depart: buses.find(isDepartOwner) || null };
 }
-// How far b may still travel in its direction before it would close on the bus ahead (24px gap kept).
+
+// Every vehicle on the road as { ref, car|bus, dir, l, r, v }: its lane, x-extent and speed (px/s, ≥ 0).
+// The ambient cars drive past the terminal on screen; a terminal stepped in the background has none.
+function laneVehicles() {
+  const out = [];
+  if (boundId === G.activeTerminal) for (const c of cars)
+    out.push({ ref: c, car: true, dir: c.v > 0 ? 1 : -1, l: c.x, r: c.x + ROAD_CAR_LENGTH, v: c.spd != null ? c.spd : Math.abs(c.v) });
+  for (const b of buses) if (b.state === "drive")
+    out.push({ ref: b, bus: true, dir: busDir(b), l: b.cx - b.len / 2, r: b.cx + b.len / 2, v: b.v || 0 });
+  return out;
+}
+
+// The x-extent of the part of a bus body (pose q) that lies inside the y-band [y0, y1], or null.
+// A level bus reads side-on and stays in its own lane (its depth is ~24 px); a turned one
+// is a 66 px-wide slab — the body is that rectangle, clipped to the band.
+function bodyBandSpan(q, len, y0, y1) {
+  const c = Math.cos(q.ang), s = Math.sin(q.ang), hl = len / 2, w = 12 + 21 * Math.abs(s);
+  let poly = [[hl, w], [hl, -w], [-hl, -w], [-hl, w]].map(([u, v]) => [q.cx + u * c - v * s, q.cy + u * s + v * c]);
+  for (const [lim, keep] of [[y0, y => y >= y0], [y1, y => y <= y1]]) { // clip against each band edge
+    const out = [];
+    poly.forEach((p, i) => {
+      const n = poly[(i + 1) % poly.length];
+      if (keep(p[1])) out.push(p);
+      if (keep(p[1]) !== keep(n[1])) out.push([p[0] + (n[0] - p[0]) * (lim - p[1]) / (n[1] - p[1]), lim]);
+    });
+    poly = out;
+    if (!poly.length) return null;
+  }
+  return { l: Math.min(...poly.map(p => p[0])), r: Math.max(...poly.map(p => p[0])) };
+}
+// The lane stretches a bus's body covers while it follows poseAt(s) for s0..s1
+// (plus its current pose when withBody), as zones { owner, dir, l, r }.
+function sweepZones(b, poseAt, s0, s1, withBody) {
+  const span = {};
+  const add = q => {
+    for (const d of [1, -1]) {
+      const hit = bodyBandSpan(q, b.len, ...LANE_BAND[d]);
+      if (!hit) continue;
+      const z = span[d] || (span[d] = { l: Infinity, r: -Infinity });
+      z.l = Math.min(z.l, hit.l); z.r = Math.max(z.r, hit.r);
+    }
+  };
+  if (withBody) add(b);
+  const n = Math.max(1, Math.ceil((s1 - s0) / 6));
+  for (let i = 0; i <= n; i++) add(poseAt(s0 + (s1 - s0) * i / n));
+  return Object.keys(span).map(d => ({ owner: b, dir: +d, l: span[d].l - ZONE_PAD, r: span[d].r + ZONE_PAD }));
+}
+
+// The road b's maneuver needs from here on. A bus that only waits for permission
+// reserves nothing; `prospective` asks what it WOULD need (for clearance and grant checks).
+function maneuverZones(b, prospective = false) {
+  if (b.state === "enter") { const g = enterGeom(b, b.slot); return sweepZones(b, s => enterPose(g, s), b.mv.s, g.L, true); }
+  if (b.state === "exit") { const g = exitGeom(b); return sweepZones(b, s => exitPose(g, s), b.mv.s || 0, g.L, true); }
+  if (b.state === "stop" && (prospective || b.phase === PHASE.WAIT_DEPART_CLEAR)) {
+    const g = exitGeom(b, b.cx, b.cy); // the whole back-out, down to the bus standing on its lane
+    return sweepZones(b, s => exitPose(g, s), 0, g.L, false);
+  }
+  if (b.state === "drive" && (prospective || b.phase === PHASE.WAIT_PARK_CLEAR)) {
+    const si = targetSlot(b);
+    if (si == null || si < 0) return [];
+    const g = enterGeom(b, si);
+    // the owner closes its turning area only once it is about to reach the turn-in point:
+    // oncoming traffic keeps flowing while it is still on its way
+    if (!prospective && busDir(b) * (g.x0 - b.cx) > PARK_GATE_DIST) return [];
+    return sweepZones(b, s => enterPose(g, s), 0, g.L, !prospective);
+  }
+  return [];
+}
+// Who was already too close to stop when each owner's zone on a lane closed:
+// owner bus → { [dir]: Set of vehicle refs }. Decided once, at the moment the
+// zone appears — from then on every other vehicle stops short of it, however
+// late it brakes. (Runtime only: after a load the owners queue up afresh.)
+const zoneCommits = new WeakMap();
+const cannotStopShort = (o, z) => {
+  const d = o.dir > 0 ? z.l - o.r : o.l - z.r;
+  return d >= 0 && o.v >= MOVING && d - vehGap(o) < brakeDist(o);
+};
+// The zones the maneuver owners hold right now (each carrying its committed set).
+function reservedZones() {
+  const zones = [];
+  let vehicles = null;
+  for (const b of buses) {
+    if (!isParkOwner(b) && !isDepartOwner(b)) continue;
+    let commits = zoneCommits.get(b);
+    if (!commits) zoneCommits.set(b, commits = {});
+    for (const z of maneuverZones(b)) {
+      if (!commits[z.dir]) { // this lane closes now
+        vehicles = vehicles || laneVehicles();
+        commits[z.dir] = new Set(vehicles.filter(o => o.dir === z.dir && o.ref !== b && cannotStopShort(o, z)).map(o => o.ref));
+      }
+      z.committed = commits[z.dir];
+      zones.push(z);
+    }
+  }
+  return zones;
+}
+
+// How vehicle o relates to zone z: "inside" it, "committed" (on its way in and too
+// close to stop short — it drives on through), "ahead" (it must stop short of it), or null.
+// A zone that is only being planned (no committed set yet) judges by stopping distance.
+function zoneRelation(o, z) {
+  if (o.dir !== z.dir || o.ref === z.owner) return null;
+  if (o.r > z.l && o.l < z.r) return "inside";
+  const d = o.dir > 0 ? z.l - o.r : o.l - z.r;
+  if (d < 0) return null; // already past it
+  if (!z.committed) return cannotStopShort(o, z) ? "committed" : "ahead";
+  if (z.committed.has(o.ref)) {
+    if (o.v >= MOVING) return "committed";
+    z.committed.delete(o.ref); // it stopped short after all: now it waits like everyone else
+  }
+  return "ahead";
+}
+
+// How far vehicle `me` may still move along its lane: up to the vehicle ahead
+// (minus the gap) or the near edge of a reserved zone it has not entered.
+// leadV: the speed of what limits it; blocker: that vehicle or zone.
+function laneLimit(me, vehicles, zones) {
+  const dir = me.dir, front = dir > 0 ? me.r : me.l, mid = (me.l + me.r) / 2, gap = vehGap(me);
+  let room = Infinity, leadV = 0, blocker = null;
+  for (const o of vehicles) {
+    if (o === me || o.dir !== dir || dir * ((o.l + o.r) / 2 - mid) <= 0) continue; // other lane, or behind
+    const d = dir * ((dir > 0 ? o.l : o.r) - front) - gap;
+    if (d < room) { room = d; leadV = o.v; blocker = o; }
+  }
+  for (const z of zones) {
+    if (zoneRelation(me, z) !== "ahead") continue;
+    const d = dir * ((dir > 0 ? z.l : z.r) - front) - gap;
+    if (d < room) { room = d; leadV = 0; blocker = z; }
+  }
+  return { room, leadV, blocker };
+}
+// How far bus b (on the road) may still drive before closing on what is ahead of it.
 function laneRoom(b) {
-  if ((b.stuckT || 0) > 8) return Infinity; // stuck behind traffic for too long: go anyway, so the road never locks up
-  const lead = laneLead(b);
-  if (!isFinite(lead)) return Infinity;
-  return busDir(b) > 0 ? lead - (b.cx + b.len / 2) - 24 : (b.cx - b.len / 2) - lead - 24;
+  const vehicles = laneVehicles(), me = vehicles.find(o => o.ref === b);
+  return me ? laneLimit(me, vehicles, reservedZones()).room : Infinity;
+}
+
+// The vehicles keeping b from starting its maneuver: inside the road it needs, or too close to stop short of it.
+function maneuverBlockers(b, vehicles = laneVehicles()) {
+  const held = reservedZones().filter(z => z.owner === b);
+  const zones = held.length ? held : maneuverZones(b, true);
+  return vehicles.filter(o => o.ref !== b && zones.some(z => {
+    const rel = zoneRelation(o, z);
+    return rel === "inside" || rel === "committed";
+  }));
+}
+const maneuverClear = b => maneuverBlockers(b).length === 0;
+
+// The permission-waiting bus at the head of the standing queue that vehicle o is part of (or null).
+function queueHeadWaiter(o, vehicles, zones, seen = new Set()) {
+  if (o.bus && o.ref.phase === PHASE.WAIT_PARK_PERMIT) return o.ref;
+  if (o.v >= MOVING || seen.has(o)) return null;
+  seen.add(o);
+  const lim = laneLimit(o, vehicles, zones);
+  return lim.blocker && !lim.blocker.owner && lim.room < 12 ? queueHeadWaiter(lim.blocker, vehicles, zones, seen) : null;
+}
+// A bus waiting for permission whose queue stands in the road b needs: b can't
+// get clear before that bus has gone, so that bus goes first (no deadlock).
+function blockingWaiter(b, vehicles, zones) {
+  for (const o of maneuverBlockers(b, vehicles)) {
+    const w = queueHeadWaiter(o, vehicles, zones);
+    if (w && w !== b) return w;
+  }
+  return null;
+}
+
+// A bus asks for the parking or departure reservation (keeping its place in line if it already has one).
+function requestManeuver(b, phase) {
+  b.phase = phase;
+  if (b.reqSeq == null) b.reqSeq = S.trafficSeq = (S.trafficSeq || 0) + 1;
+  trafficControl(); // granted at once if the terminal is free
+}
+function grantManeuver(b) {
+  if (b.phase === PHASE.WAIT_DEPART_PERMIT) { b.phase = PHASE.WAIT_DEPART_CLEAR; return true; }
+  const si = targetSlot(b);
+  if (si < 0) return false; // no free bay ahead any more — its approach drops the request
+  b.parkSlot = si; // the bay is reserved for it from now on
+  b.phase = PHASE.WAIT_PARK_CLEAR;
+  return true;
+}
+// Test hook: when an array, every grant and hand-back is recorded with its reason.
+let trafficTrace = null;
+// Once per terminal step: hand the maneuver reservation to the next eligible bus.
+function trafficControl() {
+  const vehicles = laneVehicles();
+  let zones = reservedZones();
+  let { park, depart } = trafficOwners();
+  for (const b of buses) if (b !== park && b !== depart) zoneCommits.delete(b); // no longer an owner
+  // An owner still waiting for clearance whose road is filled by a queue standing
+  // behind a bus that waits for permission hands the reservation back (keeping
+  // its place in line), so that bus goes first and the queue can drain.
+  for (const o of [park, depart]) {
+    if (!o || (o.phase !== PHASE.WAIT_PARK_CLEAR && o.phase !== PHASE.WAIT_DEPART_CLEAR)) continue;
+    const w = blockingWaiter(o, vehicles, zones);
+    if (!w || blockingWaiter(w, vehicles, zones)) continue; // a true standoff: keep it, traffic will move
+    o.phase = o.phase === PHASE.WAIT_PARK_CLEAR ? PHASE.WAIT_PARK_PERMIT : PHASE.WAIT_DEPART_PERMIT;
+    if (trafficTrace) trafficTrace.push({ handback: o.id, to: w.id });
+    o.parkSlot = null;
+    zoneCommits.delete(o);
+    if (o === park) park = null; else depart = null;
+    zones = reservedZones();
+  }
+  if (park || depart) return; // one maneuver at a time — parking and departure exclude each other
+  const waiting = buses.filter(isPermitWaiter).sort((a, b) => a.reqSeq - b.reqSeq);
+  // first come, first served — skipping a bus whose road is held up behind a later one
+  const blockedBy = new Map(waiting.map(b => [b, blockingWaiter(b, vehicles, zones)]));
+  const order = [...waiting.filter(b => !blockedBy.get(b)), ...waiting];
+  const tried = new Set();
+  for (const b of order) {
+    if (tried.has(b)) continue;
+    tried.add(b);
+    if (!grantManeuver(b)) continue;
+    if (trafficTrace) trafficTrace.push({ granted: b.id, skipped: waiting.filter(w => w.reqSeq < b.reqSeq).map(w => ({
+      id: w.id, why: blockedBy.get(w) ? "blocked by " + blockedBy.get(w).id : tried.has(w) ? "no free bay" : null,
+    })) });
+    return;
+  }
+}
+
+// The terminal approach of a visiting bus on the road, given the step it is
+// about to drive: signal and ask for the parking reservation, wait short of the
+// turn-in point until it holds it and the turning area is clear, then turn in.
+// Returns the step it may drive, or null once it has turned in.
+function parkingApproach(b, step) {
+  const sg = busDir(b);
+  const si = targetSlot(b, step + 2, b.cx + step * sg);
+  if (si < 0) { // no free bay ahead: it drives on through
+    if (b.phase === PHASE.WAIT_PARK_PERMIT) { b.phase = PHASE.APPROACHING; b.reqSeq = null; }
+    return step;
+  }
+  const dist = sg * (enterGeom(b, si).x0 - b.cx);
+  if (b.phase === PHASE.APPROACHING && dist <= PARK_REQUEST_DIST) requestManeuver(b, PHASE.WAIT_PARK_PERMIT);
+  if (step < dist) return step; // not at the turn-in point yet
+  if (b.phase === PHASE.WAIT_PARK_CLEAR && b.parkSlot === si && maneuverClear(b)) {
+    b.cx += step * sg;
+    beginEnter(b, si); // snaps onto the start of the turn
+    return null;
+  }
+  // the waiting position: just short of the turn-in point, outside the turning area
+  b.v = 0; b.brake = true;
+  return Math.max(0, dist - 1);
+}
+
+// The traffic phase a loaded bus is in. An owner still waiting for clearance
+// goes back in line (keeping its turn): the controller re-grants on the next step.
+function syncPhase(b) {
+  if (b.through) { b.phase = null; return; }
+  const allowed = PHASES_OF_STATE[b.state] || [];
+  if (!allowed.includes(b.phase))
+    b.phase = b.state === "drive" ? (b.stoppedOnce ? PHASE.DEPARTING : PHASE.APPROACHING) : allowed[0];
+  if (b.phase === PHASE.WAIT_PARK_CLEAR) b.phase = PHASE.WAIT_PARK_PERMIT;
+  if (b.phase === PHASE.WAIT_DEPART_CLEAR) b.phase = PHASE.WAIT_DEPART_PERMIT;
+  if (isPermitWaiter(b) && b.reqSeq == null) b.reqSeq = S.trafficSeq = (S.trafficSeq || 0) + 1;
+  b.parkSlot = null;
 }
 
 // The cleanest built stall, occupied or not — the bar that makes a guest
@@ -1926,7 +2234,7 @@ function tryJoin(fac, p, bus) {
 
 function headToFacility(fac, p, bus) {
   if (fac === "R" && !LOKANTA_OPEN) { p.refuseR = true; wander(p); return; }
-  const entrance = fac === "T" ? { x: 851, y: 184 } : { x: 690, y: 184 };
+  const entrance = fac === "T" ? { x: 851, y: 184 - BUILD_LIFT } : { x: 690, y: 184 - BUILD_LIFT };
   p.want = fac;
   p.state = "walk";
   p.tx = entrance.x; p.ty = entrance.y;
@@ -1943,7 +2251,7 @@ function wander(p) {
   // leaves the guest standing forever)
   const obstacles = outdoorBusObstacles();
   for (let n = 0; n < 12; n++) {
-    const x = rand(560, 940), y = rand(195, 330);
+    const x = rand(560, 940), y = rand(WALK_TOP + 6, 330);
     const inBus = obstacles.some(o => {
       const l = busLocalPoint({ x, y }, o);
       return Math.abs(l.x) < o.hl && Math.abs(l.y) < o.hw;
@@ -3593,7 +3901,7 @@ function offerCologne() {
 // viaDoor: the guest is still INSIDE the WC — no snap out; they take the
 // long way home, strolling to the exit (the "leaveC" state below).
 function finishVisit(p, sat, viaDoor = false) {
-  if (!viaDoor && isIndoorPax(p)) { p.x = 852; p.y = 169; } // back on the outdoor side of the door
+  if (!viaDoor && isIndoorPax(p)) { p.x = 852; p.y = 169 - BUILD_LIFT; } // back on the outdoor side of the door
   sat = clamp(sat, 0, 100);
   p.sat = sat;
   p.refuseR = p.refuseT = false;
@@ -3735,14 +4043,15 @@ function stepTerminal(dt, timeDt) {
   }
   openingBus();
   const scheduleDue = reached(S.nextBusAt);
-  if ((scheduleDue || vacantTooLong >= 0) && parked < capacity && !inbound && buses.filter(b => !b.through).length < capacity) {
+  if (autoTraffic && (scheduleDue || vacantTooLong >= 0) && parked < capacity && !inbound && buses.filter(b => !b.through).length < capacity) {
     // The 8-minute backstop reserves the bay that went quiet longest (baySlotFor
     // honors forcedSlot); a scheduled bus takes the first free stall it reaches.
-    spawnBus(vacantTooLong >= 0 ? vacantTooLong : null);
-    S.nextBusAt = G.clock.time + busInterval();
+    // (it waits while its lane is backed up to the edge — it never appears inside a vehicle or a reserved zone)
+    if (spawnBus(vacantTooLong >= 0 ? vacantTooLong : null)) S.nextBusAt = G.clock.time + busInterval();
   }
 
-  // buses
+  // buses — the traffic controller first hands out the maneuver reservation
+  trafficControl();
   for (let i = buses.length - 1; i >= 0; i--) {
     const b = buses[i];
     if (b.state === "drive") {
@@ -3754,23 +4063,20 @@ function stepTerminal(dt, timeDt) {
         b.brake = b.v > vT + 0.2;
         b.v = b.v < vT ? Math.min(vT, b.v + BUS_ACC * dt) : Math.max(vT, b.v - 3 * BUS_BRAKE * dt);
       }
-      b.stuckT = b.v < 2 ? (b.stuckT || 0) + dt : 0;
       let step = b.v * dt;
-      // hard limit: never drive into the gap the bus ahead needs (no overtaking)
+      // hard limit: never drive into the gap the vehicle ahead needs, nor into a reserved zone (no overtaking)
       const room = laneRoom(b);
       if (step > room) { step = Math.max(0, room); b.v = 0; b.brake = true; }
       const sg = busDir(b);
-      const si = !b.stoppedOnce ? baySlotFor(b, step + 2, b.cx + step * sg) : -1;
-      const entry = si >= 0 ? enterGeom(b, si) : null;
-      const trafficWait = !!entry && sg * (b.cx + step * sg - entry.x0) >= 0 && (b.stuckT || 0) <= 8 && carsBlockBusCrossing(entry.x0, entry.tx, b.len);
-      if (trafficWait) {
-        b.cx = sg > 0 ? Math.min(b.cx, entry.x0 - 1) : Math.max(b.cx, entry.x0 + 1);
-        b.v = 0; b.brake = true;
-      } else b.cx += step * sg;
-      b.cy = lerp(b.cy, laneCy(b), Math.min(1, dt * 3));
-      b.ang = lerp(b.ang, 0, Math.min(1, dt * 5));
-      // Yield to cars already crossing the driveway, then commit to the turn.
-      if (!b.stoppedOnce && !trafficWait && entry && sg * (b.cx - entry.x0) >= 0) beginEnter(b, si);
+      const onLane = sweepClear(b, walkingPax(), b.cx, b.cx + step * sg, x => ({ cx: x, cy: laneCy(b), ang: 0 }));
+      if (onLane.blocked) { step = Math.abs(onLane.s - b.cx); b.v = 0; b.brake = true; b.paxHit = onLane.hit; }
+      // a visiting bus asks for the parking reservation, waits short of its turn-in point, then turns in
+      const lane = !b.stoppedOnce && !b.through ? parkingApproach(b, step) : step;
+      if (lane != null) {
+        b.cx += lane * sg;
+        b.cy = lerp(b.cy, laneCy(b), Math.min(1, dt * 3));
+        b.ang = lerp(b.ang, 0, Math.min(1, dt * 5));
+      }
       // Only cull buses still driving: a coarse step (a 100x/200x frame on a
       // busy tab moves a bus 185·10 = 1850px) can carry an inbound bus past
       // every bay threshold AND the removal line in the same step — the
@@ -3822,50 +4128,51 @@ function stepTerminal(dt, timeDt) {
         }
         b.__lineDeadline = lineDeadline; // the shared window (null if nobody was in the line)
       }
-      // one bus leaves at a time: wait while another bus is still pulling out
-      // one bus leaves at a time: none may be backing out, and a few game minutes must pass since the last departure
-      // and no bus may be on the road near this bay's exit point, since the bus would sweep through it
-      const bayX = BAY_SLOTS[b.slot] ? BAY_SLOTS[b.slot].cx : null;
-      const roadNear = bayX != null && buses.some(o => o !== b && o.state === "drive" && Math.abs(o.cx - bayX) < 220);
-      const busAhead = buses.some(o => o !== b && o.state === "exit") || roadNear
-        || (G.lastDepartAt != null && G.clock.time - G.lastDepartAt < DEPART_GAP_HOURS);
-      if (reached(b.stopEnd) && allAbroad(b) && !busAhead) {
-        b.boardGrace = (b.boardGrace || 0) + dt;
-        if (b.boardGrace >= (b.boardWait != null ? b.boardWait : 2)) endStop(b);
-      } else if (b.stopElapsed >= SECONDS_PER_HOUR) {
-        // Hard cap: a full in-game hour in the terminal. The bus leaves no
-        // matter what — anyone still in the WC payment line gives up on the
-        // payment and walks for the boarding door.
-        for (const p of b.pax) {
-          for (const q of [facilities.C.queue, facilities.C.queue2]) {
-            const qi = q.indexOf(p);
-            if (qi >= 0) { q.splice(qi, 1); giveUpLine(p); }
+      // Departure: once the layover is over and every guest is aboard, the bus
+      // asks for the departure reservation. The controller lets one bus park or
+      // leave at a time; this bus starts backing out (endStop) once it holds the
+      // reservation and its whole reversing path is clear of traffic.
+      if (b.phase === PHASE.PARKED) {
+        if (reached(b.stopEnd) && allAbroad(b)) {
+          b.boardGrace = (b.boardGrace || 0) + dt;
+          if (b.boardGrace >= (b.boardWait != null ? b.boardWait : 2)) requestManeuver(b, PHASE.WAIT_DEPART_PERMIT);
+        } else if (b.stopElapsed >= SECONDS_PER_HOUR) {
+          // Hard cap: a full in-game hour in the terminal. Anyone still in the WC
+          // payment line gives up on the payment and walks for the boarding door;
+          // the bus leaves as soon as they are all aboard.
+          for (const p of b.pax) {
+            for (const q of [facilities.C.queue, facilities.C.queue2]) {
+              const qi = q.indexOf(p);
+              if (qi >= 0) { q.splice(qi, 1); giveUpLine(p); }
+            }
           }
+          if (!b.__capped) { b.__capped = true; toast("⏱ Süre doldu, otobüs kalkıyor", "bad"); }
         }
-        toast("⏱ Süre doldu, otobüs kalkıyor", "bad");
-        endStop(b);
       }
+      if (b.phase === PHASE.WAIT_DEPART_CLEAR && maneuverClear(b)) endStop(b);
     } else if (b.state === "enter") {
       b.stopElapsed = (b.stopElapsed || 0) + timeDt; // dwell clock keeps running
       const g = enterGeom(b, b.slot);
-      const done = moveAlong(b, dt, g.L, BUS_TURN_V, BUS_ACC, BUS_BRAKE * 0.6);
+      const s0 = b.mv.s;
+      let done = moveAlong(b, dt, g.L, BUS_TURN_V, BUS_ACC, BUS_BRAKE * 0.6);
+      const clear = sweepClear(b, walkingPax(), s0, b.mv.s, s => enterPose(g, s));
+      if (clear.blocked) { b.mv.s = clear.s; b.v = 0; b.brake = true; done = false; b.paxHit = clear.hit; } // a guest is in the way: hold
       Object.assign(b, enterPose(g, b.mv.s));
       if (done) finishEnter(b);
-    } else { // "exit" — backing out of the stall onto the lane
+    } else { // "exit" — REVERSING out of the stall onto the lane. The road it
+      // sweeps was clear when it started and stays reserved (no vehicle enters it).
       const g = exitGeom(b);
-      const crossingX = g.sx - g.sg * g.R;
-      // wait for cars at the crossing or a bus on the road; one shared limit (5 s), so the lot can never lock up
-      const waiting = ((b.mv.s || 0) <= 0.001 && carsBlockBusCrossing(crossingX, g.sx, b.len))
-        || busBlocksBackingOut(b, exitPose(g, Math.min(g.L, (b.mv.s || 0) + BUS_REV_V * dt)));
-      b.blockT = waiting ? (b.blockT || 0) + dt : 0;
-      if (waiting && b.blockT < 5) {
-        b.v = 0; b.brake = true;
-      } else {
-        const done = moveAlong(b, dt, g.L, BUS_REV_V, 30, 45);
-        Object.assign(b, exitPose(g, b.mv.s));
-        if (done) finishExit(b);
-      }
+      const s0 = b.mv.s || 0;
+      let done = moveAlong(b, dt, g.L, BUS_REV_V, 30, 45);
+      const clear = sweepClear(b, walkingPax(), s0, b.mv.s, s => exitPose(g, s));
+      if (clear.blocked) { b.mv.s = clear.s; b.v = 0; b.brake = true; done = false; b.paxHit = clear.hit; } // a guest is in the way: hold
+      Object.assign(b, exitPose(g, b.mv.s));
+      if (done) finishExit(b);
     }
+    // a guest holding the bus too long steps out of its way
+    b.paxHoldT = b.paxHit ? (b.paxHoldT || 0) + dt : 0;
+    if (b.paxHoldT > PAX_SHOVE_AFTER && b.paxHit) shoveOutOfBus(b.paxHit);
+    b.paxHit = null;
     // passengers
     for (const p of b.pax) updatePax(p, b, dt, timeDt);
   }
@@ -3942,6 +4249,16 @@ function updatePax(p, bus, dt, timeDt = dt) {
   // disembarked: walk toward target
   if (p.state === "walk" || p.state === "board") {
     const step = (p.state === "board" ? 150 : 55) * dt; // sprinting to catch the bus
+    if (p.state === "board") {
+      // a guest who cannot find a way to the door (walled in between parked buses)
+      // gives up on the walk and gets on at the door after a few seconds
+      p.boardT = (p.boardT || 0) + dt;
+      if (p.boardT > 4) {
+        p.x = p.tx; p.y = p.ty; p.boardT = 0;
+        p.state = "bus"; p.__boarded = true;
+        return;
+      }
+    } else p.boardT = 0;
     if (p.state === "walk") {
       // a random stroll that never gets there (blocked route) gives up after a while
       p.walkT = (p.walkT || 0) + dt;
@@ -3966,12 +4283,12 @@ function updatePax(p, bus, dt, timeDt = dt) {
     const f = facilities[p.state === "waitR" ? "R" : "T"];
     const i = f.queue.indexOf(p);
     if (i === -1) { p.state = "free"; p.idleT = rand(0.5, 2); return; }
-    if (p.state === "waitR") { p.x = 676 - 16 * (i + 1); p.y = 168 - (i % 2) * 3; }
-    else { p.x = Math.min(940, 866 + 16 * (i + 1)); p.y = 168 - (i % 2) * 3; }
+    if (p.state === "waitR") { p.x = 676 - 16 * (i + 1); p.y = 168 - BUILD_LIFT - (i % 2) * 3; }
+    else { p.x = Math.min(940, 866 + 16 * (i + 1)); p.y = 168 - BUILD_LIFT - (i % 2) * 3; }
     return;
   }
 
-  if (p.state === "serveR") { p.x = 690; p.y = 169; return; }
+  if (p.state === "serveR") { p.x = 690; p.y = 169 - BUILD_LIFT; return; }
   if (p.state === "serveT") {
     // indoors: fresh pulls spawn below a side passage (stepFac) and walk up
     // it (enterT). Then walk to your stall bay — the
@@ -4040,7 +4357,7 @@ function updatePax(p, bus, dt, timeDt = dt) {
     if (p.x !== gx) moveToward(p, gx, SIDE_IN_Y, step);
     else moveToward(p, gx, oy, step);
     if (p.x === gx && Math.abs(p.y - oy) < 8) {
-      p.x = 852; p.y = 169;    // step out onto the outdoor side
+      p.x = 852; p.y = 169 - BUILD_LIFT;    // step out onto the outdoor side
       p.runaway = false;       // crossed the exit — the escape succeeded
       if (bus && reached(p.boardAt)) {
         if (bus.state === "stop") goDoor(p, bus); // sprint the rest of the way
@@ -4089,84 +4406,56 @@ function riseNeeds(p, timeDt) {
 
 /* ------------------------------- Cars ------------------------------- */
 let carTimer = 3;
-const ROAD_CAR_LENGTH = 52, ROAD_CAR_GAP = 18, ROAD_CROSS_BUFFER = 28;
-function carsBlockBusCrossing(a, b2, busLen) {
-  const left = Math.min(a, b2), right = Math.max(a, b2);
-  const leftClear = left - busLen / 2 - ROAD_CROSS_BUFFER - ROAD_CAR_LENGTH;
-  const rightClear = right + busLen / 2 + ROAD_CROSS_BUFFER;
-  // cars held for a while are queued behind a bus, not about to drive across the turn: don't wait for them too
-  return cars.some(c => (c.heldT || 0) < 2 && c.x <= rightClear && c.x + ROAD_CAR_LENGTH >= leftClear);
+const ROAD_CAR_LENGTH = 52, ROAD_CAR_GAP = 18;
+// Is the stretch [l, r] of lane `dir` free for a vehicle to appear in at speed v
+// (no vehicle or reserved zone there, nor within its stopping distance)?
+function laneEntryFree(dir, l, r, v) {
+  const pad = ROAD_CAR_GAP + v * v / (2 * CAR_BRAKE);
+  return !laneVehicles().some(o => o.dir === dir && o.r > l - pad && o.l < r + pad)
+    && !reservedZones().some(z => z.dir === dir && z.r > l - pad && z.l < r + pad);
 }
-function activeBusRoadCrossings() {
-  const crossings = [];
-  for (const b of buses) {
-    if (b.state === "enter") {
-      const g = enterGeom(b, b.slot);
-      crossings.push({ b, left: Math.min(g.x0, g.tx), right: Math.max(g.x0, g.tx), waitingExit: false, queueTail: null });
-    } else if (b.state === "exit") {
-      const g = exitGeom(b), lanePt = g.sx - g.sg * g.R;
-      crossings.push({ b, left: Math.min(lanePt, g.sx), right: Math.max(lanePt, g.sx), waitingExit: (b.mv.s || 0) <= 0.001, queueTail: null });
-    }
-  }
-  return crossings;
-}
+
+// Cars drive their lane at their own cruising speed (|c.v|, signed by direction;
+// c.spd is the current speed). Each car brakes smoothly for its stop line from
+// laneLimit — the vehicle ahead (keeping a short time gap) or a reserved zone —
+// and never moves past it, so the order on a lane never changes.
 function updateCars(dt) {
   carTimer -= dt;
-  if (carTimer <= 0) {
-    carTimer = rand(4, 9);
+  const vehicles = laneVehicles(), zones = reservedZones();
+  if (carTimer <= 0 && autoTraffic) {
     // traffic runs both ways: right-to-left in the upper lane, left-to-right in the lower lane
-    if (Math.random() < 0.5) cars.push({ x: Wdyn - offX + 40, y: 462, hue: randInt(0, 359), v: -rand(120, 190) });
-    else cars.push({ x: -offX - ROAD_CAR_LENGTH - 40, y: 514, hue: randInt(0, 359), v: rand(120, 190) }); // left-to-right: the lane nearer the bottom edge
-  }
-  const crossings = activeBusRoadCrossings();
-  // buses on the road (leaving or driving): no car may pass through or past one
-  // a bus turning in still blocks the cars behind it until it has left the road
-  const roadBuses = buses.filter(b => (b.state === "drive" || b.state === "exit" || b.state === "enter") && b.cy + 33 > ROAD.top)
-    .map(b => ({ l: b.cx - b.len / 2, r: b.cx + b.len / 2 }));
-  const leftward = cars.filter(c => c.v < 0).sort((a, b) => a.x - b.x);   // lead = leftmost
-  const rightward = cars.filter(c => c.v > 0).sort((a, b) => b.x - a.x); // lead = rightmost
-  // Each direction is processed lead-first, so every follower keeps its gap.
-  for (const group of [leftward, rightward]) {
-    const dir = group === leftward ? -1 : 1;
-    let leadCar = null;
-    for (const c of group) {
-      let nextX = c.x + c.v * dt, hold = false;
-      // a car held for too long (a jam) ignores the holds for a moment, so the traffic can never lock up for good
-      const free = (c.heldT || 0) > 8;
-      for (const crossing of free ? [] : crossings) {
-        const leftClear = crossing.left - crossing.b.len / 2 - ROAD_CROSS_BUFFER - ROAD_CAR_LENGTH;
-        const rightClear = crossing.right + crossing.b.len / 2 + ROAD_CROSS_BUFFER;
-        if (dir < 0) {
-          if (c.x > rightClear) {
-            const stopX = crossing.queueTail == null ? rightClear + 1 : crossing.queueTail;
-            nextX = Math.max(stopX, nextX);
-            crossing.queueTail = nextX + ROAD_CAR_LENGTH + ROAD_CAR_GAP;
-          } else if (c.x + ROAD_CAR_LENGTH >= leftClear) {
-            if (crossing.waitingExit) {
-              // Let a car already crossing clear first; queue the next car behind it.
-              crossing.queueTail = Math.max(crossing.queueTail || 0, c.x + ROAD_CAR_LENGTH + ROAD_CAR_GAP);
-            } else hold = true;
-          }
-        } else if (!crossing.waitingExit && c.x + ROAD_CAR_LENGTH < leftClear && nextX + ROAD_CAR_LENGTH >= leftClear) {
-          hold = true; // rightward cars wait short of a crossing bus
-        }
-      }
-      let newX = hold ? c.x : nextX;
-      // car-following: nobody closes the gap to the car ahead
-      if (leadCar && !free) newX = dir < 0 ? Math.max(newX, leadCar.x + ROAD_CAR_LENGTH + ROAD_CAR_GAP)
-        : Math.min(newX, leadCar.x - ROAD_CAR_LENGTH - ROAD_CAR_GAP);
-      // a bus on the road is a wall: a car that is outside it stays outside it
-      for (const r of free ? [] : roadBuses) {
-        if (dir < 0 && c.x >= r.r + ROAD_CAR_GAP && newX < r.r + ROAD_CAR_GAP) newX = r.r + ROAD_CAR_GAP;
-        if (dir > 0 && c.x + ROAD_CAR_LENGTH <= r.l - ROAD_CAR_GAP && newX + ROAD_CAR_LENGTH > r.l - ROAD_CAR_GAP)
-          newX = r.l - ROAD_CAR_GAP - ROAD_CAR_LENGTH;
-      }
-      c.heldT = Math.abs(newX - c.x) < 0.05 ? (c.heldT || 0) + dt : 0; // how long this car has been standing still
-      c.x = newX;
-      leadCar = c;
+    const fromRight = Math.random() < 0.5, dir = fromRight ? -1 : 1;
+    const spawnX = fromRight ? Wdyn - offX + 40 : -offX - ROAD_CAR_LENGTH - 40;
+    const vmax = rand(120, 190);
+    // the entry stretch must be free (a queue backed up to the edge, or a bus passing it): try again shortly
+    if (!laneEntryFree(dir, spawnX, spawnX + ROAD_CAR_LENGTH, vmax)) carTimer = 0.2;
+    else {
+      carTimer = rand(4, 9);
+      const c = { x: spawnX, y: fromRight ? 462 : 514, hue: randInt(0, 359), v: dir * vmax, spd: vmax }; // left-to-right: the lane nearer the bottom edge
+      cars.push(c);
+      vehicles.push({ ref: c, car: true, dir, l: c.x, r: c.x + ROAD_CAR_LENGTH, v: vmax });
     }
   }
-  cars = cars.filter(c => c.x > -offX - 80 && c.x < Wdyn - offX + 80);
+  for (const dir of [-1, 1]) {
+    // lead car first, so every follower sees where the car ahead has just moved to
+    const lane = vehicles.filter(o => o.car && o.dir === dir).sort((a, b) => dir * (b.l - a.l));
+    for (const o of lane) {
+      const c = o.ref, vmax = Math.abs(c.v);
+      const { room, leadV } = laneLimit(o, vehicles, zones);
+      let spd = c.spd != null ? c.spd : vmax;
+      const free = Math.max(0, room - CAR_HEADWAY * spd);
+      const target = Math.min(vmax, Math.sqrt(leadV * leadV + 2 * CAR_BRAKE * free));
+      spd = spd < target ? Math.min(target, spd + CAR_ACC * dt) : Math.max(target, spd - CAR_HARD_BRAKE * dt);
+      let move = spd * dt;
+      if (move > Math.max(0, room)) { move = Math.max(0, room); spd = Math.min(spd, leadV); } // never past the stop line — and never backwards
+      c.x += dir * move; c.spd = spd;
+      o.l = c.x; o.r = c.x + ROAD_CAR_LENGTH; o.v = spd;
+      c.heldT = move < 0.05 ? (c.heldT || 0) + dt : 0; // how long this car has been standing (debug overlay)
+    }
+  }
+  // a car leaves once it is past the edge it drives toward (rightbound cars appear beyond the left edge, so
+  // culling on both edges deleted every one of them the frame it appeared)
+  cars = cars.filter(c => (c.v > 0 ? c.x < Wdyn - offX + 80 : c.x + ROAD_CAR_LENGTH > -offX - 80));
 }
 
 /* ------------------------------ Rendering --------------------------- */
@@ -4197,9 +4486,10 @@ function resize() {
   // tall windows extra height (more sky/grass). The core stays centered, so
   // the scene fills the stage instead of letterboxing.
   const a = box.width / box.height;
-  if (a > W / H)      { Wdyn = H * a; Hdyn = H; }
-  else if (a < W / H) { Wdyn = W; Hdyn = W / a; }
-  else                { Wdyn = W; Hdyn = H; }
+  // Never narrower than LOT_MIN_W: bay 10 ends near x≈968 and the lot must still show past it on
+  // windows narrower than 2:1 (they used to clip at 960). Wider windows keep the exact H×aspect width.
+  Wdyn = Math.max(H * a, LOT_MIN_W);
+  Hdyn = Wdyn / a;
   offX = (Wdyn - W) / 2;
   offY = (Hdyn - H) / 2;
   // centered in the gap between the left view edge and the stall row, at the top
@@ -4252,7 +4542,11 @@ function mix(a, b, t) {
   const pa = hex(a), pb = hex(b);
   return `rgb(${Math.round(lerp(pa[0], pb[0], t))},${Math.round(lerp(pa[1], pb[1], t))},${Math.round(lerp(pa[2], pb[2], t))})`;
 }
-function hex(h) { return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]; }
+// "#rrggbb" or "rgb(r,g,b)" (what mix returns, so mixes can be nested) → [r, g, b]
+function hex(h) {
+  if (h[0] !== "#") return h.match(/[\d.]+/g).slice(0, 3).map(Number);
+  return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+}
 
 function nightFactor() {
   const t = G.clock.time;
@@ -4512,7 +4806,6 @@ function setMapOpen(on) {
   mapPanelOpen = on && !!mapSel;
   $("mapPanel").classList.toggle("hidden", !mapPanelOpen);
   $("mapBtn").classList.toggle("on", on);
-  $("btnShop").classList.toggle("hidden", on);
   if (on) renderMapPanel();
 }
 
@@ -4551,11 +4844,17 @@ function drawRoadDebug() {
   ctx.font = "10px ui-monospace, Menlo, monospace";
   ctx.textAlign = "left";
   ctx.fillStyle = "rgba(0,0,0,0.6)";
+  // reserved zones: the lane stretches a maneuvering bus has closed to traffic
+  for (const z of reservedZones()) {
+    const [y0, y1] = LANE_BAND[z.dir];
+    ctx.fillStyle = "rgba(255,60,60,0.22)"; ctx.fillRect(z.l, y0, z.r - z.l, y1 - y0);
+    ctx.strokeStyle = "rgba(255,60,60,0.8)"; ctx.strokeRect(z.l, y0, z.r - z.l, y1 - y0);
+  }
   for (const b of buses) {
     const lines = [
       `#${b.id} ${b.state} dir${busDir(b)}${b.through ? " thru" : ""}`,
-      `v${(b.v || 0).toFixed(1)} stuck${(b.stuckT || 0).toFixed(1)} block${(b.blockT || 0).toFixed(1)}`,
-      `room${f(laneRoom(b))} lead${f(laneLead(b))} cx${f(b.cx)} cy${f(b.cy)}`,
+      `${b.phase || "-"}${b.reqSeq != null ? " #" + b.reqSeq : ""}`,
+      `v${(b.v || 0).toFixed(1)} room${b.state === "drive" ? f(laneRoom(b)) : "-"} cx${f(b.cx)} cy${f(b.cy)}`,
     ];
     const x = b.cx - 60, y = b.cy - 56;
     lines.forEach((t, i) => { ctx.fillStyle = "rgba(0,0,0,0.65)"; ctx.fillRect(x - 2, y + i * 12 - 9, 150, 12); ctx.fillStyle = "#ffe27a"; ctx.fillText(t, x, y + i * 12); });
@@ -4593,6 +4892,7 @@ function drawOutdoor() {
   drawSky(nf, now);
   drawHills(nf);
   drawGrassBand(GRASS.top, GRASS.bot, nf, 3);
+  drawWalkway(nf);
   for (const tr of trees) drawTree(tr, nf);
 
   drawLot();
@@ -4941,8 +5241,20 @@ function drawWindow(x, y, w, h, top, bot, frame) {
   ctx.fillRect(x - 3, y + h + 2, w + 6, 2);
 }
 
+// Walkway: pavement between the buildings' front walls and the bus lot. Drawn
+// before the sign, lamps and lot so they stand on top of it.
+function drawWalkway(nf) {
+  ctx.fillStyle = mix("#cdc6b4", "#3b3e4a", nf * 0.7);
+  ctx.fillRect(-offX, WALK_TOP, Wdyn, LOT.top - WALK_TOP);
+  ctx.fillStyle = "rgba(0,0,0,0.12)";
+  ctx.fillRect(-offX, LOT.top - 2, Wdyn, 2);
+}
+
 function drawRestStop() {
   const nf = nightFactor(), now = performance.now();
+  // the buildings are drawn in their own (higher) frame
+  ctx.save();
+  ctx.translate(0, -BUILD_LIFT);
   // --- diner ---
   const red = mix("#d94f3d", "#3a2430", nf * 0.7);
   ctx.fillStyle = "rgba(0,0,0,0.25)";
@@ -5081,6 +5393,7 @@ function drawRestStop() {
       ctx.fill();
     }
   }
+  ctx.restore();
 }
 
 // Drawn over the night overlay: lamp pools, lit windows, glowing signs.
@@ -5116,7 +5429,7 @@ function drawNightLights(nf, now) {
   // window light spilling onto the curb
   for (const [sx, rx] of [[705, 100], [851, 46]]) {
     ctx.save();
-    ctx.translate(sx, 170);
+    ctx.translate(sx, 170 - BUILD_LIFT);
     ctx.scale(1, 0.28);
     const sg = ctx.createRadialGradient(0, 0, 2, 0, 0, rx);
     sg.addColorStop(0, `rgba(255,190,100,${0.2 * a})`);
@@ -5128,7 +5441,7 @@ function drawNightLights(nf, now) {
   ctx.restore();
 
   ctx.fillStyle = `rgba(255, 196, 100, ${0.5 * nf})`;
-  for (const [x, y, w, h] of [...DINER_WINDOWS, ...WC_WINDOWS]) ctx.fillRect(x, y, w, h);
+  for (const [x, y, w, h] of [...DINER_WINDOWS, ...WC_WINDOWS]) ctx.fillRect(x, y - BUILD_LIFT, w, h);
 
   ctx.save();
   ctx.textAlign = "center";
@@ -5136,10 +5449,10 @@ function drawNightLights(nf, now) {
   ctx.font = "bold 12px system-ui";
   ctx.shadowColor = "#ffb02e";
   ctx.fillStyle = "#ffd36b";
-  ctx.fillText("LOKANTA", 705, 105);
+  ctx.fillText("LOKANTA", 705, 105 - BUILD_LIFT);
   ctx.shadowColor = "#4fd8ff";
   ctx.fillStyle = "#b6f0ff";
-  ctx.fillText("WC", 851, 114);
+  ctx.fillText("WC", 851, 114 - BUILD_LIFT);
   ctx.restore();
   // backlit pylon face cuts through the night overlay
   ctx.save();
@@ -6651,7 +6964,7 @@ function drawWcPrompt() {
   if (n === 0) return;
   const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 200);
   // Badge pinned to the WC building's facade (inside the building body).
-  const cx = 851, cy = 131;
+  const cx = 851, cy = 131 - BUILD_LIFT;
   const label = String(n); // exact count — no "9+" cap
   ctx.font = "bold 11px system-ui, sans-serif";
   ctx.textAlign = "center";
@@ -6675,7 +6988,7 @@ function drawWcPrompt() {
   // pulsing hint pointing at the building (the click target)
   ctx.fillStyle = `rgba(255, 179, 71, ${pulse})`;
   ctx.font = "bold 9px system-ui, sans-serif";
-  ctx.fillText((coarseQ ? "girmek için dokun" : "girmek için tıkla") + " ↓", 851, 84);
+  ctx.fillText((coarseQ ? "girmek için dokun" : "girmek için tıkla") + " ↓", 851, 84 - BUILD_LIFT);
   // restore text state for the rest of the scene
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
@@ -6784,9 +7097,15 @@ function drawBus(b) {
 
 const blinkOn = () => Math.floor(performance.now() / 380) % 2 === 0;
 
-// Side view — what the bus looks like while driving on the road.
+// Side view — what the bus looks like while driving on the road: a flat-style
+// touring coach (+x = nose) in the bus's own colour (b.hue). Three roof pods, a
+// tall black window band with glare stripes that sweeps down into the windshield,
+// a darker accent line following that sweep, luggage panels, a rear vent grille,
+// the front door under the windshield, and grey-hub wheels in dark arches.
 function drawBusSide(b, alpha) {
-  const len = b.len, nf = nightFactor();
+  const L = b.len, h = L / 2, nf = nightFactor();
+  const paint = (l, s = 62) => `hsl(${b.hue}, ${s}%, ${l - nf * 15}%)`;
+  const glass = mix("#121418", "#05070a", nf);
   ctx.save();
   ctx.translate(b.cx, b.cy);
   ctx.rotate(b.ang);
@@ -6794,81 +7113,151 @@ function drawBusSide(b, alpha) {
   ctx.globalAlpha = alpha;
   // headlight cone from the nose (night only)
   if (nf > 0.4) {
-    const hg = ctx.createLinearGradient(len / 2, 0, len / 2 + 90, 0);
+    const hg = ctx.createLinearGradient(h, 0, h + 90, 0);
     hg.addColorStop(0, `rgba(255,240,180,${0.35 * nf})`);
     hg.addColorStop(1, "rgba(255,240,180,0)");
     ctx.fillStyle = hg;
     ctx.beginPath();
-    ctx.moveTo(len / 2 - 4, -7);
-    ctx.lineTo(len / 2 + 90, 15);
-    ctx.lineTo(len / 2 + 90, 37);
-    ctx.lineTo(len / 2 - 4, 15);
+    ctx.moveTo(h - 4, 14); ctx.lineTo(h + 90, 22); ctx.lineTo(h + 90, 42); ctx.lineTo(h - 4, 24);
     ctx.closePath(); ctx.fill();
   }
+  // ground shadow
   ctx.fillStyle = "rgba(0,0,0,0.28)";
-  ctx.beginPath(); ctx.ellipse(0, 46, len / 2 - 2, 6, 0, 0, 7); ctx.fill();
-  // body (centered; +x = nose)
-  ctx.fillStyle = `hsl(${b.hue}, 55%, ${58 - nf * 15}%)`;
-  rr(ctx, -len / 2, -33, len, 66, 12); ctx.fill();
-  ctx.fillStyle = "rgba(255,255,255,0.2)";
-  rr(ctx, -len / 2 + 8, -31, len - 16, 4, 2); ctx.fill();
-  ctx.fillStyle = `hsl(${b.hue}, 60%, ${38 - nf * 10}%)`;
-  ctx.fillRect(-len / 2 + 2, 17, len - 4, 4);
-  // skirt
-  ctx.fillStyle = `hsl(${b.hue}, 40%, 30%)`;
-  ctx.fillRect(-len / 2 + 4, 25, len - 8, 10);
-  // windows + passenger heads
-  const winN = Math.max(1, Math.floor((len - 44) / 21));
-  for (let i = 0; i < winN; i++) {
-    const wx = -len / 2 + 18 + i * 21;
-    ctx.fillStyle = mix("#cfe8ff", "#26364e", nf * 0.8);
-    rr(ctx, wx, -8, 14, 16, 4); ctx.fill();
-    // show a few heads
-    const n = b.pax.length;
-    if (i < n && n > 0) {
-      const idx = Math.min(n - 1, Math.floor(i * n / winN));
-      const p = b.pax[idx];
-      if (p && p.state === "bus") {
-        const sc = Math.min(1, (PAX_TYPES[p.type] || PAX_TYPES.m).scale); // kids' heads are smaller + lower
-        const hy = 2 + (1 - sc) * 3;
-        ctx.fillStyle = p.skin || "#e8b88e";
-        ctx.beginPath(); ctx.arc(wx + 7, hy, 4 * sc, 0, 7); ctx.fill();
-        ctx.fillStyle = p.hair || "#362718";
-        ctx.beginPath(); ctx.arc(wx + 7, hy, 4 * sc, Math.PI, Math.PI * 2); ctx.fill(); // hair cap
-      }
+  ctx.beginPath(); ctx.ellipse(0, 45, h - 2, 6, 0, 0, 7); ctx.fill();
+
+  // roof pods: a short one at each end, a long low one in the middle
+  ctx.fillStyle = paint(42);
+  rr(ctx, -h + 18, -36, 26, 5, 2); ctx.fill();
+  rr(ctx, -h * 0.12, -37.5, h * 0.72, 6, 3); ctx.fill();
+  rr(ctx, h - 56, -36, 24, 5, 2); ctx.fill();
+
+  // body: flat colour, square rounded tail, nose curving back at the top
+  ctx.fillStyle = paint(56);
+  ctx.beginPath();
+  ctx.moveTo(-h + 2, 31);
+  ctx.lineTo(-h, -26);
+  ctx.quadraticCurveTo(-h, -33, -h + 8, -33);
+  ctx.lineTo(h - 22, -33);
+  ctx.quadraticCurveTo(h - 3, -33, h - 1, -14);
+  ctx.lineTo(h, 26);
+  ctx.quadraticCurveTo(h, 31, h - 5, 31);
+  ctx.closePath(); ctx.fill();
+
+  // the window band: straight along the side, sweeping down into the windshield
+  const band = () => {
+    ctx.beginPath();
+    ctx.moveTo(-h + 8, -29);
+    ctx.lineTo(h - 24, -29);
+    ctx.quadraticCurveTo(h - 7, -29, h - 4, -14);
+    ctx.lineTo(h - 3, 10);
+    ctx.lineTo(h - 30, 10);
+    ctx.quadraticCurveTo(h - 36, -6, h - 58, -6);
+    ctx.lineTo(-h + 8, -6);
+    ctx.closePath();
+  };
+  ctx.fillStyle = glass; band(); ctx.fill();
+  ctx.save();
+  band(); ctx.clip();
+  const wl = -h + 8, wr = h - 34;
+  ctx.globalAlpha = alpha;
+  // windshield: darkens with grime, clears once washed
+  const dirt = b.washDone ? 0 : (b.wash ? b.wash.g.reduce((a, v) => a + v, 0) / b.wash.g.length : 0.7);
+  ctx.fillStyle = mix(mix("#1a1e24", "#06080b", nf), "#70542c", dirt * 0.7);
+  ctx.fillRect(h - 30, -30, 30, 42);
+  // window pillars (barely there) and diagonal glare stripes
+  ctx.fillStyle = "rgba(255,255,255,0.07)";
+  const winN = Math.max(3, Math.round((wr - wl) / 30));
+  for (let i = 1; i < winN; i++) ctx.fillRect(wl + (wr - wl) * i / winN, -29, 1.2, 23);
+  ctx.fillStyle = `rgba(255,255,255,${(b.washDone ? 0.26 : 0.17) - nf * 0.1})`;
+  for (let x = -h + 26, k = 0; x < h + 10; x += 34, k++) {
+    const w = k % 3 === 1 ? 4 : 8; // a thin stripe now and then
+    ctx.beginPath();
+    ctx.moveTo(x, -29); ctx.lineTo(x + w, -29); ctx.lineTo(x + w - 16, 10); ctx.lineTo(x - 16, 10);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+  // accent line under the windows, following the sweep down to the nose
+  ctx.fillStyle = paint(40);
+  ctx.beginPath();
+  ctx.moveTo(-h + 1, -6); ctx.lineTo(h - 58, -6);
+  ctx.quadraticCurveTo(h - 36, -6, h - 30, 10);
+  ctx.lineTo(h - 2, 10); ctx.lineTo(h - 2, 13.5);
+  ctx.lineTo(h - 32, 13.5);
+  ctx.quadraticCurveTo(h - 38, -2.5, h - 58, -2.5);
+  ctx.lineTo(-h + 1, -2.5);
+  ctx.closePath(); ctx.fill();
+
+  // wheel positions: a longer rear overhang (room for the grille), front axle just behind the door
+  const rearW = -h + Math.max(40, L * 0.22), frontW = h - 50, dx = h - 26; // dx: front door's rear edge (doorPos sits at h - 19)
+  // luggage panels between the axles: seams and small orange handles
+  ctx.strokeStyle = paint(42); ctx.lineWidth = 1;
+  const bayL = rearW + 16, bayR = frontW - 16;
+  const bays = Math.max(1, Math.round((bayR - bayL) / 26));
+  for (let i = 0; i <= bays; i++) {
+    const x = bayL + (bayR - bayL) * i / bays;
+    ctx.beginPath(); ctx.moveTo(x, -2.5); ctx.lineTo(x, 31); ctx.stroke();
+    if (i < bays) {
+      ctx.fillStyle = "#e08a1e";
+      ctx.fillRect(x + (bayR - bayL) / bays / 2 - 2, 25, 4, 2.5);
     }
   }
-  // windshield (front = +x) — darkens with grime, gleams once washed
-  const dirt = b.washDone ? 0 : (b.wash ? b.wash.g.reduce((a, v) => a + v, 0) / b.wash.g.length : 0.7);
-  ctx.fillStyle = mix(mix("#cfe8ff", "#26364e", nf * 0.8), "#70542c", dirt * 0.8);
-  rr(ctx, len / 2 - 24, -8, 16, 16, 4); ctx.fill();
-  // door (side of the nose)
-  ctx.fillStyle = `hsl(${b.hue}, 30%, 22%)`;
-  ctx.fillRect(len / 2 - 46, -11, 14, 44);
-  ctx.fillStyle = `hsl(${b.hue}, 30%, 35%)`;
-  ctx.fillRect(len / 2 - 43, -7, 8, 36);
-  // tail light (brighter on the brakes), reverse lamp, left indicator
-  ctx.fillStyle = b.brake ? "#ff3b2e" : nf > 0.4 ? "#e0473a" : "#9c2a24";
-  ctx.fillRect(-len / 2, 2, 4, 12);
+  // rear vent grille
+  ctx.fillStyle = paint(44);
+  const gl = -h + 7, gr = Math.min(rearW - 18, -h + 30);
+  for (let y = 4; y <= 26; y += 3) ctx.fillRect(gl, y, gr - gl, 1.4);
+  // front door under the windshield: its outline, a handle and two orange markers
+  ctx.strokeStyle = paint(38);
+  ctx.beginPath(); ctx.moveTo(dx, 13.5); ctx.lineTo(dx, 31); ctx.moveTo(dx + 15, 13.5); ctx.lineTo(dx + 15, 31); ctx.stroke();
+  ctx.fillStyle = paint(36);
+  ctx.fillRect(dx + 2, 19, 3, 1.5);
+  ctx.fillStyle = "#f0a020";
+  ctx.fillRect(dx - 7, 16, 4, 2.5);
+  ctx.fillRect(dx - 7, 22, 4, 2.5);
+
+  // tail lights: a red stack with a white lamp (brighter on the brakes, white lamp on in reverse)
+  ctx.fillStyle = b.brake ? "#ff3b2e" : nf > 0.4 ? "#e0473a" : "#c8342c";
+  ctx.fillRect(-h, 2, 4, 9);
+  ctx.fillStyle = b.rev ? "#ffffff" : "#e8e4dc";
+  ctx.fillRect(-h, 11, 4, 3);
+  ctx.fillStyle = b.brake ? "#ff3b2e" : "#c8342c";
+  ctx.fillRect(-h, 14, 4, 3);
   if (b.brake) {
     ctx.fillStyle = "rgba(255,60,40,0.35)";
-    ctx.beginPath(); ctx.arc(-len / 2, 8, 12, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(-h, 9, 12, 0, 7); ctx.fill();
   }
-  if (b.rev) { ctx.fillStyle = "#f4f7ff"; ctx.fillRect(-len / 2, 15, 4, 5); }
+  // small marker lamps up the tail
+  ctx.fillStyle = paint(72, 40);
+  for (let y = -25; y <= -13; y += 4) ctx.fillRect(-h + 1, y, 2.5, 2);
+  // headlight / nose lamp
+  ctx.fillStyle = nf > 0.4 ? "#fff6d0" : "#f2f2ee";
+  ctx.fillRect(h - 3, 17, 3, 4);
+  ctx.fillStyle = "#c8342c";
+  ctx.fillRect(h - 3, 21, 3, 2);
   if (b.blink && blinkOn()) {
     ctx.fillStyle = "#ffb52e";
-    ctx.fillRect(-len / 2, -4, 4, 5);
-    ctx.fillRect(len / 2 - 4, 14, 4, 6);
+    ctx.fillRect(-h, -2, 4, 4);
+    ctx.fillRect(h - 4, 24, 4, 4);
   }
-  // wheels
-  ctx.fillStyle = "#141821";
-  for (const wx of [-len / 2 + 34, len / 2 - 44]) {
-    ctx.beginPath(); ctx.arc(wx, 35, 12, 0, 7); ctx.fill();
-    ctx.fillStyle = "#7d8696";
-    ctx.beginPath(); ctx.arc(wx, 35, 6.5, 0, 7); ctx.fill();
-    ctx.fillStyle = "#3a4150";
-    ctx.beginPath(); ctx.arc(wx, 35, 3, 0, 7); ctx.fill();
-    ctx.fillStyle = "#141821";
+  // mirror on an arm curving forward off the roof
+  ctx.strokeStyle = paint(52); ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(h - 8, -31); ctx.quadraticCurveTo(h + 7, -32, h + 7, -24); ctx.stroke();
+  ctx.fillStyle = "#14171c";
+  rr(ctx, h + 4, -24, 5, 10, 1.5); ctx.fill();
+
+  // wheel arches and wheels
+  for (const wx of [rearW, frontW]) {
+    ctx.fillStyle = mix("#2a2d33", "#0b0d10", nf);
+    ctx.beginPath(); ctx.arc(wx, 32, 14.5, Math.PI, 0); ctx.lineTo(wx + 14.5, 31); ctx.lineTo(wx - 14.5, 31); ctx.fill();
+    ctx.fillStyle = mix("#4a4d53", "#17191d", nf);
+    ctx.beginPath(); ctx.arc(wx, 34, 12, 0, 7); ctx.fill();
+    ctx.fillStyle = mix("#b9bcc1", "#45484e", nf);
+    ctx.beginPath(); ctx.arc(wx, 34, 7, 0, 7); ctx.fill();
+    ctx.fillStyle = mix("#80848b", "#2e3136", nf);
+    for (let k = 0; k < 8; k++) { // stud ring
+      const a = k * Math.PI / 4;
+      ctx.beginPath(); ctx.arc(wx + Math.cos(a) * 4.4, 34 + Math.sin(a) * 4.4, 1, 0, 7); ctx.fill();
+    }
+    ctx.beginPath(); ctx.arc(wx, 34, 1.8, 0, 7); ctx.fill();
   }
   ctx.restore();
 }
@@ -7679,7 +8068,16 @@ function wcIntroTargetRect() {
 }
 
 function maybeShowArrivalInfo() {
-  if (arrivalInfoOpen || modalOpen || paused || shopOpen || mapOpen || S.view !== "out") return;
+  if (arrivalInfoOpen || modalOpen || paused || shopOpen || mapOpen) return;
+  if (S.view !== "out") {
+    // first time indoors (the exit button appears), after the WC tutorial: point at it
+    if (!G.flags.exitInfoSeen && G.flags.wcIntroStep >= 4) {
+      arrivalInfoKind = "intro-exit";
+      arrivalInfoBusId = null;
+      arrivalInfoOpen = true;
+    }
+    return;
+  }
   if (!G.flags.arrivalInfoSeen) {
     if (performance.now() < arrivalInfoDelayUntil) return;
     const bus = buses.find(b => b.state === "drive" && b.cx + b.len / 2 >= -offX && b.cx - b.len / 2 <= Wdyn - offX);
@@ -7711,6 +8109,7 @@ function toolbarTargetRect(id) {
 
 function dismissArrivalInfo() {
   if (!arrivalInfoOpen) return;
+  if (arrivalInfoKind === "intro-exit") { G.flags.exitInfoSeen = true; arrivalInfoOpen = false; save(); return; }
   if (arrivalInfoKind.startsWith("intro-")) {
     if (arrivalInfoKind === "intro-map") { G.flags.toolbarIntro = 2; arrivalInfoKind = "intro-shop"; }
     else if (arrivalInfoKind === "intro-shop") { G.flags.toolbarIntro = 3; arrivalInfoKind = "intro-wash"; }
@@ -7761,7 +8160,7 @@ function arrivalInfoLayout() {
   if (isIntro) {
     const w = 430, h = 132, left = -offX + 8, right = Wdyn - offX - w - 8;
     const target = arrivalInfoKind.startsWith("intro-")
-      ? toolbarTargetRect(arrivalInfoKind === "intro-map" ? "mapBtn" : "btnShop")
+      ? toolbarTargetRect({ "intro-map": "mapBtn", "intro-shop": "cashChip", "intro-exit": "btnExit" }[arrivalInfoKind] || "cashChip")
       : wcIntroTargetRect();
     let x = Wdyn / 2 - w / 2, y;
     if (arrivalInfoKind.startsWith("intro-")) {
@@ -7869,7 +8268,9 @@ function drawArrivalInfo() {
           ? ["Bölge haritası", "Terminallerini ve yolu buradan takip et.", "Yeni terminal de buradan satın alınır."]
           : arrivalInfoKind === "intro-shop"
             ? ["İşletme", "Her terminalin yükseltmeleri burada.", "Tuvalet ve oto yıkama için ayrı ayrı yükselt."]
-            : ["Gişe", "Tuvalet ücreti burada ödenir.", "Doğru para üstünü verip misafirleri uğurla."];
+            : arrivalInfoKind === "intro-exit"
+              ? ["Dışarı çık", "İşin bitince bu düğmeyle binadan çık.", "Otobüsler dışarıda seni bekliyor."]
+              : ["Gişe", "Tuvalet ücreti burada ödenir.", "Doğru para üstünü verip misafirleri uğurla."];
     ctx.fillStyle = "rgba(16, 22, 35, 0.98)";
     rr(ctx, x, y, w, h, 14); ctx.fill();
     ctx.strokeStyle = "#f2c66d"; ctx.lineWidth = 2;
@@ -8048,7 +8449,6 @@ function init() {
     $("shop").classList.add("hidden");
     save();
   };
-  $("btnShop").onclick = openShop;
   // testing aid: booked like any other money, so the ledger and totals stay consistent
   $("btnTestCash").onclick = () => {
     applyTransaction("testCash", 100000, null, "test");
@@ -8059,7 +8459,8 @@ function init() {
   $("mapBtn").onclick = () => setMapOpen(!mapOpen);
   $("btnMapClose").onclick = () => setMapPanelOpen(false);
   document.addEventListener("pointerdown", e => {
-    if (mapPanelOpen && !$("mapPanel").contains(e.target)) setMapPanelOpen(false);
+    // canvas presses are routed by routePress (it toggles the panel itself)
+    if (mapPanelOpen && e.target !== canvas && !$("mapPanel").contains(e.target)) setMapPanelOpen(false);
   }, true);
   $("mapPanel").addEventListener("click", e => {
     const btn = e.target.closest("button[data-sel], button[data-act]");
@@ -8189,7 +8590,13 @@ function init() {
       if (onButton) dismissArrivalInfo();
       return; // only the explicit button dismisses the tip; clicks elsewhere can't activate scene items
     }
-    if (mapOpen) { const id = mapNodeAt(x, y, padMin); if (id) mapSelect(id); return; }
+    if (mapOpen) {
+      const id = mapNodeAt(x, y, padMin);
+      if (!id) { if (mapPanelOpen) setMapPanelOpen(false); return; }     // empty map: close the panel
+      if (mapPanelOpen && mapSel === id) setMapPanelOpen(false);           // the open terminal again: close
+      else mapSelect(id);                                                  // another terminal (or none open): show it
+      return;
+    }
     const hit = (r, pad = 2) => {
       const p = Math.max(pad, padMin);
       return x >= r.x - p && x <= r.x + r.w + p && y >= r.y - p && y <= r.y + r.h + p;
@@ -8246,6 +8653,12 @@ function init() {
     mapOpen: () => mapOpen, mapPanelOpen: () => mapPanelOpen, mapZoom: () => mapZoom, mapSel: () => mapSel, setMapOpen, setMapPanelOpen,
     mapNode: id => mapPos(termDef(id).map), mapState,
     sim: () => S, buses: () => buses, facilities: () => facilities,
+    // traffic controller (tests): live cars, owners, zones, and switches for the random traffic
+    cars: () => cars, setCars: list => { cars = list; }, setAutoTraffic: v => { autoTraffic = !!v; },
+    PHASE, trafficOwners, reservedZones, laneVehicles, maneuverZones, maneuverClear, maneuverBlockers, trafficControl,
+    traceTraffic: on => { trafficTrace = on ? [] : null; }, trafficTrace: () => trafficTrace,
+    spawnBus, finishEnter, rebuildFacilities, enterGeom, exitGeom, laneCy, BAY_SLOTS, LANE_BAND, ROAD_CAR_LENGTH, ROAD_CAR_GAP,
+    offX: () => offX, Wdyn: () => Wdyn,
     // drive the scheduler directly: `sec` real seconds at the current speed tier, in 1/30 s frames
     advance: sec => { for (let i = Math.round(sec * 30); i > 0; i--) advanceSimulation(speed / 30, speed / 30); },
     setSpeed: v => { speed = v; }, speed: () => speed, paused: () => paused,
