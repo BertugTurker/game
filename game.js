@@ -539,6 +539,10 @@ let pointerDown = false;
 // The WC cleaning hose: in-hand flag plus per-stall spray pacing. Session aid,
 // never saved — picking it up again costs the player, not their save file.
 let toolInHand = null; // the hose station (COUNTER_IN.hose) whose hose is in hand
+// Picking up a cleaning tool zooms the WC camera in on the stall row, so the
+// toilets fill the screen while you work them. wcZoom eases 0 → 1 (rest → in).
+const WC_ZOOM_S = 1.7;
+let wcZoom = 0;
 let hoseCd = new Array(WC_STALLS).fill(0);      // last spray timestamp per stall (performance.now)
 let hoseGleam = new Array(WC_STALLS).fill(0);   // per stall: when it last hit 100 (sparkle burst)
 let lastHoseToast = 0;
@@ -2510,7 +2514,7 @@ function setView(v) {
   if (from !== "wc" && v === "wc") startWcIntro();
   viewFade = 1;
   if (from === "wash") S.washBus = null; // we step back out; the bus keeps its washed state
-  if (v !== "wc") toolInHand = null;    // leaving the counter room — the hose goes back on its faucet
+  if (v !== "wc") { toolInHand = null; wcZoom = 0; } // leaving the counter room — the hose goes back on its faucet, the camera resets
   save();
 }
 
@@ -6046,12 +6050,12 @@ function drawHoseSpray(px, py, now) {
     const ang = k * 2.39996 + Math.floor(now / 380 + hsh(k)) * 0.9;
     const rad = 6 + t * 24;
     ctx.fillStyle = `rgba(150, 215, 255, ${(0.9 * (1 - t)).toFixed(2)})`;
-    ctx.beginPath(); ctx.arc(px + Math.cos(ang) * rad, py + Math.sin(ang) * rad, 1.4 + (1 - t) * 1.4, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(px + Math.cos(ang) * rad, py + Math.sin(ang) * rad, (1.4 + (1 - t) * 1.4) * SPRAY_RADIUS_K, 0, 7); ctx.fill();
   }
   for (let k = 0; k < 3; k++) {
     const t = (now / 650 + k / 3) % 1;
     ctx.fillStyle = `rgba(160, 220, 255, ${(0.6 * (1 - t)).toFixed(2)})`;
-    ctx.beginPath(); ctx.ellipse(px - 11 + k * 11, py + 14 + t * 34, 1.6, 3 + t * 2, 0, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(px - 11 + k * 11, py + 14 + t * 34, 1.6 * SPRAY_RADIUS_K, (3 + t * 2) * SPRAY_RADIUS_K, 0, 0, 7); ctx.fill();
   }
 }
 
@@ -6564,12 +6568,16 @@ function drawBucketStation(st) {
 }
 
 // The hand brush / mop at the pointer; suds where it scrubs a free stall.
-function drawHandTool(px, py, scrubbing, now) {
+// Visual only: suds and spray droplets are drawn this much bigger; the reach that
+// actually cleans (CONFIG.cleaningTools) is unchanged.
+const SUDS_RADIUS_K = 3.5, SPRAY_RADIUS_K = 3.5;
+// The suds are drawn at (fx, fy) — the toilet being cleaned — not on the tool.
+function drawHandTool(px, py, scrubbing, now, fx = px, fy = py) {
   if (scrubbing) {
     for (let k = 0; k < 7; k++) {
       const f = frac(now / 700 + k / 7);
       ctx.fillStyle = `rgba(250, 253, 255, ${0.85 * (1 - f)})`;
-      ctx.beginPath(); ctx.arc(px + Math.sin(k * 2.1 + f * 5) * 10, py - f * 22, 1.8 + (k % 3), 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(fx + Math.sin(k * 2.1 + f * 5) * 10, fy - f * 22, (1.8 + (k % 3)) * SUDS_RADIUS_K, 0, 7); ctx.fill();
     }
   }
   const wob = scrubbing ? Math.sin(now / 45) * 3 : 0;
@@ -6680,7 +6688,34 @@ function drawModernToilet(i, bx, dirty) {
 
 }
 
+// The WC camera: a zoom about the stall row's middle (bay mid-height), eased by
+// wcZoom. Everything in the interior is drawn in base coords and mapped through
+// this, so wcCameraToBase() is its exact inverse for pointer input.
+function wcCamera() {
+  const e = easeInOut(wcZoom), k = 1 + (WC_ZOOM_S - 1) * e;
+  const fx = -offX + Wdyn / 2, fy = stallSy(177);   // focus: the stall row's centre
+  // the focus eases toward the screen centre, but never far enough to pull the
+  // scene's top edge (base y = -offY) below the screen top: the canvas isn't
+  // cleared each frame, so an unpainted band would show stale pixels
+  const ty = Math.min(e * (H / 2 - k * fy), (k - 1) * offY);
+  return { k, tx: e * (fx - k * fx), ty };
+}
+function wcCameraToBase(x, y) {
+  const c = wcCamera();
+  return { x: (x - c.tx) / c.k, y: (y - c.ty) / c.k };
+}
+
 function drawWCInterior() {
+  if (wcZoom <= 0) return drawWCScene();
+  const c = wcCamera();
+  ctx.save();
+  ctx.translate(c.tx, c.ty);
+  ctx.scale(c.k, c.k);
+  drawWCScene();
+  ctx.restore();
+}
+
+function drawWCScene() {
   // floor
   ctx.fillStyle = "#262b36";
   ctx.fillRect(-offX, -offY, Wdyn, H + 2 * offY);
@@ -6891,7 +6926,7 @@ function drawWCInterior() {
       ctx.fillText("kapı kapalı", pointer.x, pointer.y - 14);
       ctx.textAlign = "left";
     }
-    drawHandTool(pointer.x, pointer.y, si >= 0 && stallActive(si) && !closed, performance.now());
+    drawHandTool(pointer.x, pointer.y, si >= 0 && stallActive(si) && !closed, performance.now(), si >= 0 ? stallCx(si) : pointer.x, si >= 0 ? stallSy(200) : pointer.y);
   } else if (toolInHand) {
     const st = toolInHand;
     drawHoseLine(st.x + st.w / 2, st.y + 49, pointer.x, pointer.y, st.right ? 60 : -60); // from the faucet spout
@@ -6907,7 +6942,7 @@ function drawWCInterior() {
           ctx.fillText("kapı kapalı", pointer.x, pointer.y - 14);
           ctx.textAlign = "left";
         } else {
-          drawHoseSpray(pointer.x, pointer.y, performance.now());
+          drawHoseSpray(pointer.x, pointer.y, performance.now()); // the spray comes out of the nozzle tip
         }
       }
     }
@@ -8378,6 +8413,7 @@ function frame(now) {
   const timeDt = Math.min(86400, elapsed) * speed;
   if (viewFade > 0) viewFade = Math.max(0, viewFade - raw * 3); // transition flash fades even while paused
   mapZoom = clamp(mapZoom + (mapOpen ? 1 : -1) * raw * 2.5, 0, 1); // ~0.4 s zoom, also while paused
+  wcZoom = clamp(wcZoom + (toolInHand ? 1 : -1) * raw * 3, 0, 1);  // ~0.3 s camera zoom onto the toilets while a tool is in hand
   if (!paused && !modalOpen && !shopOpen && !arrivalInfoOpen) { // panels and one-time tips hold the clock
     const dt = raw * speed;
     advanceSimulation(dt, timeDt);
@@ -8488,10 +8524,12 @@ function init() {
   // phone.
   const toGame = (e) => {
     const rect = canvas.getBoundingClientRect();
-    return {
+    const p = {
       x: (e.clientX - rect.left) * (Wdyn / rect.width) - offX,
       y: (e.clientY - rect.top) * (Hdyn / rect.height) - offY,
     };
+    // the WC interior is drawn through its zoom camera: map the screen point back to the scene
+    return S.view === "wc" ? wcCameraToBase(p.x, p.y) : p;
   };
   const releasePointer = () => { pointerDown = false; activePointer = null; };
 
@@ -8624,7 +8662,10 @@ function init() {
     // inside the counter room: the hose station, till chips, cologne bottle, tea intercom (exit is the HTML #btnExit)
     for (const st of toolStations()) // tap picks up / puts down that station's hose
       if (hit(st)) { toolInHand = toolInHand === st ? null : st; return; }
-    if (toolInHand) return; // while holding the hose, other desk/counter interactions and runaway catching are blocked
+    if (toolInHand) { // holding a tool: a tap off the stalls puts it back (the zoomed-in view hides the stations)
+      if (S.view === "wc" && stallAt(x, y, 0) < 0) toolInHand = null;
+      return; // other desk/counter interactions and runaway catching are blocked while holding
+    }
     const chip = COUNTER_IN.chips.find(c => hit(deskRect(chipHit(c), "drawer")));
     if (chip) { giveChange(chip.d); save(); return; }
     if (hasCologne() && hit(deskRect(COUNTER_IN.bottle, "bottle"))) { offerCologne(); save(); return; }
