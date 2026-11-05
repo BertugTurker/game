@@ -100,11 +100,14 @@ function check(name, cond, detail = "") {
 }
 async function test(title, fn) {
   results.push(title);
-  const before = page.errors.length;
+  const before = page.errors.length, t0 = Date.now();
   try { await fn(); }
   catch (e) { check("no harness exception", false, e.message); }
   const errs = page.errors.slice(before);
   check("no page errors", errs.length === 0, errs.join(" | "));
+  // live progress on stderr: the full report only prints at the end
+  const s = (Date.now() - t0) / 1000;
+  process.stderr.write(`${s >= 10 ? "SLOW " : ""}${s.toFixed(1).padStart(6)}s  ${title}\n`);
 }
 
 /* --------------------------------- setup -------------------------------- */

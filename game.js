@@ -47,6 +47,7 @@ const LOT_NOSE = 182;                 // lot stalls: where a parked bus's nose p
 const PARKING_SLOT_COUNT = 10;
 const BAY_SLOTS = Array.from({ length: PARKING_SLOT_COUNT }, (_, i) => ({ cx: 170 + i * 84 })); // 10 parallel bus bays across the lot, 84px apart (a bus is 66px wide)
 const GRASS = { top: 88, bot: 170 };  // grass strip — the diner and WC stand on it
+const BUILD_DX = -225; // shifts the diner (drawn centred on x 705) to the centre of the view; the WC keeps its place beside it
 const BUILD_LIFT = 28; // the diner and WC stand this far back from the lot: the strip in front of them is a walkway for guests
 const WALK_TOP = 170 - BUILD_LIFT; // the walkway starts at the diner and WC front wall
 const LOT   = { top: 170, bot: 432 }; // bus parking lot (asphalt), in front of the diner + WC
@@ -57,6 +58,7 @@ const LOKANTA_OPEN = false;                // the diner is closed; guests cannot
 const WC_STALLS   = 10;                    // 5 bays in two rows — one on the left, mirrored on the right
 const SVC_TIME_R  = 5.4;                   // real seconds per diner guest served
 const TOILET_STAY = [6, 60];               // a toilet visit lasts 1–10 in-game minutes (6 s of timeDt per game min)
+const TUT_TOILET_STAY = 2.5;                // the first-ever WC guest's stay (timeDt s — 2.5 real s at 1×)
 const SVC_TIME_T  = (TOILET_STAY[0] + TOILET_STAY[1]) / 2; // mean visit length — queue patience & save restore
 const SAT_BASE    = 60;                    // baseline satisfaction per service
 const WC_EVADE    = 0.03;                  // share of finished toilet visits that skip the fee and run for the exit (~3 in 100 — everyone else queues)
@@ -177,7 +179,7 @@ function withDesk(item, fn) {
 }
 const PAY_SPOT = { x: 560, y: counterGuestStandY() }; // customer line stays behind the far countertop edge
 const PAY_SPOT2 = { x: 462, y: counterGuestStandY() }; // exact-₺20 line
-const WC_BUILDING = { x: 808, y: 92 - BUILD_LIFT, w: 86, h: 80 }; // outdoor hit rect: click to enter
+const WC_BUILDING = { x: 808 + BUILD_DX, y: 92 - BUILD_LIFT, w: 86, h: 80 }; // outdoor hit rect: click to enter
 // Car wash view geometry — a close-up of the parked bus's front. The
 // windshield is a cols×rows cell grid; each cell tracks its own dirt and soap.
 const WASH = {
@@ -371,7 +373,7 @@ const ENGLISH = [
   ["🗺 BÖLGE HARİTASI", "🗺 REGIONAL MAP"], ["— bir terminale dokun", "— tap a terminal"], ["— bir terminale tıkla", "— click a terminal"],
   ["🚪 ÇIKIŞ (E)", "🚪 EXIT (E)"], ["Dışarı çık (E)", "Go outside (E)"], ["Dışarı çık", "Go outside"], ["WC binası", "Restroom"], ["İlk otobüsün geliyor!", "Your first bus is arriving!"],
   ["Yolcular tuvalet için buraya gelir.", "Passengers come here to use the restroom."], ["Otobüsler terminalinde mola verir.", "Buses stop at your terminal."], ["Yolculara hizmet için hazır ol.", "Get ready to serve passengers."],
-  ["Anladım", "Got it"], ["İşin bitince bu düğmeyle binadan çık.", "When you're done, leave the building with this button."], ["Otobüsler dışarıda seni bekliyor.", "Your buses are waiting for you outside."],["Park etmiş otobüse dokun:", "Tap a parked bus:"], ["uzun saplı fırçayla köpükle,", "soap it with the long brush,"], ["hortumla durula", "then rinse with the hose"], ["Terminallerini ve yolu buradan takip et.", "Follow your terminals and the route from here."], ["Yeni terminal de buradan satın alınır.", "New terminals are also bought from here."], ["Her terminalin yükseltmeleri burada.", "Upgrades for each terminal are here."], ["Tuvalet ve oto yıkama için ayrı ayrı yükselt.", "Upgrade toilets and car wash separately."], ["Devam", "Continue"], ["İşe dön", "Back to work"], ["Dükkânı aç!", "Open the shop!"],
+  ["Anladım", "Got it"], ["Park etmiş otobüse dokun:", "Tap a parked bus:"], ["uzun saplı fırçayla köpükle,", "soap it with the long brush,"], ["hortumla durula", "then rinse with the hose"], ["Terminallerini ve yolu buradan takip et.", "Follow your terminals and the route from here."], ["Yeni terminal de buradan satın alınır.", "New terminals are also bought from here."], ["Her terminalin yükseltmeleri burada.", "Upgrades for each terminal are here."], ["Tuvalet ve oto yıkama için ayrı ayrı yükselt.", "Upgrade toilets and car wash separately."], ["Devam", "Continue"], ["İşe dön", "Back to work"], ["Dükkânı aç!", "Open the shop!"],
   ["🎉 ", "🎉 "], [" artık senin", " is now yours"], ["arızalandı — onarılana kadar elle çalış", "has broken down — operate it manually until repaired"],
   ["⚠️ Kayıt sorunu", "⚠️ Save problem"], ["💾 Kaydın aktarıldı", "💾 Save migrated"], ["Kayıt okunamadı", "Save could not be read"],
   ["✨ Ön cam pırıl pırıl!", "✨ The windshield is sparkling clean!"], ["😖 Tuvalet pis, misafir gitti", "😖 The restroom is dirty; the guest left"],
@@ -409,10 +411,10 @@ const ENGLISH = [
   ["yeni kabinler tertemiz açılır", "new stalls open spotless"], ["park yeri açık", "parking spaces open"],
   ["Bugün:", "Today:"], ["Yükseltme maliyeti", "Upgrade cost"], ["Başlangıç itibarı", "Starting reputation"], ["yükseltmeler", "upgrades"],
   ["Şartlar:", "Requirements:"], ["Fiyat:", "Price:"], [": yok", ": unavailable"], ["/sn temizlik", "/s cleaning"], ["(önceki:", "(previous:"],
-  ["Misafirler", "Guests"], ["misafirler", "guests"], ["Misafirler temiz ve boş kabinleri kullanır.", "Guests use clean, unoccupied stalls."], ["misafirler temiz ve boş kabinleri kullanır.", "Guests use clean, unoccupied stalls."], ["Her kabinin temizliğini buradan takip et.", "Check each stall's cleanliness here."],
+  ["Misafirler", "Guests"], ["misafirler", "guests"],
   ["Hizmet verilen otobüs", "Buses served"], ["Hizmet verilen misafir", "Guests served"], ["Gelir", "Revenue"], ["Gider", "Expenses"], ["Bütün terminaller: gelir / gider", "All terminals: revenue / expenses"], ["Dökülen kolonya", "Cologne used"], ["Yıkanan ön cam", "Windshields washed"], ["Kaçırılan ", "Missed "], ["ücret", "fee"], ["Yakalanan kaçak", "Runaways caught"], ["Ort. memnuniyet", "Avg. satisfaction"], ["İtibar", "Reputation"], ["Ünün yayılıyor — yarın daha büyük otobüsler bekle.", "Your reputation is spreading — expect bigger buses tomorrow."], ["Zor bir gündü. Tuvaletleri temiz tut.", "A tough day. Keep the restrooms clean."], ["Mola Yeri'nde sakin bir gün.", "A quiet day at Layover Lane."], ["güne devam", "continue the day"],
-  ["misafirler temiz ve boş kabinleri kullanır.", "Guests use clean, unoccupied stalls."], ["Temizlik aleti", "Cleaning tool"], ["Aleti alıp kirlenen kabinlerde sürükle.", "Pick up the tool and drag it over dirty stalls."], ["İçinde misafir olan kabin temizlenemez.", "You cannot clean an occupied stall."],
-  ["Gişe", "Counter"], ["Tuvalet ücreti burada ödenir.", "The restroom fee is paid here."], ["Doğru para üstünü verip misafirleri uğurla.", "Give the correct change and send guests on their way."],
+  
+  ["Gişe", "Counter"], ["Kirli tuvalet", "Dirty toilet"], ["Fırçayı tuvaletin üzerinde sürükle", "Drag the brush over the toilet"],
   ["🧽 YAKALANDI — bütün tuvaletleri ovuyor", "🧽 CAUGHT — scrubbing every restroom"], ["✨ BÜTÜN TUVALETLER PIRIL PIRIL ✨", "✨ ALL RESTROOMS SPOTLESS ✨"],
   ["🧽 Yakalandın! Tuvalet senin!", "🧽 Caught! The restroom is yours!"], ["✨ Tuvaletler pırıl pırıl!", "✨ The restrooms are sparkling clean!"],
   ["Kabin pırıl pırıl!", "The stall is sparkling clean!"], ["Çayın zaten yolda", "Your tea is already on its way"], ["Çay geliyor!", "Tea is on its way!"], ["Çay için kasada", "Not enough cash for tea:"],
@@ -575,7 +577,7 @@ function freshGame(profile = CONFIG.newGameProfile) {
     company: { cash: CONFIG.economy.startCash, nextTxId: 1, ledger: [], totals: {} },
     activeTerminal: start.id,
     terminals: {},
-    flags: { firstBusDone: false, firstBusParked: false, wcLockedToastSeen: false, arrivalInfoSeen: false, wcInfoSeen: false, wcIntroStep: 0, toolbarIntro: 0, exitInfoSeen: false },
+    flags: { firstBusDone: false, firstBusParked: false, wcLockedToastSeen: false, arrivalInfoSeen: false, wcInfoSeen: false, wcIntroStep: 0, toolbarIntro: 0, wcDirtied: false, brushTutDone: false, changeTutDone: false },
     migratedFrom: null,      // save version this game was migrated from (null = born on v7)
   };
   g.terminals[start.id] = freshTerminal(start.id, profile);
@@ -812,6 +814,12 @@ function restoreGame(data) {
   g.flags.wcInfoSeen = !!g.flags.wcInfoSeen;
   g.flags.wcLockedToastSeen = !!g.flags.wcLockedToastSeen;
   g.flags.wcIntroStep = Number.isInteger(g.flags.wcIntroStep) ? clamp(g.flags.wcIntroStep, 0, 4) : 0;
+  // brush tutorial: saves from before it existed have already used the WC — skip it
+  const hasTut = !!src.flags && Object.prototype.hasOwnProperty.call(src.flags, "brushTutDone");
+  g.flags.brushTutDone = hasTut ? !!g.flags.brushTutDone : g.flags.wcIntroStep >= 4;
+  g.flags.wcDirtied = hasTut ? !!g.flags.wcDirtied : g.flags.brushTutDone;
+  const hasChangeTut = !!src.flags && Object.prototype.hasOwnProperty.call(src.flags, "changeTutDone");
+  g.flags.changeTutDone = hasChangeTut ? !!g.flags.changeTutDone : g.flags.brushTutDone;
   // 0 = map tip not shown yet, 2 = map tip done, 3 = shop tip done, 4 = car wash tip done
   g.flags.toolbarIntro = Number.isInteger(g.flags.toolbarIntro) ? clamp(g.flags.toolbarIntro, 0, 4) : 0;
   const hasParkedFlag = !!src.flags && Object.prototype.hasOwnProperty.call(src.flags, "firstBusParked");
@@ -855,6 +863,7 @@ function migrateLegacy(data) {
   g.flags.firstBusDone = true; // an old game already had its buses — no new-game opening
   g.flags.firstBusParked = true; // the old game has already been through the first stop
   g.flags.wcIntroStep = 4; // old saves have already used the WC
+  g.flags.wcDirtied = g.flags.brushTutDone = g.flags.changeTutDone = true;
   g.clock = sanitizeClock({ day: data.S.day, time: data.S.time, lastSave: data.S.lastSave });
   const t = g.terminals[g.activeTerminal];
   t.sim = data.S;
@@ -1754,7 +1763,13 @@ function finishEnter(b) {
   }
   planStopVisitors(b);
   guaranteeWc(b);
-  if (!G.flags.firstBusParked) { G.flags.firstBusParked = true; save(); }
+  if (!G.flags.firstBusParked) {
+    // the very first bus: the first guest off walks straight to the WC building,
+    // so the player sees right away where guests go
+    const first = b.pax.filter(p => p.disembark && p.forceToilet).sort((u, v) => u.offAt - v.offAt)[0];
+    if (first) first.directWc = true;
+    G.flags.firstBusParked = true; save();
+  }
 }
 
 // At each stop, half the passengers disembark in a quick staggered sequence
@@ -1791,7 +1806,7 @@ function endStop(b) {
     if (p.state === "serveR" || p.state === "serveT" || p.state === "scrubC" || p.state === "selfDripC") continue; // let them finish, they'll board after
     if (p.state === "queueC" || p.state === "payC" || p.state === "doneC" || p.state === "dripC" ||
         p.state === "queueC2" || p.state === "payC2") continue; // still at the counter — they'll finish & board after
-    if (p.state === "leaveC") { p.x = 852; p.y = 169 - BUILD_LIFT; p.runaway = false; goDoor(p, b); continue; } // at the exit door — out & sprint for the bus
+    if (p.state === "leaveC") { p.x = 852 + BUILD_DX; p.y = 169 - BUILD_LIFT; p.runaway = false; goDoor(p, b); continue; } // at the exit door — out & sprint for the bus
     if (p.state !== "bus") p.state = "board";
   }
   // reputation outcome
@@ -2228,6 +2243,17 @@ function tryJoin(fac, p, bus) {
   const f = facilities[fac];
   if (f.spots.some(s => s && s.pax === p)) return;
   if (f.queue.includes(p)) return;
+  if (fac === "T" && !G.flags.wcDirtied) {
+    // the first-ever WC guest reaches the door: the left toilet is left at 80% for
+    // the brush tutorial, and this guest walks the player through the counter
+    // afterwards (a short stay, a ₺50 bill)
+    S.stallClean[brushTutStall()] = 80;
+    S.cleanliness = avgClean();
+    G.flags.wcDirtied = true;
+    p.tutGuest = true;
+    save();
+  }
+  if (p.tutGuest && fac === "T" && S.view !== "wc") { wander(p); return; } // the tutorial guest only joins the line once the player is inside the WC
   f.queue.push(p);
   p.state = fac === "R" ? "waitR" : "waitT";
   const stalls = fac === "R" ? DINER_SEATS : stallCount();
@@ -2238,7 +2264,7 @@ function tryJoin(fac, p, bus) {
 
 function headToFacility(fac, p, bus) {
   if (fac === "R" && !LOKANTA_OPEN) { p.refuseR = true; wander(p); return; }
-  const entrance = fac === "T" ? { x: 851, y: 184 - BUILD_LIFT } : { x: 690, y: 184 - BUILD_LIFT };
+  const entrance = fac === "T" ? { x: 851 + BUILD_DX, y: 184 - BUILD_LIFT } : { x: 690 + BUILD_DX, y: 184 - BUILD_LIFT };
   p.want = fac;
   p.state = "walk";
   p.tx = entrance.x; p.ty = entrance.y;
@@ -2255,7 +2281,7 @@ function wander(p) {
   // leaves the guest standing forever)
   const obstacles = outdoorBusObstacles();
   for (let n = 0; n < 12; n++) {
-    const x = rand(560, 940), y = rand(WALK_TOP + 6, 330);
+    const x = rand(560 + BUILD_DX, 940 + BUILD_DX), y = rand(WALK_TOP + 6, 330);
     const inBus = obstacles.some(o => {
       const l = busLocalPoint({ x, y }, o);
       return Math.abs(l.x) < o.hl && Math.abs(l.y) < o.hw;
@@ -2311,7 +2337,10 @@ function stepFac(name, timeDt, stalls, svcTime) {
   // stall; diner seats fill from the front.
   while (f.queue.length) {
     const free = [];
-    for (let i = 0; i < stalls; i++) if (!f.spots[i] && (name !== "T" || stallActive(i))) free.push(i);
+    // the left toilet is held back for the first-ever WC guest (who is the one it was cleaned for)
+    const tutNext = !!f.queue[0] && !!f.queue[0].tutGuest;
+    for (let i = 0; i < stalls; i++)
+      if (!f.spots[i] && (name !== "T" || stallActive(i) && (tutNext || !(brushTutPending() && i === brushTutStall())))) free.push(i);
     if (!free.length) break;
     // No guest steps into a toilet that filthy: if every OPEN stall is below
     // the bar, the whole line stands (and loses patience) until the hose
@@ -2329,6 +2358,7 @@ function stepFac(name, timeDt, stalls, svcTime) {
       // Guests sniff the row and head for the least grimy free door.
       slot = free[0];
       for (const i of free) if (S.stallClean[i] > S.stallClean[slot]) slot = i;
+      if (p.tutGuest && free.includes(brushTutStall())) slot = brushTutStall(); // the toilet the player just cleaned
     } else slot = free[0];
     p.state = name === "R" ? "serveR" : "serveT";
     p.stall = slot; // the stall this visit uses — pinned until the guest leaves
@@ -2342,12 +2372,13 @@ function stepFac(name, timeDt, stalls, svcTime) {
     }
     // A toilet visit runs 1–10 in-game minutes; a diner seat keeps the short
     // fixed service time.
-    f.spots[slot] = { pax: p, t: name === "T" ? rand(TOILET_STAY[0], TOILET_STAY[1]) : svcTime };
+    f.spots[slot] = { pax: p, t: name === "T" ? (p.tutGuest ? TUT_TOILET_STAY : rand(TOILET_STAY[0], TOILET_STAY[1])) : svcTime };
   }
   // running services — a finished visit frees its own slot (no reflow)
   for (let i = 0; i < stalls; i++) {
     const s = f.spots[i];
     if (!s) continue;
+    if (s.pax && s.pax.tutGuest && !s.pax.inStall) continue; // the tutorial guest's 2.5 s start once they are inside the toilet
     s.t -= timeDt;
     if (s.t <= 0) { completeService(name, s.pax); f.spots[i] = null; s.pax = null; s.t = -1; }
   }
@@ -2391,7 +2422,7 @@ function completeService(name, p) {
   const bus = findBusOf(p);
   if (bus && bus.state === "stop") {
     // the one roll per visit: a few guests try to run off without paying
-    if (Math.random() < WC_EVADE) fleeCounter(p);
+    if (!p.tutGuest && Math.random() < WC_EVADE) fleeCounter(p); // the tutorial guest always pays
     else enterCounter(p);
   } else {
     p.unpaid = true; // bus already pulled out — no counter, no time for the ritual
@@ -2494,6 +2525,41 @@ function cleanApply(x, y) {
     }
   }
   if (touched) S.cleanliness = avgClean();
+  if (brushTutCleaning() && S.stallClean[brushTutStall()] >= 100) {
+    toolInHand = null; // as if the player put the brush down: wcZoom eases back out
+    G.flags.brushTutDone = true;
+    // the strolling tutorial guest now heads for the clean toilet
+    for (const b of buses) for (const p of b.pax)
+      if (p.tutGuest && (p.state === "walk" || p.state === "free")) headToFacility("T", p, b);
+    save();
+  }
+}
+
+// --- Brush tutorial (first WC visit): tap cue on the bucket, then clean the left toilet to 100% ---
+let wcEnteredAt = 0; // performance.now() when the player last stepped into the WC
+const BRUSH_CUE_DELAY = 2000; // real ms after stepping into the WC before the brush hand shows and the clock stops
+const brushTutStall = () => Math.min(...activeStalls());          // the toilet on the left
+const brushTutPending = () => G.flags.wcDirtied && !G.flags.brushTutDone;
+// zoomed in with the brush: the player stays here until the left toilet is spotless
+const brushTutCleaning = () => brushTutPending() && S.view === "wc" && !!toolInHand;
+// the clock holds from the moment the brush hand appears (2 real s after stepping in) until the toilet is clean
+const brushTutHold = () => brushTutPending() && S.view === "wc" && (!!toolInHand || performance.now() - wcEnteredAt >= BRUSH_CUE_DELAY);
+// Change tutorial: the first WC guest stands at the counter with ₺50 — the
+// player hands back ₺10, then ₺20. Returns the bill to tap next (or null).
+function changeTutNext() {
+  if (G.flags.changeTutDone || S.view !== "wc" || brushTutPending()) return null;
+  const f = facilities.C.queue[0];
+  if (!f || !f.tutGuest || f.state !== "payC" || !atPaySpot(f)) return null;
+  return f.changeGiven === 0 ? 10 : f.changeGiven === 10 ? 20 : null;
+}
+const wcTutHold = () => brushTutHold() || changeTutNext() != null;
+// Stepping into the WC while the brush tutorial waits: the first guest, still
+// strolling on the street, joins the line now — so they walk up the side passage
+// in view until the brush hand appears (the clock holds from then on).
+function tutGuestEnterWc() {
+  if (!brushTutPending()) return;
+  for (const b of buses) for (const p of b.pax)
+    if (p.tutGuest && (p.state === "walk" || p.state === "free")) tryJoin("T", p, b);
 }
 
 /* ---------------------- Player actions (counter) -------------------- */
@@ -2509,9 +2575,10 @@ function setView(v) {
   }
   if (v === S.view) return;
   if (scrub && S.view === "wc") return; // stay and watch the caught runaway finish scrubbing (5 s)
+  if (brushTutCleaning() || changeTutNext() != null) return; // finish the WC tutorial step first
   const from = S.view;
   S.view = v;
-  if (from !== "wc" && v === "wc") startWcIntro();
+  if (from !== "wc" && v === "wc") { markWcVisited(); wcEnteredAt = performance.now(); tutGuestEnterWc(); }
   viewFade = 1;
   if (from === "wash") S.washBus = null; // we step back out; the bus keeps its washed state
   if (v !== "wc") { toolInHand = null; wcZoom = 0; } // leaving the counter room — the hose goes back on its faucet, the camera resets
@@ -3650,7 +3717,7 @@ function enterCounter(p) {
   // somehow already in a line, the second join would strand a stale entry
   // (finalizePayment releases from the first queue only, then breaks).
   if (facilities.C.queue.includes(p) || facilities.C.queue2.includes(p)) return;
-  p.bill = pick(BILL_POOL);
+  p.bill = p.tutGuest ? 50 : pick(BILL_POOL); // the tutorial guest pays ₺50: ₺30 change = 10 + 20
   p.owed = p.bill - CONFIG.economy.toiletFee;
   p.changeGiven = 0;
   p.changeNotes = [];
@@ -3694,7 +3761,7 @@ function stepCQueue(f, q, auto, timeDt) {
     const p = q[i];
     if (p.state !== qState && p.state !== pState) continue; // stale entry (an old save)
     if (p.state === qState) p.waitTotal += timeDt;
-    p.patience -= (p.state === qState ? 1 : 0.5) * timeDt; // the front guest settling at the counter is on the clock too
+    if (!p.tutGuest) p.patience -= (p.state === qState ? 1 : 0.5) * timeDt; // the front guest settling at the counter is on the clock too (the tutorial guest waits for you)
     if (p.patience <= 0) { leaveCounterLine(q, i); stormOut(p); continue; }
     // Line grace: 5–10 in-game minutes to settle the payment, then out the
     // door. Set here when the guest's bus has started boarding (boardAt)
@@ -3905,7 +3972,7 @@ function offerCologne() {
 // viaDoor: the guest is still INSIDE the WC — no snap out; they take the
 // long way home, strolling to the exit (the "leaveC" state below).
 function finishVisit(p, sat, viaDoor = false) {
-  if (!viaDoor && isIndoorPax(p)) { p.x = 852; p.y = 169 - BUILD_LIFT; } // back on the outdoor side of the door
+  if (!viaDoor && isIndoorPax(p)) { p.x = 852 + BUILD_DX; p.y = 169 - BUILD_LIFT; } // back on the outdoor side of the door
   sat = clamp(sat, 0, 100);
   p.sat = sat;
   p.refuseR = p.refuseT = false;
@@ -4238,7 +4305,8 @@ function updatePax(p, bus, dt, timeDt = dt) {
     if (bus.state === "stop" && p.disembark && reached(p.offAt) && !reached(p.boardAt)) {
       p.disembark = false; // each guest leaves only once per stop
       p.__boarded = false; // off the bus for this cycle
-      wander(p); // spread out to a random spot instead of queuing at the door
+      if (p.directWc) { p.directWc = false; p.refuseT = false; headToFacility("T", p, bus); } // first-ever bus: straight to the WC
+      else wander(p); // spread out to a random spot instead of queuing at the door
     } else if (bus.stoppedOnce && reached(p.boardAt) && !p.__boarded) {
       // One-shot per boarding cycle. Guests who stayed aboard keep their
       // heads in the windows (the flag stays true); only a guest who never
@@ -4271,7 +4339,7 @@ function updatePax(p, bus, dt, timeDt = dt) {
     if (moveOutdoorPax(p, p.tx, p.ty, step)) {
       if (p.state === "board") { p.state = "bus"; p.__boarded = true; } // aboard again for this cycle
       else if (p.want === "R" || p.want === "T") tryJoin(p.want, p, bus);
-      else { p.state = "free"; p.idleT = rand(2, 5); p.tx = p.x; p.ty = p.y; p.walkT = 0; } // stand a while, then wander on (free branch)
+      else { p.state = "free"; p.idleT = p.tutGuest && brushTutPending() ? rand(0.2, 0.5) : rand(2, 5); p.tx = p.x; p.ty = p.y; p.walkT = 0; } // stand a while, then wander on (free branch) — the tutorial guest keeps moving
     }
     return;
   }
@@ -4287,12 +4355,12 @@ function updatePax(p, bus, dt, timeDt = dt) {
     const f = facilities[p.state === "waitR" ? "R" : "T"];
     const i = f.queue.indexOf(p);
     if (i === -1) { p.state = "free"; p.idleT = rand(0.5, 2); return; }
-    if (p.state === "waitR") { p.x = 676 - 16 * (i + 1); p.y = 168 - BUILD_LIFT - (i % 2) * 3; }
-    else { p.x = Math.min(940, 866 + 16 * (i + 1)); p.y = 168 - BUILD_LIFT - (i % 2) * 3; }
+    if (p.state === "waitR") { p.x = 676 + BUILD_DX - 16 * (i + 1); p.y = 168 - BUILD_LIFT - (i % 2) * 3; }
+    else { p.x = Math.min(940, 866 + BUILD_DX + 16 * (i + 1)); p.y = 168 - BUILD_LIFT - (i % 2) * 3; }
     return;
   }
 
-  if (p.state === "serveR") { p.x = 690; p.y = 169 - BUILD_LIFT; return; }
+  if (p.state === "serveR") { p.x = 690 + BUILD_DX; p.y = 169 - BUILD_LIFT; return; }
   if (p.state === "serveT") {
     // indoors: fresh pulls spawn below a side passage (stepFac) and walk up
     // it (enterT). Then walk to your stall bay — the
@@ -4361,7 +4429,7 @@ function updatePax(p, bus, dt, timeDt = dt) {
     if (p.x !== gx) moveToward(p, gx, SIDE_IN_Y, step);
     else moveToward(p, gx, oy, step);
     if (p.x === gx && Math.abs(p.y - oy) < 8) {
-      p.x = 852; p.y = 169 - BUILD_LIFT;    // step out onto the outdoor side
+      p.x = 852 + BUILD_DX; p.y = 169 - BUILD_LIFT;    // step out onto the outdoor side
       p.runaway = false;       // crossed the exit — the escape succeeded
       if (bus && reached(p.boardAt)) {
         if (bus.state === "stop") goDoor(p, bus); // sprint the rest of the way
@@ -5226,7 +5294,8 @@ function drawSign() {
 }
 
 const DINER_WINDOWS = [[630, 140, 26, 22], [700, 140, 26, 22], [750, 140, 26, 22]];
-const WC_WINDOWS = [[826, 134, 20, 18], [858, 134, 20, 18]];
+// flank the centered doorway (frame x 841..861) with clear wall on both sides
+const WC_WINDOWS = [[819, 137, 16, 15], [867, 137, 16, 15]];
 
 function drawWindow(x, y, w, h, top, bot, frame) {
   ctx.fillStyle = frame;
@@ -5258,7 +5327,7 @@ function drawRestStop() {
   const nf = nightFactor(), now = performance.now();
   // the buildings are drawn in their own (higher) frame
   ctx.save();
-  ctx.translate(0, -BUILD_LIFT);
+  ctx.translate(BUILD_DX, -BUILD_LIFT);
   // --- diner ---
   const red = mix("#d94f3d", "#3a2430", nf * 0.7);
   ctx.fillStyle = "rgba(0,0,0,0.25)";
@@ -5361,12 +5430,18 @@ function drawRestStop() {
   for (const [x, y, w, h] of WC_WINDOWS)
     drawWindow(x, y, w, h, mix("#fff2d0", "#5a4a30", nf * 0.5), mix("#f3d9a0", "#40342a", nf * 0.5), "#2a3142");
   // open doorway — the WC has no door
-  ctx.fillStyle = mix("#d3d9e2", "#3a4250", nf * 0.6);
-  ctx.fillRect(843, 138, 16, 32);
-  const dg = ctx.createLinearGradient(0, 140, 0, 170);
-  dg.addColorStop(0, "#121725"); dg.addColorStop(1, "#262d40");
+  ctx.fillStyle = mix("#d3d9e2", "#3a4250", nf * 0.6); // trim
+  ctx.fillRect(842, 136, 18, 34);
+  ctx.fillStyle = mix("#3a4458", "#161b26", nf * 0.6); // lintel
+  rr(ctx, 840, 133, 22, 4, 1.5); ctx.fill();
+  const dg = ctx.createLinearGradient(0, 138, 0, 170);
+  dg.addColorStop(0, "#121725"); dg.addColorStop(1, "#2a3247");
   ctx.fillStyle = dg;
-  ctx.fillRect(845, 140, 12, 30);
+  ctx.fillRect(845, 138, 12, 32);
+  ctx.fillStyle = "rgba(255,240,200,0.10)"; // faint light from inside
+  ctx.fillRect(845, 160, 12, 10);
+  ctx.fillStyle = mix("#b8c0cc", "#30384a", nf * 0.6); // step
+  ctx.fillRect(840, 168, 22, 2);
   ctx.fillStyle = "#1d2333";
   rr(ctx, 818, 100, 66, 20, 5); ctx.fill();
   ctx.strokeStyle = "rgba(159,232,255,0.4)"; ctx.lineWidth = 1.5;
@@ -5433,7 +5508,7 @@ function drawNightLights(nf, now) {
   // window light spilling onto the curb
   for (const [sx, rx] of [[705, 100], [851, 46]]) {
     ctx.save();
-    ctx.translate(sx, 170 - BUILD_LIFT);
+    ctx.translate(sx + BUILD_DX, 170 - BUILD_LIFT);
     ctx.scale(1, 0.28);
     const sg = ctx.createRadialGradient(0, 0, 2, 0, 0, rx);
     sg.addColorStop(0, `rgba(255,190,100,${0.2 * a})`);
@@ -5445,7 +5520,7 @@ function drawNightLights(nf, now) {
   ctx.restore();
 
   ctx.fillStyle = `rgba(255, 196, 100, ${0.5 * nf})`;
-  for (const [x, y, w, h] of [...DINER_WINDOWS, ...WC_WINDOWS]) ctx.fillRect(x, y - BUILD_LIFT, w, h);
+  for (const [x, y, w, h] of [...DINER_WINDOWS, ...WC_WINDOWS]) ctx.fillRect(x + BUILD_DX, y - BUILD_LIFT, w, h);
 
   ctx.save();
   ctx.textAlign = "center";
@@ -5453,10 +5528,10 @@ function drawNightLights(nf, now) {
   ctx.font = "bold 12px system-ui";
   ctx.shadowColor = "#ffb02e";
   ctx.fillStyle = "#ffd36b";
-  ctx.fillText("LOKANTA", 705, 105 - BUILD_LIFT);
+  ctx.fillText("LOKANTA", 705 + BUILD_DX, 105 - BUILD_LIFT);
   ctx.shadowColor = "#4fd8ff";
   ctx.fillStyle = "#b6f0ff";
-  ctx.fillText("WC", 851, 114 - BUILD_LIFT);
+  ctx.fillText("WC", 851 + BUILD_DX, 114 - BUILD_LIFT);
   ctx.restore();
   // backlit pylon face cuts through the night overlay
   ctx.save();
@@ -6706,13 +6781,114 @@ function wcCameraToBase(x, y) {
 }
 
 function drawWCInterior() {
-  if (wcZoom <= 0) return drawWCScene();
+  if (wcZoom <= 0) { drawWCScene(); drawBrushTutorial(); return; }
   const c = wcCamera();
   ctx.save();
   ctx.translate(c.tx, c.ty);
   ctx.scale(c.k, c.k);
   drawWCScene();
+  drawBrushTutorial();
   ctx.restore();
+}
+
+// The brush tutorial, drawn in WC scene coords (inside the zoom camera):
+// 2 real s after stepping in, a tap cue on the brush bucket; once the brush is in
+// hand and the camera has zoomed in, a bubble on the left toilet with its
+// cleanliness until it reaches 100%.
+// Dims the room like the arrival popup, but with a soft spotlight: the dim ramps
+// up over FEATHER px around the lit rect instead of stopping at a hard edge.
+// Built from non-overlapping annuli (no ctx.filter, which some browsers lack).
+// Built on an offscreen layer: the dim fills the whole canvas, then the lit rect is
+// erased with a Gaussian-blurred shadow, so the edge falls off smoothly with no seams.
+let spotLayer = null;
+function spotlightDim(x, y, w, h, pad = 6, feather = 40) {
+  const DIM = 0.76;
+  const W = ctx.canvas.width, H = ctx.canvas.height;
+  if (!spotLayer) spotLayer = document.createElement("canvas");
+  if (spotLayer.width !== W || spotLayer.height !== H) { spotLayer.width = W; spotLayer.height = H; }
+  const g = spotLayer.getContext("2d");
+  // map scene coords to device pixels with the current transform (scale only, as drawn here)
+  const m = ctx.getTransform();
+  const dx = (px) => m.a * px + m.e, dy = (py) => m.d * py + m.f;
+  const k = Math.hypot(m.a, m.b);
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.globalCompositeOperation = "source-over";
+  g.shadowColor = "transparent";
+  g.clearRect(0, 0, W, H);
+  g.fillStyle = `rgba(5, 8, 16, ${DIM})`;
+  g.fillRect(0, 0, W, H);
+  // erase only the blurred shadow of the lit rect: the shape itself is drawn off-canvas,
+  // so there is no hard inner edge — brightness falls off across the box's border
+  const rx = dx(x - pad), ry = dy(y - pad), rw = (w + 2 * pad) * m.a, rh = (h + 2 * pad) * m.d;
+  const OFF = W * 2;
+  g.globalCompositeOperation = "destination-out";
+  g.shadowColor = "rgba(0, 0, 0, 1)";
+  g.shadowBlur = feather * k;
+  g.shadowOffsetX = OFF; g.shadowOffsetY = 0;
+  g.fillStyle = "#000";
+  g.fillRect(rx - OFF, ry, rw, rh);
+  g.shadowOffsetX = 0;
+  g.shadowColor = "transparent";
+  g.globalCompositeOperation = "source-over";
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(spotLayer, 0, 0);
+  ctx.restore();
+}
+
+function drawBrushTutorial() {
+  if (arrivalInfoOpen || modalOpen) return;
+  const tutBill = changeTutNext();
+  if (tutBill != null) { // change tutorial: the hand taps the bill to hand back next
+    const r = deskRect(chipHit(COUNTER_IN.chips.find(c => c.d === tutBill)), "drawer");
+    // same dim as the brush cue: the room darkens with the tapped bill left bright
+    spotlightDim(r.x, r.y, r.w, r.h);
+    drawTapCue(r.x + r.w / 2, r.y + r.h * 0.4);
+    return;
+  }
+  if (!brushTutPending()) return;
+  if (!toolInHand) {
+    if (wcZoom > 0 || performance.now() - wcEnteredAt < BRUSH_CUE_DELAY) return;
+    const st = toolStations()[0];
+    // while the hand asks for the brush the room dims like the arrival popup,
+    // with the brush bucket left bright; once it is in hand the dim goes away
+    spotlightDim(st.x, st.y, st.w, st.h);
+    drawTapCue(st.x + st.w / 2, st.y + st.h - 8); // fingertip near the foot of the bucket: the hand hangs below, leaving the brush and cup visible
+    return;
+  }
+  if (wcZoom < 0.95) return; // wait for the zoom to settle
+  const i = brushTutStall(), bay = stallBay(i), clean = S.stallClean[i];
+  const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 380);
+  ctx.save();
+  // soft pulsing frame around the toilet
+  ctx.strokeStyle = `rgba(255, 211, 107, ${0.55 + 0.4 * pulse})`;
+  ctx.lineWidth = 1.5;
+  rr(ctx, bay.x - 3, bay.y - 3, bay.w + 6, bay.h + 6, 5); ctx.stroke();
+  // the bubble, just below the toilet, pointing up at it
+  const w = 156, h = 50, tail = 6;
+  const cx = bay.x + bay.w / 2;
+  const x = clamp(cx - w / 2, -offX + 4, Wdyn - offX - w - 4), y = bay.y + bay.h + 8 + tail;
+  ctx.fillStyle = "rgba(16, 22, 35, 0.96)";
+  ctx.beginPath();
+  ctx.moveTo(cx - tail, y + 0.5); ctx.lineTo(cx, y - tail); ctx.lineTo(cx + tail, y + 0.5);
+  ctx.fill();
+  rr(ctx, x, y, w, h, 7); ctx.fill();
+  ctx.strokeStyle = "#f2c66d"; ctx.lineWidth = 1;
+  rr(ctx, x, y, w, h, 7); ctx.stroke();
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillStyle = "#ffd36b"; ctx.font = "bold 10px system-ui";
+  ctx.fillText("Kirli tuvalet", x + w / 2, y + 10);
+  ctx.fillStyle = "#f4f6fb"; ctx.font = "8px system-ui";
+  ctx.fillText("Fırçayı tuvaletin üzerinde sürükle", x + w / 2, y + 23);
+  // cleanliness bar
+  const bx = x + 10, by = y + 34, bw = w - 44, bh = 6;
+  ctx.fillStyle = "#0d1120"; rr(ctx, bx, by, bw, bh, 3); ctx.fill();
+  ctx.fillStyle = clean > 95 ? "#5ad07a" : "#ffd36b";
+  rr(ctx, bx, by, Math.max(bh, bw * clean / 100), bh, 3); ctx.fill();
+  ctx.fillStyle = "#f4f6fb"; ctx.font = "bold 8px system-ui"; ctx.textAlign = "right";
+  ctx.fillText(gameLanguage === "en" ? `${Math.floor(clean)}%` : `%${Math.floor(clean)}`, x + w - 8, by + bh / 2 + 0.5);
+  ctx.restore();
+  ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
 }
 
 function drawWCScene() {
@@ -6999,7 +7175,7 @@ function drawWcPrompt() {
   if (n === 0) return;
   const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 200);
   // Badge pinned to the WC building's facade (inside the building body).
-  const cx = 851, cy = 131 - BUILD_LIFT;
+  const cx = 851 + BUILD_DX, cy = 131 - BUILD_LIFT;
   const label = String(n); // exact count — no "9+" cap
   ctx.font = "bold 11px system-ui, sans-serif";
   ctx.textAlign = "center";
@@ -7023,7 +7199,7 @@ function drawWcPrompt() {
   // pulsing hint pointing at the building (the click target)
   ctx.fillStyle = `rgba(255, 179, 71, ${pulse})`;
   ctx.font = "bold 9px system-ui, sans-serif";
-  ctx.fillText((coarseQ ? "girmek için dokun" : "girmek için tıkla") + " ↓", 851, 84 - BUILD_LIFT);
+  ctx.fillText((coarseQ ? "girmek için dokun" : "girmek için tıkla") + " ↓", cx, 84 - BUILD_LIFT);
   // restore text state for the rest of the scene
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
@@ -8079,40 +8255,17 @@ function showIntro(first) {
   showModal();
 }
 
-function startWcIntro() {
-  if (G.flags.wcIntroStep !== 0) return;
-  G.flags.wcIntroStep = 1;
-  arrivalInfoKind = "wcIntro-toilets";
-  arrivalInfoOpen = true;
+// The WC has no tutorial popups: the first visit just marks it as seen, which
+// lets the outdoor toolbar tips (map, business, car wash) follow.
+function markWcVisited() {
+  if (G.flags.wcIntroStep >= 4) return;
+  G.flags.wcIntroStep = 4;
   save();
-}
-
-function wcIntroTargetRect() {
-  if (arrivalInfoKind === "wcIntro-toilets") {
-    const x1 = stallSx(0), x2 = stallSx(STALL_ROW_W);
-    const y1 = stallSy(84), y2 = stallSy(246);
-    return { x: x1 - 8, y: y1 - 8, w: x2 - x1 + 16, h: y2 - y1 + 16 };
-  }
-  if (arrivalInfoKind === "wcIntro-brush") {
-    const st = toolStations()[0];
-    return { x: st.x - 10, y: st.y - 10, w: st.w + 20, h: st.h + 20 };
-  }
-  const r = deskRect(COUNTER_IN.desk, "drawer");
-  const { L, R } = counterBounds();
-  return { x: L - 8, y: r.y - 8, w: R - L + 16, h: r.h + 16 };
 }
 
 function maybeShowArrivalInfo() {
   if (arrivalInfoOpen || modalOpen || paused || shopOpen || mapOpen) return;
-  if (S.view !== "out") {
-    // first time indoors (the exit button appears), after the WC tutorial: point at it
-    if (!G.flags.exitInfoSeen && G.flags.wcIntroStep >= 4) {
-      arrivalInfoKind = "intro-exit";
-      arrivalInfoBusId = null;
-      arrivalInfoOpen = true;
-    }
-    return;
-  }
+  if (S.view !== "out") return; // no tips indoors
   if (!G.flags.arrivalInfoSeen) {
     if (performance.now() < arrivalInfoDelayUntil) return;
     const bus = buses.find(b => b.state === "drive" && b.cx + b.len / 2 >= -offX && b.cx - b.len / 2 <= Wdyn - offX);
@@ -8120,7 +8273,8 @@ function maybeShowArrivalInfo() {
     arrivalInfoKind = "arrival";
     arrivalInfoBusId = bus.id;
     arrivalInfoOpen = true;
-  } else if (!G.flags.wcInfoSeen && buses.some(b => b.state === "stop")) {
+  } else if (!G.flags.wcInfoSeen && buses.some(b => b.pax.some(p => p.tutGuest || isIndoorPax(p) || p.state === "waitT"))) {
+    // only once a guest has reached the WC (at its door or inside) — the tip then explains where they went
     arrivalInfoKind = "wc";
     arrivalInfoBusId = null;
     arrivalInfoOpen = true;
@@ -8144,20 +8298,10 @@ function toolbarTargetRect(id) {
 
 function dismissArrivalInfo() {
   if (!arrivalInfoOpen) return;
-  if (arrivalInfoKind === "intro-exit") { G.flags.exitInfoSeen = true; arrivalInfoOpen = false; save(); return; }
   if (arrivalInfoKind.startsWith("intro-")) {
     if (arrivalInfoKind === "intro-map") { G.flags.toolbarIntro = 2; arrivalInfoKind = "intro-shop"; }
     else if (arrivalInfoKind === "intro-shop") { G.flags.toolbarIntro = 3; arrivalInfoKind = "intro-wash"; }
     else { G.flags.toolbarIntro = 4; arrivalInfoOpen = false; }
-    save();
-    return;
-  }
-  if (arrivalInfoKind.startsWith("wcIntro-")) {
-    const next = G.flags.wcIntroStep + 1;
-    G.flags.wcIntroStep = next;
-    if (next < 4) arrivalInfoKind = [null, null, "wcIntro-brush", "wcIntro-counter"][next];
-    else arrivalInfoOpen = false;
-    arrivalInfoBusId = null;
     save();
     return;
   }
@@ -8191,34 +8335,22 @@ function arrivalInfoLayout() {
     return { washTip: true, x, y, w, h, tail: { x: tipX, y: bus.cy, bx, by: bus.cy, side },
       button: { x: x + w / 2 - 62, y: y + h - 48, w: 124, h: 32 } };
   }
-  const isIntro = arrivalInfoKind.startsWith("wcIntro-") || arrivalInfoKind.startsWith("intro-");
+  const isIntro = arrivalInfoKind.startsWith("intro-");
   if (isIntro) {
     const w = 430, h = 132, left = -offX + 8, right = Wdyn - offX - w - 8;
-    const target = arrivalInfoKind.startsWith("intro-")
-      ? toolbarTargetRect({ "intro-map": "mapBtn", "intro-shop": "cashChip", "intro-exit": "btnExit" }[arrivalInfoKind] || "cashChip")
-      : wcIntroTargetRect();
-    let x = Wdyn / 2 - w / 2, y;
-    if (arrivalInfoKind.startsWith("intro-")) {
-      x = target.x - w - 12; // the box sits to the left of the highlighted button, level with it
-      // but never up under the header bar's buttons: start below the header's bottom edge
-      const header = toolbarTargetRect("headerBar");
-      y = Math.max(target.y + target.h / 2 - h / 2, header.y + header.h + 8);
-    } else if (arrivalInfoKind === "wcIntro-toilets") {
-      y = target.y + target.h + 12; // directly below the highlighted stall row
-    } else if (arrivalInfoKind === "wcIntro-brush") {
-      x = target.x + target.w + 12; // beside the highlighted cleaning tool
-      if (x > right) x = target.x - w - 12;
-      y = target.y + target.h / 2 - h / 2;
-    } else {
-      y = target.y - h - 12; // directly above the highlighted counter
-    }
+    const target = toolbarTargetRect(arrivalInfoKind === "intro-map" ? "mapBtn" : "cashChip");
+    let x = target.x - w - 12; // the box sits to the left of the highlighted button, level with it
+    // but never up under the header bar's buttons: start below the header's bottom edge
+    const header = toolbarTargetRect("headerBar");
+    let y = Math.max(target.y + target.h / 2 - h / 2, header.y + header.h + 8);
     x = clamp(x, left, right);
     y = clamp(y, -offY + 8, H + offY - h - 8);
     return { isIntro, target, x, y, w, h, button: { x: x + w / 2 - 62, y: y + 90, w: 124, h: 32 } };
   }
   const isWc = arrivalInfoKind === "wc";
   const bus = isWc ? null : buses.find(b => b.id === arrivalInfoBusId);
-  const w = 430, h = 132, tail = 14;
+  // the WC tip has no button, so it is just a title and one line — a narrower, shorter box
+  const w = isWc ? 360 : 430, h = isWc ? 84 : 132, tail = 14;
   if (isWc) {
     const targetY = WC_BUILDING.y + WC_BUILDING.h / 2;
     const x = WC_BUILDING.x - w - tail - 8;
@@ -8295,17 +8427,9 @@ function drawArrivalInfo() {
     ctx.strokeStyle = "#ffd36b"; ctx.lineWidth = 2;
     rr(ctx, target.x, target.y, target.w, target.h, 8); ctx.stroke();
 
-    const copy = arrivalInfoKind === "wcIntro-toilets"
-      ? ["Tuvaletler", "Misafirler temiz ve boş kabinleri kullanır.", "Her kabinin temizliğini buradan takip et."]
-      : arrivalInfoKind === "wcIntro-brush"
-        ? ["Temizlik aleti", "Aleti alıp kirlenen kabinlerde sürükle.", "İçinde misafir olan kabin temizlenemez."]
-        : arrivalInfoKind === "intro-map"
-          ? ["Bölge haritası", "Terminallerini ve yolu buradan takip et.", "Yeni terminal de buradan satın alınır."]
-          : arrivalInfoKind === "intro-shop"
-            ? ["İşletme", "Her terminalin yükseltmeleri burada.", "Tuvalet ve oto yıkama için ayrı ayrı yükselt."]
-            : arrivalInfoKind === "intro-exit"
-              ? ["Dışarı çık", "İşin bitince bu düğmeyle binadan çık.", "Otobüsler dışarıda seni bekliyor."]
-              : ["Gişe", "Tuvalet ücreti burada ödenir.", "Doğru para üstünü verip misafirleri uğurla."];
+    const copy = arrivalInfoKind === "intro-map"
+      ? ["Bölge haritası", "Terminallerini ve yolu buradan takip et.", "Yeni terminal de buradan satın alınır."]
+      : ["İşletme", "Her terminalin yükseltmeleri burada.", "Tuvalet ve oto yıkama için ayrı ayrı yükselt."];
     ctx.fillStyle = "rgba(16, 22, 35, 0.98)";
     rr(ctx, x, y, w, h, 14); ctx.fill();
     ctx.strokeStyle = "#f2c66d"; ctx.lineWidth = 2;
@@ -8391,11 +8515,96 @@ function drawArrivalInfo() {
     ctx.fillText("Otobüsler terminalinde mola verir.", x + w / 2, y + 53);
     ctx.fillText("Yolculara hizmet için hazır ol.", x + w / 2, y + 72);
   }
-  ctx.fillStyle = "#d92332";
-  rr(ctx, button.x, button.y, button.w, button.h, 8); ctx.fill();
-  ctx.fillStyle = "#fff";
-  ctx.font = "bold 15px system-ui";
-  ctx.fillText("Anladım", button.x + button.w / 2, button.y + button.h / 2);
+  if (isWc) {
+    drawWcTapCue(); // no button: the building itself is the way forward
+  } else {
+    ctx.fillStyle = "#d92332";
+    rr(ctx, button.x, button.y, button.w, button.h, 8); ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 15px system-ui";
+    ctx.fillText("Anladım", button.x + button.w / 2, button.y + button.h / 2);
+  }
+  ctx.restore();
+}
+
+// Tap cue on the WC building: a pointer hand glides up to the building's middle,
+// presses gently, and a single soft ripple spreads from the fingertip
+function drawWcTapCue() {
+  drawTapCue(WC_BUILDING.x + WC_BUILDING.w / 2, WC_BUILDING.y + WC_BUILDING.h / 2);
+}
+function drawTapCue(cx, cy) {
+  const CYCLE = 2400, TRAVEL = 16;                  // ms per tap; px the hand glides
+  const t = (performance.now() % CYCLE) / CYCLE;
+  const TAU = Math.PI * 2;
+  // continuous cosine glide: farthest at t = 0, touching at t = 0.5 — no stops, no jerks
+  const reach = 0.5 - 0.5 * Math.cos(TAU * t);      // 0 = away, 1 = touching
+  const press = Math.pow(Math.max(0, (reach - 0.8) / 0.2), 2); // eases in only right at the touch
+  const since = (t + 0.5) % 1;                      // cycle fraction since the last touch
+  ctx.save();
+  // one soft ripple per touch
+  const p = since / 0.7;
+  if (p < 1) {
+    const e = 1 - Math.pow(1 - p, 2);
+    ctx.globalAlpha = 0.55 * (1 - p) * (1 - p);
+    ctx.strokeStyle = "#ffd36b";
+    ctx.lineWidth = 2.5 - 1.5 * p;
+    ctx.beginPath(); ctx.arc(cx, cy, 8 + e * 26, 0, TAU); ctx.stroke();
+  }
+  // the touch point: a soft glow that breathes with the hand
+  const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, 14 + 4 * press);
+  glow.addColorStop(0, `rgba(255, 211, 107, ${0.55 + 0.3 * press})`);
+  glow.addColorStop(1, "rgba(255, 211, 107, 0)");
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = glow;
+  ctx.beginPath(); ctx.arc(cx, cy, 18 + 4 * press, 0, TAU); ctx.fill();
+  // the hand glides up until its fingertip meets the glow; it dips slightly on the press
+  drawClickHand(cx, cy + (1 - reach) * TRAVEL, 1.2 * (1 - 0.06 * press));
+  ctx.restore();
+}
+
+// The pointer-cursor hand, pointing north: index finger up, three folded fingers
+// with their tips in a row, the thumb out on the left. White with a black outline;
+// the index fingertip sits at (cx, cy).
+function drawClickHand(cx, cy, k = 1.3) {
+  const box = (x, y, w, h, r) => {                        // rr() without beginPath: parts add up into one path
+    r = Math.min(r, w / 2, h / 2);
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  };
+  const capsule = (x, y, w, h) => box(x, y, w, h, w / 2);
+  // the silhouette, part by part (local units ≈ px, fingertip at the origin)
+  const parts = () => {
+    ctx.beginPath();
+    capsule(-4, 0, 8, 30);                                // index finger
+    capsule(4, 11, 7, 19);                                // folded fingers
+    capsule(11, 12.5, 7, 17.5);
+    capsule(18, 14.5, 6.5, 15.5);
+    box(-4, 22, 28.5, 19, 5);                             // palm
+    ctx.save(); ctx.translate(-2, 33); ctx.rotate(-0.7);  // thumb, out to the left
+    capsule(-3.5, -14, 7, 16); ctx.restore();
+  };
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(-0.12);                                      // a slight natural tilt
+  ctx.scale(k, k);
+  ctx.lineJoin = "round"; ctx.lineCap = "round";
+  // soft drop shadow, then outline (thick), then the fill on top: the parts merge into one shape
+  ctx.save();
+  ctx.shadowColor = "rgba(0, 0, 0, 0.35)"; ctx.shadowBlur = 6; ctx.shadowOffsetY = 3;
+  parts(); ctx.strokeStyle = "#1d2333"; ctx.lineWidth = 2.5; ctx.stroke();
+  ctx.restore();
+  const g = ctx.createLinearGradient(0, 0, 0, 41);
+  g.addColorStop(0, "#ffffff"); g.addColorStop(1, "#e3e8f0");
+  parts(); ctx.fillStyle = g; ctx.fill();
+  // the gaps between the fingers
+  ctx.strokeStyle = "rgba(29, 35, 51, 0.6)"; ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(4, 15); ctx.lineTo(4, 25);
+  ctx.moveTo(11, 16); ctx.lineTo(11, 25);
+  ctx.moveTo(18, 18); ctx.lineTo(18, 25);
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -8414,7 +8623,9 @@ function frame(now) {
   if (viewFade > 0) viewFade = Math.max(0, viewFade - raw * 3); // transition flash fades even while paused
   mapZoom = clamp(mapZoom + (mapOpen ? 1 : -1) * raw * 2.5, 0, 1); // ~0.4 s zoom, also while paused
   wcZoom = clamp(wcZoom + (toolInHand ? 1 : -1) * raw * 3, 0, 1);  // ~0.3 s camera zoom onto the toilets while a tool is in hand
-  if (!paused && !modalOpen && !shopOpen && !arrivalInfoOpen) { // panels and one-time tips hold the clock
+  // panels, one-time tips and the WC tutorials (brush: from the brush hand appearing until the left toilet is spotless;
+  // change: while the hand points at a bill) hold the clock
+  if (!paused && !modalOpen && !shopOpen && !arrivalInfoOpen && !wcTutHold()) {
     const dt = raw * speed;
     advanceSimulation(dt, timeDt);
     stepScrub(Math.min(0.25, elapsed)); // real seconds — the scrub ignores the speed tier
@@ -8559,7 +8770,11 @@ function init() {
     if (e.pointerType !== "mouse" && activePointer !== e.pointerId) return;
     const { x, y } = toGame(e);
     pointer.x = x; pointer.y = y;
-    if (arrivalInfoOpen) { if (e.pointerType === "mouse") canvas.style.cursor = "default"; return; }
+    if (arrivalInfoOpen) {
+      if (e.pointerType === "mouse") canvas.style.cursor = arrivalInfoKind === "wc" && x >= WC_BUILDING.x && x <= WC_BUILDING.x + WC_BUILDING.w
+        && y >= WC_BUILDING.y && y <= WC_BUILDING.y + WC_BUILDING.h ? "pointer" : "default";
+      return;
+    }
     if (activePointer === e.pointerId) {
       // a held scrub/spray — the per-cell cooldown inside washApply throttles it
       if (S.view === "wash" && pointerDown) washApply(x, y);
@@ -8570,7 +8785,7 @@ function init() {
     const hit = (r, pad = 2) => x >= r.x - pad && x <= r.x + r.w + pad && y >= r.y - pad && y <= r.y + r.h + pad;
     let hot;
     if (S.view === "out") {
-      hot = (G.flags.firstBusParked && hit(WC_BUILDING)) || carWashOpen() && buses.some(z => z.state === "stop" && !z.washDone
+      hot = (G.flags.wcInfoSeen && hit(WC_BUILDING)) || carWashOpen() && buses.some(z => z.state === "stop" && !z.washDone
         && x >= z.cx - 36 - 2 && x <= z.cx + 36 + 2 && y >= LOT_NOSE - 2 && y <= z.cy + z.len / 2 + 2);
     } else if (S.view === "wash") {
       hot = hit(WASH.brush) || hit(WASH.hose);
@@ -8623,10 +8838,13 @@ function init() {
     const padMin = isMouse ? 0 : clamp(10 / scale, 4, 16);
     if (arrivalInfoOpen) {
       const { button } = arrivalInfoLayout();
-      const onButton = x >= button.x - padMin && x <= button.x + button.w + padMin &&
+      const onButton = arrivalInfoKind !== "wc" && x >= button.x - padMin && x <= button.x + button.w + padMin &&
         y >= button.y - padMin && y <= button.y + button.h + padMin;
       if (onButton) dismissArrivalInfo();
-      return; // only the explicit button dismisses the tip; clicks elsewhere can't activate scene items
+      // the WC tip points at the restroom: clicking that building accepts it and walks in
+      else if (arrivalInfoKind === "wc" && x >= WC_BUILDING.x - 2 - padMin && x <= WC_BUILDING.x + WC_BUILDING.w + 2 + padMin
+        && y >= WC_BUILDING.y - 2 - padMin && y <= WC_BUILDING.y + WC_BUILDING.h + 2 + padMin) { dismissArrivalInfo(); setView("wc"); }
+      return; // other clicks elsewhere can't activate scene items
     }
     if (mapOpen) {
       const id = mapNodeAt(x, y, padMin);
@@ -8641,7 +8859,9 @@ function init() {
     };
     if (S.view === "out") {
       // outdoor scene: walk into the WC building, or step up to a parked bus
-      if (hit(WC_BUILDING)) { setView("wc"); return; }
+      // the WC opens with its info popup: before that the building ignores clicks
+      // (before the first bus, setView still shows the "WC opens with the first bus" toast)
+      if (hit(WC_BUILDING)) { if (G.flags.wcInfoSeen || !G.flags.firstBusParked) setView("wc"); return; }
       const b = buses.find(z => z.state === "stop" && !z.washDone
         && x >= z.cx - 36 - 2 - padMin && x <= z.cx + 36 + 2 + padMin && y >= LOT_NOSE - 2 - padMin && y <= z.cy + z.len / 2 + 2 + padMin);
       if (b && !carWashOpen()) toast(`🔒 Oto yıkama yok — ${fmtTL(tierCost(G.activeTerminal, CONFIG.carWashTiers[0]))} ile kurulabilir`, "");
@@ -8659,11 +8879,21 @@ function init() {
       if (!washDef().combo && hit(WASH.hose)) { w.tool = w.tool === "hose" ? "none" : "hose"; return; }
       return;
     }
+    // change tutorial: only the bill the hand points at responds
+    const tutBill = changeTutNext();
+    if (tutBill != null) {
+      if (hit(deskRect(chipHit(COUNTER_IN.chips.find(c => c.d === tutBill)), "drawer"))) {
+        giveChange(tutBill);
+        if (tutBill === 20) G.flags.changeTutDone = true;
+        save();
+      }
+      return;
+    }
     // inside the counter room: the hose station, till chips, cologne bottle, tea intercom (exit is the HTML #btnExit)
     for (const st of toolStations()) // tap picks up / puts down that station's hose
-      if (hit(st)) { toolInHand = toolInHand === st ? null : st; return; }
+      if (hit(st)) { if (!brushTutCleaning()) toolInHand = toolInHand === st ? null : st; return; }
     if (toolInHand) { // holding a tool: a tap off the stalls puts it back (the zoomed-in view hides the stations)
-      if (S.view === "wc" && stallAt(x, y, 0) < 0) toolInHand = null;
+      if (S.view === "wc" && stallAt(x, y, 0) < 0 && !brushTutCleaning()) toolInHand = null;
       return; // other desk/counter interactions and runaway catching are blocked while holding
     }
     const chip = COUNTER_IN.chips.find(c => hit(deskRect(chipHit(c), "drawer")));
@@ -8749,13 +8979,7 @@ function init() {
   window.addEventListener("beforeunload", save);
   document.addEventListener("visibilitychange", () => { if (document.hidden) { releasePointer(); save(); } });
 
-  if (S.view === "wc") {
-    if (G.flags.wcIntroStep === 0) startWcIntro();
-    else if (G.flags.wcIntroStep < 4) {
-      arrivalInfoKind = [null, "wcIntro-toilets", "wcIntro-brush", "wcIntro-counter"][G.flags.wcIntroStep];
-      arrivalInfoOpen = true;
-    }
-  }
+  if (S.view === "wc") { markWcVisited(); wcEnteredAt = performance.now(); } // a save made mid-way through the old WC tutorial
   if (loaded.status !== "new" && loaded.status !== "loaded") showLoadNotice(loaded);
 
   requestAnimationFrame(frame);
