@@ -58,7 +58,8 @@ const LOKANTA_OPEN = false;                // the diner is closed; guests cannot
 const WC_STALLS   = 10;                    // 5 bays in two rows — one on the left, mirrored on the right
 const SVC_TIME_R  = 5.4;                   // real seconds per diner guest served
 const TOILET_STAY = [6, 60];               // a toilet visit lasts 1–10 in-game minutes (6 s of timeDt per game min)
-const TUT_TOILET_STAY = 2.5;                // the first-ever WC guest's stay (timeDt s — 2.5 real s at 1×)
+const TUT_WALK_IN_S = 3;                    // real s the first-ever WC guest walks into their toilet after the brush tutorial (they are placed this far out)
+const TUT_TOILET_STAY = 2.5;               // the first-ever WC guest's stay (timeDt s — 2.5 real s at 1×)
 const SVC_TIME_T  = (TOILET_STAY[0] + TOILET_STAY[1]) / 2; // mean visit length — queue patience & save restore
 const SAT_BASE    = 60;                    // baseline satisfaction per service
 const WC_EVADE    = 0.03;                  // share of finished toilet visits that skip the fee and run for the exit (~3 in 100 — everyone else queues)
@@ -414,7 +415,8 @@ const ENGLISH = [
   ["Misafirler", "Guests"], ["misafirler", "guests"],
   ["Hizmet verilen otobüs", "Buses served"], ["Hizmet verilen misafir", "Guests served"], ["Gelir", "Revenue"], ["Gider", "Expenses"], ["Bütün terminaller: gelir / gider", "All terminals: revenue / expenses"], ["Dökülen kolonya", "Cologne used"], ["Yıkanan ön cam", "Windshields washed"], ["Kaçırılan ", "Missed "], ["ücret", "fee"], ["Yakalanan kaçak", "Runaways caught"], ["Ort. memnuniyet", "Avg. satisfaction"], ["İtibar", "Reputation"], ["Ünün yayılıyor — yarın daha büyük otobüsler bekle.", "Your reputation is spreading — expect bigger buses tomorrow."], ["Zor bir gündü. Tuvaletleri temiz tut.", "A tough day. Keep the restrooms clean."], ["Mola Yeri'nde sakin bir gün.", "A quiet day at Layover Lane."], ["güne devam", "continue the day"],
   
-  ["Gişe", "Counter"], ["Kirli tuvalet", "Dirty toilet"], ["Fırçayı tuvaletin üzerinde sürükle", "Drag the brush over the toilet"],
+  ["Gişe", "Counter"], ["Kirli tuvalet", "Dirty toilet"], ["Tuvaletleri temizlemek için fırçayı al", "Pick up the brush to clean the toilets"], ["Temizlik ekipmanı", "Cleaning equipment"], ["Para üstü", "Change"], ["Verilen paradan tuvalet ücretini düş", "Subtract the toilet fee from the money given"],
+  ["Hesapla", "Do the math"], ["Mümkün olduğunca az banknot kullan, fazla para verme", "Use as few bills as possible, don't overpay"],["Fırçayı tuvaletin üzerinde sürükle", "Drag the brush over the toilet"],
   ["🧽 YAKALANDI — bütün tuvaletleri ovuyor", "🧽 CAUGHT — scrubbing every restroom"], ["✨ BÜTÜN TUVALETLER PIRIL PIRIL ✨", "✨ ALL RESTROOMS SPOTLESS ✨"],
   ["🧽 Yakalandın! Tuvalet senin!", "🧽 Caught! The restroom is yours!"], ["✨ Tuvaletler pırıl pırıl!", "✨ The restrooms are sparkling clean!"],
   ["Kabin pırıl pırıl!", "The stall is sparkling clean!"], ["Çayın zaten yolda", "Your tea is already on its way"], ["Çay geliyor!", "Tea is on its way!"], ["Çay için kasada", "Not enough cash for tea:"],
@@ -547,6 +549,8 @@ const WC_ZOOM_S = 1.7;
 let wcZoom = 0;
 let hoseCd = new Array(WC_STALLS).fill(0);      // last spray timestamp per stall (performance.now)
 let hoseGleam = new Array(WC_STALLS).fill(0);   // per stall: when it last hit 100 (sparkle burst)
+const SCRUB_ANIM_MS = 500;                      // a brush drag over a toilet shows its suds on that toilet this long
+let stallScrubUntil = new Array(WC_STALLS).fill(0); // per stall: performance.now() until which its suds animation shows (each drag over it resets this)
 let lastHoseToast = 0;
 let changeBillFlights = [];  // bills handed from the drawer to the customer
 const CHANGE_BILL_FLIGHT_DURATION = 650, CHANGE_BILL_STAGGER = 180;
@@ -2514,6 +2518,7 @@ function cleanApply(x, y) {
     const r = stallBay(i);
     if (x + R < r.x || x - R > r.x + r.w || y + R < r.y || y - R > r.y + r.h) continue;
     if (stallDoorClosed(i)) continue; // door shut (occupant in) — the spray bounces
+    if (tool !== CONFIG.cleaningTools.hose) stallScrubUntil[i] = now + SCRUB_ANIM_MS; // brush/mop drag over this toilet (re)starts its suds
     if (hoseCd[i] > now) continue;
     hoseCd[i] = now + 150;
     touched = true;
@@ -2528,9 +2533,14 @@ function cleanApply(x, y) {
   if (brushTutCleaning() && S.stallClean[brushTutStall()] >= 100) {
     toolInHand = null; // as if the player put the brush down: wcZoom eases back out
     G.flags.brushTutDone = true;
-    // the strolling tutorial guest now heads for the clean toilet
-    for (const b of buses) for (const p of b.pax)
-      if (p.tutGuest && (p.state === "walk" || p.state === "free")) headToFacility("T", p, b);
+    // the tutorial guest now heads for the clean toilet — joining the line at
+    // once (no outdoor walk to the door) and, once on their indoor route,
+    // placed TUT_WALK_IN_S of walking from the stall (see serveT in updatePax)
+    for (const b of buses) for (const p of b.pax) {
+      if (!p.tutGuest) continue;
+      if (p.state === "walk" || p.state === "free") tryJoin("T", p, b);
+      if (p.state === "waitT" || p.state === "serveT") p.tutWarp = true;
+    }
     save();
   }
 }
@@ -4370,12 +4380,13 @@ function updatePax(p, bus, dt, timeDt = dt) {
     if (!(ti >= 0 && ti < WC_STALLS && facilities.T.spots[ti] && facilities.T.spots[ti].pax === p))
       ti = facilities.T.spots.findIndex(s => s && s.pax === p);
     if (ti === -1) { p.state = "free"; p.idleT = rand(0.5, 2); return; }
+    const sx = stallCx(ti), sy = stallSy(224);
+    if (p.tutWarp) { p.tutWarp = false; warpNearStall(p, sx, sy, TUT_WALK_IN_S * 100); }
     if (p.enterT) {
       moveToward(p, p.enterT.x, p.enterT.y, 100 * dt);
       if (Math.hypot(p.x - p.enterT.x, p.y - p.enterT.y) < 8) p.enterT = null;
       return;
     }
-    const sx = stallCx(ti), sy = stallSy(224);
     moveToward(p, sx, sy, 100 * dt);
     // the door shuts only once the guest has stepped in — before that the
     // leaf stays ajar and the guest is visible walking off to their bay
@@ -4440,6 +4451,26 @@ function updatePax(p, bus, dt, timeDt = dt) {
       }
     }
     return;
+  }
+}
+
+// Place an indoor toilet guest `len` px of walking short of their stall
+// (sx, sy), on their remaining route (via enterT, if still pending). A guest
+// already closer than that stays where they are.
+function warpNearStall(p, sx, sy, len) {
+  const pts = [{ x: p.x, y: p.y }];
+  if (p.enterT) pts.push(p.enterT);
+  pts.push({ x: sx, y: sy });
+  for (let k = pts.length - 1; k > 0; k--) {
+    const a = pts[k - 1], b = pts[k];
+    const d = Math.hypot(b.x - a.x, b.y - a.y);
+    if (d >= len) {
+      p.x = b.x + (a.x - b.x) / d * len;
+      p.y = b.y + (a.y - b.y) / d * len;
+      if (k === pts.length - 1) p.enterT = null; // already past the side passage
+      return;
+    }
+    len -= d;
   }
 }
 
@@ -6647,14 +6678,23 @@ function drawBucketStation(st) {
 // actually cleans (CONFIG.cleaningTools) is unchanged.
 const SUDS_RADIUS_K = 3.5, SPRAY_RADIUS_K = 3.5;
 // The suds are drawn at (fx, fy) — the toilet being cleaned — not on the tool.
-function drawHandTool(px, py, scrubbing, now, fx = px, fy = py) {
-  if (scrubbing) {
+// The suds belong to the toilet, not the tool: drawStallSuds shows them on each
+// toilet the brush was dragged over, for SCRUB_ANIM_MS after its last drag.
+function drawStallSuds(now) {
+  for (let i = 0; i < WC_STALLS; i++) {
+    const left = stallScrubUntil[i] - now;
+    if (left <= 0 || !stallActive(i)) continue;
+    const fade = Math.min(1, left / 250); // fades out over the last 250 ms
+    const fx = stallCx(i), fy = stallSy(200);
     for (let k = 0; k < 7; k++) {
       const f = frac(now / 700 + k / 7);
-      ctx.fillStyle = `rgba(250, 253, 255, ${0.85 * (1 - f)})`;
+      ctx.fillStyle = `rgba(250, 253, 255, ${0.85 * (1 - f) * fade})`;
       ctx.beginPath(); ctx.arc(fx + Math.sin(k * 2.1 + f * 5) * 10, fy - f * 22, (1.8 + (k % 3)) * SUDS_RADIUS_K, 0, 7); ctx.fill();
     }
   }
+}
+
+function drawHandTool(px, py, scrubbing, now) {
   const wob = scrubbing ? Math.sin(now / 45) * 3 : 0;
   ctx.save();
   ctx.translate(px + wob, py);
@@ -6780,14 +6820,54 @@ function wcCameraToBase(x, y) {
   return { x: (x - c.tx) / c.k, y: (y - c.ty) / c.k };
 }
 
+// The tool in hand (brush, mop or hose) at the pointer. Drawn after the brush
+// tutorial so its frame and popup sit beneath the tool, not over it.
+function drawHeldTool() {
+  // the cleaning hose in hand: drapes from its faucet to the pointer; holding
+  // the mouse sprays the stall under it (cleanApply throttles the actual work)
+  if (toolInHand && cleaningTool() !== CONFIG.cleaningTools.hose) {
+    const si = pointerDown ? stallAt(pointer.x, pointer.y) : -1;
+    const closed = si >= 0 && stallDoorClosed(si);
+    if (closed) {
+      ctx.fillStyle = "rgba(255, 120, 120, 0.9)";
+      ctx.font = "bold 11px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("kapı kapalı", pointer.x, pointer.y - 14);
+      ctx.textAlign = "left";
+    }
+    drawHandTool(pointer.x, pointer.y, si >= 0 && stallActive(si) && !closed, performance.now());
+  } else if (toolInHand) {
+    const st = toolInHand;
+    drawHoseLine(st.x + st.w / 2, st.y + 49, pointer.x, pointer.y, st.right ? 60 : -60); // from the faucet spout
+    if (pointerDown) {
+      const si = stallAt(pointer.x, pointer.y);
+      if (si >= 0) {
+        const closed = stallDoorClosed(si);
+        if (closed) {
+          // the door is shut — the spray bounces off
+          ctx.fillStyle = "rgba(255, 120, 120, 0.9)";
+          ctx.font = "bold 11px system-ui, sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText("kapı kapalı", pointer.x, pointer.y - 14);
+          ctx.textAlign = "left";
+        } else {
+          drawHoseSpray(pointer.x, pointer.y, performance.now()); // the spray comes out of the nozzle tip
+        }
+      }
+    }
+    drawHoseNozzle(pointer.x, pointer.y);
+  }
+}
+
 function drawWCInterior() {
-  if (wcZoom <= 0) { drawWCScene(); drawBrushTutorial(); return; }
+  if (wcZoom <= 0) { drawWCScene(); drawBrushTutorial(); drawHeldTool(); return; }
   const c = wcCamera();
   ctx.save();
   ctx.translate(c.tx, c.ty);
   ctx.scale(c.k, c.k);
   drawWCScene();
   drawBrushTutorial();
+  drawHeldTool();
   ctx.restore();
 }
 
@@ -6801,7 +6881,9 @@ function drawWCInterior() {
 // Built on an offscreen layer: the dim fills the whole canvas, then the lit rect is
 // erased with a Gaussian-blurred shadow, so the edge falls off smoothly with no seams.
 let spotLayer = null;
-function spotlightDim(x, y, w, h, pad = 6, feather = 40) {
+function spotlightDim(x, y, w, h, pad = 6, feather = 40) { spotlightDimRects([{ x, y, w, h }], pad, feather); }
+// Several lit rects at once (each keeps its own soft edge).
+function spotlightDimRects(rects, pad = 6, feather = 40) {
   const DIM = 0.76;
   const W = ctx.canvas.width, H = ctx.canvas.height;
   if (!spotLayer) spotLayer = document.createElement("canvas");
@@ -6819,14 +6901,13 @@ function spotlightDim(x, y, w, h, pad = 6, feather = 40) {
   g.fillRect(0, 0, W, H);
   // erase only the blurred shadow of the lit rect: the shape itself is drawn off-canvas,
   // so there is no hard inner edge — brightness falls off across the box's border
-  const rx = dx(x - pad), ry = dy(y - pad), rw = (w + 2 * pad) * m.a, rh = (h + 2 * pad) * m.d;
   const OFF = W * 2;
   g.globalCompositeOperation = "destination-out";
   g.shadowColor = "rgba(0, 0, 0, 1)";
   g.shadowBlur = feather * k;
   g.shadowOffsetX = OFF; g.shadowOffsetY = 0;
   g.fillStyle = "#000";
-  g.fillRect(rx - OFF, ry, rw, rh);
+  for (const q of rects) g.fillRect(dx(q.x - pad) - OFF, dy(q.y - pad), (q.w + 2 * pad) * m.a, (q.h + 2 * pad) * m.d);
   g.shadowOffsetX = 0;
   g.shadowColor = "transparent";
   g.globalCompositeOperation = "source-over";
@@ -6836,14 +6917,71 @@ function spotlightDim(x, y, w, h, pad = 6, feather = 40) {
   ctx.restore();
 }
 
+// Tutorial info popup in the arrival-popup design: dark rounded box, gold outline,
+// gold bold title, white copy. tail: { side: "left" | "bottom", at: edge midpoint
+// (y for left, x for bottom), tip: {x, y} } — the pointer that joins the box to what it explains.
+function drawTutBubble(x, y, w, h, title, body, tail) {
+  const r = 14, t = 11;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  if (tail.side === "bottom") { ctx.lineTo(tail.at + t, y + h); ctx.lineTo(tail.tip.x, tail.tip.y); ctx.lineTo(tail.at - t, y + h); }
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  if (tail.side === "left") { ctx.lineTo(x, tail.at + t); ctx.lineTo(tail.tip.x, tail.tip.y); ctx.lineTo(x, tail.at - t); }
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(16, 22, 35, 0.98)"; ctx.fill();
+  ctx.strokeStyle = "#f2c66d"; ctx.lineWidth = 2; ctx.stroke();
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillStyle = "#ffd36b"; ctx.font = "bold 19px system-ui";
+  ctx.fillText(title, x + w / 2, y + 20);
+  ctx.fillStyle = "#f4f6fb"; ctx.font = "15px system-ui";
+  ctx.fillText(body, x + w / 2, y + h - 18);
+  ctx.restore();
+}
+
+// While the brush hand asks for the brush: the popup to the right of the brush
+// station, its tail pointing left at the brush.
+function drawBrushNeedsCleanBubble(st) {
+  const w = 300, h = 66, tail = 11, tipGap = 4;
+  const cy = st.y + st.h / 2;
+  const x = clamp(st.x + st.w + tail + tipGap + 6, -offX + 4, Wdyn - offX - w - 4), y = cy - h / 2;
+  const tipX = x - tail - tipGap + 6;
+  drawTutBubble(x, y, w, h, "Temizlik ekipmanı", "Tuvaletleri temizlemek için fırçayı al",
+    { side: "left", at: cy, tip: { x: tipX, y: cy } });
+}
+
+// Change tutorial: the popup above the customer's bill (its top edge at topY, centred
+// on cx), its tail pointing down at the bill.
+function drawChangeBubble(cx, topY, title, body) {
+  const h = 66, gap = 28;
+  ctx.font = "15px system-ui"; // measure the copy as drawn, so a long line widens the box instead of spilling out
+  const w = Math.max(300, Math.ceil(ctx.measureText(translateText(body)).width) + 40);
+  const x = clamp(cx - w / 2, -offX + 4, Wdyn - offX - w - 4), y = topY - gap - h;
+  drawTutBubble(x, y, w, h, title, body,
+    { side: "bottom", at: clamp(cx, x + 24, x + w - 24), tip: { x: cx, y: topY - 4 } });
+}
+
 function drawBrushTutorial() {
   if (arrivalInfoOpen || modalOpen) return;
   const tutBill = changeTutNext();
   if (tutBill != null) { // change tutorial: the hand taps the bill to hand back next
     const r = deskRect(chipHit(COUNTER_IN.chips.find(c => c.d === tutBill)), "drawer");
-    // same dim as the brush cue: the room darkens with the tapped bill left bright
-    spotlightDim(r.x, r.y, r.w, r.h);
+    // the popup sits over the bill the customer is handing over: drawn at the counter top,
+    // rotated 90° so its 16u length runs vertically — its top edge is 8u above the centre
+    const payer = facilities.C.queue[0];
+    const billX = payer.x + COUNTER_BILL_OFFSET, billCy = counterTopBillY(), billTop = billCy - 8 * COUNTER_BILL_U;
+    // the room darkens with the tapped drawer tray and the customer's bill left bright
+    spotlightDimRects([r, { x: billX - 4 * COUNTER_BILL_U, y: billTop, w: 8 * COUNTER_BILL_U, h: 16 * COUNTER_BILL_U }]);
     drawTapCue(r.x + r.w / 2, r.y + r.h * 0.4);
+    if (tutBill === 10) drawChangeBubble(billX, billTop, "Para üstü", "Verilen paradan tuvalet ücretini düş");
+    else drawChangeBubble(billX, billTop, "Hesapla", "Mümkün olduğunca az banknot kullan, fazla para verme");
     return;
   }
   if (!brushTutPending()) return;
@@ -6854,6 +6992,7 @@ function drawBrushTutorial() {
     // with the brush bucket left bright; once it is in hand the dim goes away
     spotlightDim(st.x, st.y, st.w, st.h);
     drawTapCue(st.x + st.w / 2, st.y + st.h - 8); // fingertip near the foot of the bucket: the hand hangs below, leaving the brush and cup visible
+    drawBrushNeedsCleanBubble(st);
     return;
   }
   if (wcZoom < 0.95) return; // wait for the zoom to settle
@@ -7090,40 +7229,7 @@ function drawWCScene() {
   ctx.restore();
   ctx.lineCap = "butt";
   ctx.lineWidth = 1;
-  // the cleaning hose in hand: drapes from its faucet to the pointer; holding
-  // the mouse sprays the stall under it (cleanApply throttles the actual work)
-  if (toolInHand && cleaningTool() !== CONFIG.cleaningTools.hose) {
-    const si = pointerDown ? stallAt(pointer.x, pointer.y) : -1;
-    const closed = si >= 0 && stallDoorClosed(si);
-    if (closed) {
-      ctx.fillStyle = "rgba(255, 120, 120, 0.9)";
-      ctx.font = "bold 11px system-ui, sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText("kapı kapalı", pointer.x, pointer.y - 14);
-      ctx.textAlign = "left";
-    }
-    drawHandTool(pointer.x, pointer.y, si >= 0 && stallActive(si) && !closed, performance.now(), si >= 0 ? stallCx(si) : pointer.x, si >= 0 ? stallSy(200) : pointer.y);
-  } else if (toolInHand) {
-    const st = toolInHand;
-    drawHoseLine(st.x + st.w / 2, st.y + 49, pointer.x, pointer.y, st.right ? 60 : -60); // from the faucet spout
-    if (pointerDown) {
-      const si = stallAt(pointer.x, pointer.y);
-      if (si >= 0) {
-        const closed = stallDoorClosed(si);
-        if (closed) {
-          // the door is shut — the spray bounces off
-          ctx.fillStyle = "rgba(255, 120, 120, 0.9)";
-          ctx.font = "bold 11px system-ui, sans-serif";
-          ctx.textAlign = "center";
-          ctx.fillText("kapı kapalı", pointer.x, pointer.y - 14);
-          ctx.textAlign = "left";
-        } else {
-          drawHoseSpray(pointer.x, pointer.y, performance.now()); // the spray comes out of the nozzle tip
-        }
-      }
-    }
-    drawHoseNozzle(pointer.x, pointer.y);
-  }
+  drawStallSuds(performance.now()); // the suds stay on each toilet for its 1 s after the brush leaves it
   // a sparkle burst where a stall just hit 100
   const gnow = performance.now();
   for (let i = 0; i < WC_STALLS; i++) {

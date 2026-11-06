@@ -358,7 +358,7 @@ button.icon { width: 34px; height: 34px; padding: 0 2px; font-size: 15px; }
   scrollbar-width: thin;
   scrollbar-color: #3d4d75 rgba(13, 17, 32, 0.4);
 }
-/* item tiles: one row of full-height vertical cards, three visible at a time, scroll sideways for the rest */
+/* item tiles: one row of full-height vertical cards, four and a half visible at a time (the half one peeks in), scroll sideways for the rest */
 #shopBody {
   flex: 1 1 auto;
   min-height: 0;
@@ -372,7 +372,7 @@ button.icon { width: 34px; height: 34px; padding: 0 2px; font-size: 15px; }
   padding-bottom: 6px;
 }
 #shopBody .card {
-  flex: 0 0 calc((100% - 30px) / 4);
+  flex: 0 0 calc((100% - 30px) / 4.5);
   min-width: 0;
   height: 100%;
   margin-bottom: 0;
