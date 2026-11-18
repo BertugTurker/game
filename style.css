@@ -133,6 +133,33 @@ button.icon { width: 34px; height: 34px; padding: 0 2px; font-size: 15px; }
   container-type: size;
 }
 
+/* cash tip click hand: drawn over the header's till button, never takes clicks */
+#tapHand {
+  position: fixed;
+  width: 90px;
+  height: 110px;
+  z-index: 1010;
+  pointer-events: none;
+}
+#tapHand.hidden { display: none; }
+
+/* shop tip: a popup above the kolonya card while the shop tutorial holds the panel */
+#shopTip {
+  position: fixed;
+  width: 300px;
+  z-index: 1011;
+  padding: 12px 14px;
+  background: rgba(16, 22, 35, 0.98);
+  border: 2px solid #f2c66d;
+  border-radius: 14px;
+  color: #f4f6fb;
+  font-size: 15px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+#shopTip.hidden { display: none; }
+#shopTip strong { display: block; margin-bottom: 6px; color: #ffd36b; font-size: 19px; }
+#shopTip p { margin: 4px 0; }
+
 /* ---------- Burger menu (highest z-index in project) ---------- */
 #headerBar {
   position: absolute;
@@ -266,6 +293,7 @@ button.icon { width: 34px; height: 34px; padding: 0 2px; font-size: 15px; }
 }
 #mapBtn.on { border-color: var(--accent); }
 #mapBtn.hidden { display: none; }
+#btnPause.hidden { display: none; }
 #mapPanel {
   position: absolute;
   top: auto;
@@ -736,3 +764,4 @@ button.icon { width: 34px; height: 34px; padding: 0 2px; font-size: 15px; }
     display: none !important;
   }
 }
+

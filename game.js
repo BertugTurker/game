@@ -57,9 +57,11 @@ const DINER_SEATS = 3;                     // fixed — no upgrades in this game
 const LOKANTA_OPEN = false;                // the diner is closed; guests cannot enter or receive service
 const WC_STALLS   = 10;                    // 5 bays in two rows — one on the left, mirrored on the right
 const SVC_TIME_R  = 5.4;                   // real seconds per diner guest served
-const TOILET_STAY = [6, 60];               // a toilet visit lasts 1–10 in-game minutes (6 s of timeDt per game min)
+const TOILET_STAY = [6, 30];               // a toilet visit lasts 1–5 in-game minutes (6 s of timeDt per game min)
 const TUT_WALK_IN_S = 3;                    // real s the first-ever WC guest walks into their toilet after the brush tutorial (they are placed this far out)
-const TUT_TOILET_STAY = 2.5;               // the first-ever WC guest's stay (timeDt s — 2.5 real s at 1×)
+const TUT_TOILET_STAY = 2;                 // the first-ever WC guest's stay (timeDt s — 2 real s at 1×)
+const SECOND_WC_GAP_S = 1;                // real s between the first-ever and second-ever WC guest leaving the bus for the WC building
+const SECOND_WC_STAY = 1.5;               // the second-ever WC guest's stay in the toilet (timeDt s)
 const SVC_TIME_T  = (TOILET_STAY[0] + TOILET_STAY[1]) / 2; // mean visit length — queue patience & save restore
 const SAT_BASE    = 60;                    // baseline satisfaction per service
 const WC_EVADE    = 0.03;                  // share of finished toilet visits that skip the fee and run for the exit (~3 in 100 — everyone else queues)
@@ -86,7 +88,7 @@ const COUNTER_IN = {
     { d: 20, x: 442, y: 384, w: 76, h: 98, color: BILL_COLORS[20], label: "20₺" },
     { d: 50, x: 524, y: 384, w: 76, h: 98, color: BILL_COLORS[50], label: "50₺" },
   ],
-  bottle: { x: 318, y: 288, w: 26, h: 52 },   // Turkish cologne standing on the countertop
+  bottle: { x: 318, y: 260, w: 40, h: 80 },   // Turkish cologne standing on the countertop (base stays on the counter line, y 340)
   desk:   { x: 96, y: 352, w: 768, h: 188 },  // the wooden counter — 10% of the view stays open on each side (the entrances)
   intercom: { x: 790, y: 394, w: 44, h: 62 }, // tea intercom at the right end of the counter (click to order a fresh tea)
   hose:   { x: 18, y: 238, w: 60, h: 96 },   // faucet + coiled hose left of the stall row (x/y track the view — see resize)
@@ -215,7 +217,7 @@ const CONFIG = {
     corruptPrefix: "layover-lane-corrupt-", // + timestamp: unreadable data is parked here before anything can overwrite it
   },
   economy: {
-    startCash: 500,     // a brand-new company
+    startCash: 1000,     // a brand-new company
     migratedCash: 0,    // pre-progression saves had no money at all
     ledgerMax: 200,     // recent transactions kept in the save (totals are kept forever)
     toiletFee: 20,      // what a toilet visit costs the guest
@@ -236,7 +238,7 @@ const CONFIG = {
     starter: { rep: 10, wc: { count: 1, style: 1, tool: 1, cologne: 0, calc: 0, tea: 0 }, carWash: { unlocked: false, tier: 1 } },
     gerede:  { rep: 25, wc: { count: 2, style: 2, tool: 1, cologne: 1, calc: 1, tea: 0 }, carWash: { unlocked: false, tier: 1 } },
     tosya:   { rep: 30, wc: { count: 3, style: 2, tool: 3, cologne: 1, calc: 1, tea: 0 }, carWash: { unlocked: true,  tier: 1 } },
-    samsun:  { rep: 35, wc: { count: 5, style: 2, tool: 4, cologne: 2, calc: 1, tea: 1 }, carWash: { unlocked: true,  tier: 2 } },
+    samsun:  { rep: 35, wc: { count: 5, style: 2, tool: 4, cologne: 1, calc: 1, tea: 1 }, carWash: { unlocked: true,  tier: 2 } },
   },
   newGameProfile: "starter",
   firstBusLead: 120,  // px before its bay's turn-in where the opening bus appears: it is pulling in ~1 real s after play starts
@@ -246,21 +248,21 @@ const CONFIG = {
   //   style:   the fixture — dirtUse: grime one visit leaves (min, max);
   //            satBonus: added to every toilet rating; auto*: see below
   //   tool:    what hangs at the cleaning stations (CONFIG.cleaningTools)
-  //   cologne: ml — the counter bottle (refilled at midnight); sat: rating bonus per splash
+  //   cologne: ml — the counter bottle (filled by the refill button); sat: rating bonus per splash
   //   calc:    the counter calculator that shows the change still owed
   wcTracks: {
     count: { title: "KABİN SAYISI", levels: [
-      { level: 1, name: "2 kabin", icon: "🚪",  cost: 0,    stalls: 2, minServed: 0 },
-      { level: 2, name: "4 kabin", icon: "🚪",  cost: 800,  stalls: 4, minServed: 50 },
-      { level: 3, name: "6 kabin", icon: "🚪",  cost: 1600, stalls: 6, minServed: 150 },
-      { level: 4, name: "8 kabin", icon: "🚪",  cost: 3000, stalls: 8, minServed: 300 },
-      { level: 5, name: "10 kabin", icon: "🚪", cost: 5000, stalls: 10, minServed: 500 },
+      { level: 1, name: "2 kabin", icon: "🚪",  cost: 0,    stalls: 2 },
+      { level: 2, name: "4 kabin", icon: "🚪",  cost: 800,  stalls: 4 },
+      { level: 3, name: "6 kabin", icon: "🚪",  cost: 1600, stalls: 6 },
+      { level: 4, name: "8 kabin", icon: "🚪",  cost: 3000, stalls: 8 },
+      { level: 5, name: "10 kabin", icon: "🚪", cost: 5000, stalls: 10 },
     ] },
     style: { title: "TUVALETLER", levels: [
-      { level: 1, name: "İlkel alaturka tuvaletler", icon: "🕳️", cost: 0,     style: "alaturka", dirtUse: [10, 20], satBonus: -6, minServed: 0 },
-      { level: 2, name: "Modern klozetler", icon: "🚽",          cost: 1000,  style: "modern",   dirtUse: [8, 16],  satBonus: 0, minServed: 75 },
-      { level: 3, name: "Yarı otomatik tuvaletler", icon: "⚙️",  cost: 10000, style: "modern",   dirtUse: [8, 16],  satBonus: 0, auto: "semi", autoCleanPerHour: 60, autoCleanPerVisit: 8, upkeep: 300, opCost: 150, minServed: 250 },
-      { level: 4, name: "Tam otomatik tuvaletler", icon: "🤖",   cost: 25000, style: "modern",   dirtUse: [8, 16],  satBonus: 0, auto: "full", autoCleanPerHour: 120, autoCleanPerVisit: 14, autoChangeSec: 3, upkeep: 450, opCost: 250, minServed: 500 },
+      { level: 1, name: "İlkel alaturka tuvaletler", icon: "🕳️", cost: 0,     style: "alaturka", dirtUse: [10, 20], satBonus: -6 },
+      { level: 2, name: "Modern klozetler", icon: "🚽",          cost: 1000,  style: "modern",   dirtUse: [8, 16],  satBonus: 0 },
+      { level: 3, name: "Yarı otomatik tuvaletler", icon: "⚙️",  cost: 10000, style: "modern",   dirtUse: [8, 16],  satBonus: 0, auto: "semi", autoCleanPerHour: 60, autoCleanPerVisit: 8, upkeep: 300, opCost: 150 },
+      { level: 4, name: "Tam otomatik tuvaletler", icon: "🤖",   cost: 25000, style: "modern",   dirtUse: [8, 16],  satBonus: 0, auto: "full", autoCleanPerHour: 120, autoCleanPerVisit: 14, autoChangeSec: 3, upkeep: 450, opCost: 250 },
     ] },
     tool: { title: "TEMİZLİK EKİPMANI", levels: [
       { level: 1, name: "Küçük el fırçası", icon: "🪥",  cost: 0,    tool: "handBrush" },
@@ -268,11 +270,10 @@ const CONFIG = {
       { level: 3, name: "Paspas seti", icon: "🪣",       cost: 600,  tool: "mop" },
       { level: 4, name: "Hortum", icon: "🚿",            cost: 3000, tool: "hose" },
     ] },
-    cologne: { title: "KOLONYA", levels: [
+    // one-time purchase; the bottle is then topped up with the refill button (refill: price per refill)
+    cologne: { title: "KOLONYA", refill: { cost: 60 }, levels: [
       { level: 0, name: "Kolonya yok", icon: "🚫",           cost: 0,    ml: 0,    sat: 0 },
       { level: 1, name: "Limon kolonyası", icon: "🍋",       cost: 300,  ml: 500,  sat: 8 },
-      { level: 2, name: "Büyük şişe kolonya", icon: "🧴",    cost: 900,  ml: 1000, sat: 8 },
-      { level: 3, name: "Lüks lavanta kolonyası", icon: "🪻", cost: 2000, ml: 1000, sat: 12 },
     ] },
     calc: { title: "HESAP MAKİNESİ", levels: [
       { level: 0, name: "Hesap makinesi yok", icon: "🧠", cost: 0 },
@@ -318,7 +319,7 @@ const CONFIG = {
   // before the same cell can be worked again; rep / sat: reputation and the
   // bus's satisfaction bonus for a finished wash.
   carWashTiers: [
-    { tier: 1, name: "Elle yıkama", icon: "🧽",              cost: 8000,  fee: 50, reach: 18, soap: 0.45, rinse: [0.15, 0.6], cd: 80, rep: 2, sat: 5 },
+    { tier: 1, name: "Elle yıkama", icon: "🧽",              cost: 500,  fee: 50, reach: 18, soap: 0.45, rinse: [0.15, 0.6], cd: 80, rep: 2, sat: 5 },
     { tier: 2, name: "Gelişmiş yıkama ekipmanı", icon: "🫧", cost: 5000,  fee: 60, reach: 26, soap: 0.6,  rinse: [0.2, 0.7],  cd: 70, rep: 3, sat: 7 },
     { tier: 3, name: "İleri yıkama ekipmanı", icon: "💦",    cost: 12000, fee: 75, reach: 36, soap: 0.8,  rinse: [0.3, 0.8],  cd: 60, rep: 4, sat: 9, combo: true },
     { tier: 4, name: "Yarı otomatik yıkama", icon: "⚙️",     cost: 20000, fee: 75, reach: 36, soap: 0.8,  rinse: [0.3, 0.8],  cd: 60, rep: 4, sat: 9, auto: "semi", autoWashSec: 60, upkeep: 300, opCost: 150, combo: true },
@@ -350,6 +351,12 @@ const LANGUAGE_KEY = "mola-yeri-language";
 let gameLanguage = "tr";
 try { gameLanguage = localStorage.getItem(LANGUAGE_KEY) === "en" ? "en" : "tr"; } catch (e) { /* storage may be disabled */ }
 const ENGLISH = [
+  ["Kilidi açmak ve satın almak için şartlara bak.", "Check the requirements to unlock and buy a new terminal."], ["Sonra terminalinde çalışmaya başla.", "Then get to work at your terminal."],
+  ["Yeni terminal", "New terminal"],
+  ["Haritayı açmak için buna dokun.", "Tap it to open the map."], ["Terminallerini ve yolu buradan takip et.", "Follow your terminals and the road from here."],
+  ["Önce fırçayı kullanarak ön camı köpükle.", "First use the brush to soap the windshield."], ["Hortumu kullanarak köpüğü durula.", "Use the hose to rinse off the soap."],
+  ["Fırça", "Brush"],
+  ["Elle yıkama ekipmanını satın al.", "Buy the manual wash equipment."], ["Otobüslerin ön camını yıkamak için önce bu ekipmanı al.", "Get this equipment first to wash the bus windshields."], ["Oto yıkamak için otobüse dokun", "Click the bus to car wash"],
   ["Bölge haritası", "Regional map"], ["Harita panelini kapat", "Close map"], ["Menüyü Aç/Kapat", "Open/close menu"], ["Menü", "Menu"],
   ["Şirket kasası — İşletme paneli (U)", "Company cash — Business panel (U)"], ["Şirket kasası, işletme panelini aç", "Company cash; open business panel"],
   ["Bugün hizmet verilen misafir", "Guests served today"], ["Bulunduğun terminal", "Current terminal"], ["Gün ve saat", "Day and time"],
@@ -372,7 +379,7 @@ const ENGLISH = [
   ["ELİNDE — basılı tut & sürükle", "IN HAND — hold & drag"], ["KİR ", "GRIME "], ["KÖPÜK ", "FOAM "], ["ÇIKIŞ", "EXIT"],
   ["para üstü!", "change!"], ["kolonya!", "cologne!"], ["kapı kapalı", "door closed"], ["girmek için dokun", "tap to enter"], ["girmek için tıkla", "click to enter"],
   ["🗺 BÖLGE HARİTASI", "🗺 REGIONAL MAP"], ["— bir terminale dokun", "— tap a terminal"], ["— bir terminale tıkla", "— click a terminal"],
-  ["🚪 ÇIKIŞ (E)", "🚪 EXIT (E)"], ["Dışarı çık (E)", "Go outside (E)"], ["Dışarı çık", "Go outside"], ["WC binası", "Restroom"], ["İlk otobüsün geliyor!", "Your first bus is arriving!"],
+  ["🚪 ÇIKIŞ (E)", "🚪 EXIT (E)"], ["Dışarı çık (E)", "Go outside (E)"], ["Dışarı çık", "Go outside"], ["Rozet: tuvalette bekleyen misafir sayısı.", "Badge: guests waiting for a toilet."], ["Dışarı çıkmak için buna dokun.", "Tap this to go outside."], ["WC binası", "Restroom"], ["İlk otobüsün geliyor!", "Your first bus is arriving!"],
   ["Yolcular tuvalet için buraya gelir.", "Passengers come here to use the restroom."], ["Otobüsler terminalinde mola verir.", "Buses stop at your terminal."], ["Yolculara hizmet için hazır ol.", "Get ready to serve passengers."],
   ["Anladım", "Got it"], ["Park etmiş otobüse dokun:", "Tap a parked bus:"], ["uzun saplı fırçayla köpükle,", "soap it with the long brush,"], ["hortumla durula", "then rinse with the hose"], ["Terminallerini ve yolu buradan takip et.", "Follow your terminals and the route from here."], ["Yeni terminal de buradan satın alınır.", "New terminals are also bought from here."], ["Her terminalin yükseltmeleri burada.", "Upgrades for each terminal are here."], ["Tuvalet ve oto yıkama için ayrı ayrı yükselt.", "Upgrade toilets and car wash separately."], ["Devam", "Continue"], ["İşe dön", "Back to work"], ["Dükkânı aç!", "Open the shop!"],
   ["🎉 ", "🎉 "], [" artık senin", " is now yours"], ["arızalandı — onarılana kadar elle çalış", "has broken down — operate it manually until repaired"],
@@ -380,29 +387,30 @@ const ENGLISH = [
   ["✨ Ön cam pırıl pırıl!", "✨ The windshield is sparkling clean!"], ["😖 Tuvalet pis, misafir gitti", "😖 The restroom is dirty; the guest left"],
   ["🏃 Misafir ödemeden kaçıyor!", "🏃 A guest is leaving without paying!"], ["😠 Misafir ödemeden gitti", "😠 A guest left without paying"],
   ["⏱ Süre doldu, otobüs kalkıyor", "⏱ Time is up; the bus is leaving"], ["🤏 Bozuk para fark edildi", "🤏 Incorrect change noticed"],
-  ["🧴 Kolonya bitti — gece dolar", "🧴 Cologne is empty — refills overnight"], ["🍵 Taze çay geldi!", "🍵 Fresh tea is ready!"], ["🍵 Çayın zaten yolda", "🍵 Your tea is already on its way"], ["🍵 Çay geliyor!", "🍵 Tea is on its way!"],
+  ["🧴 Kolonya bitti — şişeyi doldur", "🧴 Cologne is empty — refill the bottle"], ["🍵 Taze çay geldi!", "🍵 Fresh tea is ready!"], ["🍵 Çayın zaten yolda", "🍵 Your tea is already on its way"], ["🍵 Çay geliyor!", "🍵 Tea is on its way!"],
   ["WC açılması için ilk otobüsün gelmesi gerekiyor", "The first bus must arrive before the restroom opens"],
   ["şirket kasası", "company cash"], ["Terminale dön", "Return to terminal"], ["Bu terminale geç", "Switch to this terminal"], ["Satın al ·", "Buy ·"],
   ["KABİN SAYISI", "STALL COUNT"], ["2 kabin", "2 stalls"], ["4 kabin", "4 stalls"], ["6 kabin", "6 stalls"], ["8 kabin", "8 stalls"], ["10 kabin", "10 stalls"],
   ["TUVALETLER", "TOILETS"], ["İlkel alaturka tuvaletler", "Basic squat toilets"], ["Modern klozetler", "Modern toilets"], ["Yarı otomatik tuvaletler", "Semi-automatic toilets"], ["Tam otomatik tuvaletler", "Fully automatic toilets"],
   ["TEMİZLİK EKİPMANI", "CLEANING EQUIPMENT"], ["FIRÇA", "BRUSH"], ["Köpük kendiliğinden durulanıyor", "Suds rinse off automatically"], ["1 · ön camı köpükle (fırça)", "1 · soap the windshield (brush)"], ["2 · köpüğü durula (hortum)", "2 · rinse the suds (hose)"], ["💧 HORTUM — durula", "💧 HOSE — rinse"], ["✨ Pırıl pırıl — şoför bunu fark edecek", "✨ Sparkling — the driver will notice"], ["PASPAS", "MOP"], ["HORTUM", "HOSE"], ["🧼 FIRÇA — köpük", "🧼 BRUSH — foam"],["Küçük el fırçası", "Small hand brush"], ["Uzun saplı fırça", "Long-handled brush"], ["Paspas seti", "Mop kit"], ["Hortum", "Hose"],
   ["KOLONYA", "COLOGNE"], ["Kolonya yok", "No cologne"], ["Limon kolonyası", "Lemon cologne"], ["Büyük şişe kolonya", "Large cologne bottle"], ["Lüks lavanta kolonyası", "Luxury lavender cologne"],
+  ["Misafirlere kolonya sıkmak memnuniyeti artırır.", "Splashing cologne on guests raises their satisfaction."],
+  ["Doldur", "Refill"], ["Doluluk:", "Fill level:"],["Kolonya dolduruldu", "Cologne refilled"], ["Şişe zaten dolu", "Bottle is already full"], ["Önce kolonyayı satın al", "Buy the cologne first"],
   ["HESAP MAKİNESİ", "CALCULATOR"], ["Hesap makinesi yok", "No calculator"], ["Hesap makinesi", "Calculator"], ["Çay yok", "No tea"], ["Çay saati", "Tea service"],
   ["Elle yıkama", "Manual wash"], ["Gelişmiş yıkama ekipmanı", "Advanced wash equipment"], ["İleri yıkama ekipmanı", "Professional wash equipment"], ["Yarı otomatik yıkama", "Semi-automatic wash"], ["Tam otomatik yıkama", "Fully automatic wash"],
   ["Bolu Dağı Mola Yeri", "Bolu Mountain Rest Stop"], ["Gerede Mola Yeri", "Gerede Rest Stop"], ["Tosya Dinlenme Tesisi", "Tosya Rest Area"], ["Samsun Sahil Tesisi", "Samsun Coastal Rest Stop"],
   ["Mola Yeri — Otobüs Mola Tesisi Simülatörü", "Layover Lane — Bus Rest Stop Simulator"], ["MOLA YERİ", "LAYOVER LANE"], ["Mola Yeri", "Layover Lane"],
   ["Yükseltince ", "Upgrade to "] , ["yeni kabinler tertemiz açılır", "new stalls open spotless"], ["park yeri açık", "parking spaces open"],
-  ["gün", "day"], ["Dünya", "World"], ["girmek", "enter"], ["itibar", "reputation"], ["daha iyisi", "or better"], ["En az", "At least"], ["şimdi:", "current:"], ["Bir terminalinde", "At one terminal:"],
+  ["bugün", "today"], ["Bugün", "Today"], ["gün", "day"], ["Dünya", "World"], ["girmek", "enter"], ["itibar", "reputation"], ["daha iyisi", "or better"], ["En az", "At least"], ["şimdi:", "current:"], ["Bir terminalinde", "At one terminal:"],
   ["Bütün oyun sıfırlansın mı? Kayıtlı oyunun silinecek.", "Reset the entire game? Your saved progress will be deleted."],
   ["Gün ", "Day "], ["gün tamamlandı", "day complete"], ["günlük", "daily"], ["gün sonra", "days later"], ["alaturka", "squat"], ["Yere gömülü alaturka taşlar", "Basic squat toilets"],
   ["Modern klozetler — alaturkanın yerine, hepsi tertemiz", "Modern toilets replace the squat toilets; all start spotless"], ["Her tuvalet puanı", "Satisfaction per restroom visit"],
   ["Daha dayanıklı: daha az kirlenir, misafir memnuniyeti artar", "More durable: gets dirty less, guest satisfaction rises"], ["Ziyaret başına kir", "Dirt per visit"], ["Daha dayanıklı: ziyaret başına kir", "More durable: dirt per visit"], ["Rutin temizlik kendiliğinden — arızalar ve bakım sende", "Routine cleaning is automatic — breakdowns and maintenance are your responsibility"],
   ["Temizlik ve gişe kendiliğinden — periyodik bakım sende", "Cleaning and checkout are automatic — periodic maintenance is your responsibility"],
-  ["Daha geniş temizlik alanı", "Wider cleaning area"], ["Gişede kolonya yok", "No cologne at the counter"], ["Gişede ", "At the counter: "], [" ml'lik şişe (gece yarısı dolar)", " ml bottle (refills at midnight)"],
-  ["Dökülen her kolonya misafir puanına +", "Each cologne application adds +"], ["Gişedeki ekranda verilecek para üstü yazar", "The counter display shows the change due"], ["Para üstünü kafandan hesaplarsın", "Calculate the change yourself"],
+  ["Daha geniş temizlik alanı", "Wider cleaning area"], ["Gişede kolonya yok", "No cologne at the counter"], ["Gişede ", "At the counter: "], ["ml'lik bir şişe", "ml bottle"], ["ml'lik şişe", "ml bottle"],["Gişedeki ekranda verilecek para üstü yazar", "The counter display shows the change due"], ["Para üstünü kafandan hesaplarsın", "Calculate the change yourself"],
   ["Gişede çay yapabilirsin — molaları daha keyifli hale getirir", "Serve tea at the counter to make breaks more pleasant"], ["Çay yapma olanaği yok", "Tea service is unavailable"],
   ["Park etmiş otobüse dokun: uzun saplı fırçayla köpükle, hortumla durula", "Tap a parked bus: soap the windshield with the long brush, then rinse with the hose"],
-  ["Biten her yıkama", "Each completed wash earns"], [" kazandırır", ""], ["İtibar şartı yok — sadece kasa", "No reputation requirement — cash only"],
+  ["Biten her yıkama", "Each completed wash earns"], [" kazandırır", ""],
   ["Yıkama ücreti", "Wash fee"], ["Daha geniş fırça ve hortum", "Wider brush and hose"], ["Kabinleri elle temizler", "Cleans stalls by hand"], ["Daha hızlı temizlik", "Cleans faster"], ["Daha fazla memnuniyet", "More satisfaction"], ["Daha güçlü köpük ve durulama — daha az geçiş", "Stronger soap and rinse — fewer passes"],
   ["İtibar +", "Reputation +"], ["otobüs memnuniyeti +", "bus satisfaction +"], ["Yıkamanın bir kısmı kendiliğinden — arızalar ve bakım sende", "Some washing is automatic — breakdowns and maintenance are your responsibility"],
   ["Otobüsler kendiliğinden yıkanır — periyodik bakım sende", "Buses are washed automatically — periodic maintenance is your responsibility"],
@@ -415,12 +423,13 @@ const ENGLISH = [
   ["Misafirler", "Guests"], ["misafirler", "guests"],
   ["Hizmet verilen otobüs", "Buses served"], ["Hizmet verilen misafir", "Guests served"], ["Gelir", "Revenue"], ["Gider", "Expenses"], ["Bütün terminaller: gelir / gider", "All terminals: revenue / expenses"], ["Dökülen kolonya", "Cologne used"], ["Yıkanan ön cam", "Windshields washed"], ["Kaçırılan ", "Missed "], ["ücret", "fee"], ["Yakalanan kaçak", "Runaways caught"], ["Ort. memnuniyet", "Avg. satisfaction"], ["İtibar", "Reputation"], ["Ünün yayılıyor — yarın daha büyük otobüsler bekle.", "Your reputation is spreading — expect bigger buses tomorrow."], ["Zor bir gündü. Tuvaletleri temiz tut.", "A tough day. Keep the restrooms clean."], ["Mola Yeri'nde sakin bir gün.", "A quiet day at Layover Lane."], ["güne devam", "continue the day"],
   
-  ["Gişe", "Counter"], ["Kirli tuvalet", "Dirty toilet"], ["Tuvaletleri temizlemek için fırçayı al", "Pick up the brush to clean the toilets"], ["Temizlik ekipmanı", "Cleaning equipment"], ["Para üstü", "Change"], ["Verilen paradan tuvalet ücretini düş", "Subtract the toilet fee from the money given"],
-  ["Hesapla", "Do the math"], ["Mümkün olduğunca az banknot kullan, fazla para verme", "Use as few bills as possible, don't overpay"],["Fırçayı tuvaletin üzerinde sürükle", "Drag the brush over the toilet"],
+  ["Gişe", "Counter"], ["Kirli tuvalet", "Dirty toilet"], ["Tuvaletleri temizlemek için fırçayı al", "Pick up the brush to clean the toilets"], ["Temizlik ekipmanı", "Cleaning equipment"], ["Para üstü", "Change"], ["Verilen paradan tuvalet ücretini(20₺) düş", "Subtract the toilet fee(20₺) from the money given"],
+  ["Hesapla", "Do the math"], ["Tam ödeme", "Exact payment"], ["Bazı misafirler tam tutarı öder, para üstü gerekmez.", "Some guests pay the exact amount, no change needed."], ["Onlara dokunmana gerek yok. İsterse kolonya kullanır.", "You don't need to interact with them. They use cologne if they want to."],["Misafir öderken ya da para üstünü verirken ona kolonya dökebilirsin", "You can splash the guest with cologne while they pay or while you give the change"], ["Mümkün olduğunca az banknot kullan, fazla para verme", "Use as few bills as possible, don't overpay"],["Fırçayı tuvaletin üzerinde sürükle", "Drag the brush over the toilet"],
   ["🧽 YAKALANDI — bütün tuvaletleri ovuyor", "🧽 CAUGHT — scrubbing every restroom"], ["✨ BÜTÜN TUVALETLER PIRIL PIRIL ✨", "✨ ALL RESTROOMS SPOTLESS ✨"],
   ["🧽 Yakalandın! Tuvalet senin!", "🧽 Caught! The restroom is yours!"], ["✨ Tuvaletler pırıl pırıl!", "✨ The restrooms are sparkling clean!"],
   ["Kabin pırıl pırıl!", "The stall is sparkling clean!"], ["Çayın zaten yolda", "Your tea is already on its way"], ["Çay geliyor!", "Tea is on its way!"], ["Çay için kasada", "Not enough cash for tea:"],
   ["Oto yıkama yok", "No car wash"], ["ile kurulabilir", "to build it"], [" test parası", " test cash"], ["test parası", "test cash"],
+  ["Şirket kasası", "Company till"], ["Misafirin ücreti buraya, kasaya girer.", "Guests' fees go into the till here."], ["Kasaya dokun: işletme paneli açılır.", "Tap the till to open the business panel."],
 ];
 ENGLISH.sort((a, b) => b[0].length - a[0].length);
 const ENGLISH_EXACT = new Map(ENGLISH);
@@ -532,6 +541,13 @@ let arrivalInfoOpen = false;
 let arrivalInfoBusId = null;
 let arrivalInfoKind = "arrival";
 let arrivalInfoDelayUntil = 0;
+let exitTipDueAt = 0; // the exit-button tip shows 2 s after the exact-payment tip is dismissed
+let cashTipDueAt = 0; // the company-till tip shows 1 s after the tutorial guest leaves the stall
+let washTipDueAt = 0; // the car-wash till tip shows 2 s after the exit tip is dismissed
+let washHintDueAt = 0; // the bus car-wash hint shows 1 s after the manual wash is bought
+let pausedByMap = false; // the map pauses the whole game; closing it resumes only what it paused
+let mapReqDueAt = 0; // the centred requirements tip shows 1 s after the regional map tip is dismissed
+let mapTipDueAt = 0; // the map-button tip shows 1 s after leaving a finished car wash
 // Speed tiers: the whole simulation (game clock, guest needs, walks, animations)
 // runs this many times faster. At 1x, 1 game hour = 6 real minutes (a game day
 // is 2.4 real hours); at 10x a game day is ~14 min; at 200x it's ~43 seconds.
@@ -581,7 +597,7 @@ function freshGame(profile = CONFIG.newGameProfile) {
     company: { cash: CONFIG.economy.startCash, nextTxId: 1, ledger: [], totals: {} },
     activeTerminal: start.id,
     terminals: {},
-    flags: { firstBusDone: false, firstBusParked: false, wcLockedToastSeen: false, arrivalInfoSeen: false, wcInfoSeen: false, wcIntroStep: 0, toolbarIntro: 0, wcDirtied: false, brushTutDone: false, changeTutDone: false },
+    flags: { firstBusDone: false, firstBusParked: false, wcLockedToastSeen: false, arrivalInfoSeen: false, wcInfoSeen: false, wcIntroStep: 0, washTutDone: false, washHintDone: false, washBrushTipSeen: false, washHoseTipSeen: false, mapTipSeen: false, mapReqTipSeen: false, firstWashDone: false, wcDirtied: false, brushTutDone: false, changeTutDone: false, cashTutStep: 0, kolonyaTutDone: false, counterKolonyaTipSeen: false, exactTipSeen: false, exitTipSeen: false },
     migratedFrom: null,      // save version this game was migrated from (null = born on v7)
   };
   g.terminals[start.id] = freshTerminal(start.id, profile);
@@ -776,8 +792,11 @@ function sanitizeTerminalMeta(t, src, profileName) {
   const oldTier = src.toilet && OLD_TOILET_TIERS[src.toilet.tier];
   const wc = src.wc && typeof src.wc === "object" ? src.wc : oldTier || prof.wc;
   t.wc = {};
-  for (const [track, def] of Object.entries(CONFIG.wcTracks))
-    t.wc[track] = Number.isInteger(wc[track]) && def.levels.some(x => x.level === wc[track]) ? wc[track] : prof.wc[track];
+  for (const [track, def] of Object.entries(CONFIG.wcTracks)) {
+    // kolonya used to have upgrade levels 2–3; as a one-time purchase those saves keep level 1
+    const saved = track === "cologne" && wc[track] > 1 ? 1 : wc[track];
+    t.wc[track] = Number.isInteger(saved) && def.levels.some(x => x.level === saved) ? saved : prof.wc[track];
+  }
   const cw = src.carWash && typeof src.carWash === "object" ? src.carWash : prof.carWash;
   t.carWash = { unlocked: !!cw.unlocked, tier: tierIn(cw.tier, CONFIG.carWashTiers, prof.carWash.tier) };
   const m = src.maintenance && typeof src.maintenance === "object" ? src.maintenance : {};
@@ -818,14 +837,34 @@ function restoreGame(data) {
   g.flags.wcInfoSeen = !!g.flags.wcInfoSeen;
   g.flags.wcLockedToastSeen = !!g.flags.wcLockedToastSeen;
   g.flags.wcIntroStep = Number.isInteger(g.flags.wcIntroStep) ? clamp(g.flags.wcIntroStep, 0, 4) : 0;
+  g.flags.washTutDone = !!g.flags.washTutDone;
+  g.flags.washHintDone = !!g.flags.washHintDone;
+  g.flags.washBrushTipSeen = !!g.flags.washBrushTipSeen;
+  g.flags.washHoseTipSeen = !!g.flags.washHoseTipSeen;
+  g.flags.mapTipSeen = !!g.flags.mapTipSeen;
+  g.flags.mapReqTipSeen = !!g.flags.mapReqTipSeen;
+  g.flags.firstWashDone = !!g.flags.firstWashDone;
   // brush tutorial: saves from before it existed have already used the WC — skip it
   const hasTut = !!src.flags && Object.prototype.hasOwnProperty.call(src.flags, "brushTutDone");
   g.flags.brushTutDone = hasTut ? !!g.flags.brushTutDone : g.flags.wcIntroStep >= 4;
   g.flags.wcDirtied = hasTut ? !!g.flags.wcDirtied : g.flags.brushTutDone;
   const hasChangeTut = !!src.flags && Object.prototype.hasOwnProperty.call(src.flags, "changeTutDone");
   g.flags.changeTutDone = hasChangeTut ? !!g.flags.changeTutDone : g.flags.brushTutDone;
-  // 0 = map tip not shown yet, 2 = map tip done, 3 = shop tip done, 4 = car wash tip done
-  g.flags.toolbarIntro = Number.isInteger(g.flags.toolbarIntro) ? clamp(g.flags.toolbarIntro, 0, 4) : 0;
+  // cash tutorial: 0 = not yet, 1 = the first WC guest has left the cabin (popup due), 2 = done.
+  // Saves from before it existed: done if the change tutorial was already finished.
+  const hasCashTut = !!src.flags && Object.prototype.hasOwnProperty.call(src.flags, "cashTutStep");
+  g.flags.cashTutStep = hasCashTut ? clamp(Math.floor(finiteOr(g.flags.cashTutStep, 0)), 0, 2) : g.flags.changeTutDone ? 2 : 0;
+  // shop tutorial: the cologne purchase that the shop asks for after the till tip
+  const hasKolonyaTut = !!src.flags && Object.prototype.hasOwnProperty.call(src.flags, "kolonyaTutDone");
+  g.flags.kolonyaTutDone = hasKolonyaTut ? !!g.flags.kolonyaTutDone : !!g.flags.changeTutDone;
+  // counter kolonya popup: shown once before the first change is handed back
+  const hasCounterTip = !!src.flags && Object.prototype.hasOwnProperty.call(src.flags, "counterKolonyaTipSeen");
+  g.flags.counterKolonyaTipSeen = hasCounterTip ? !!g.flags.counterKolonyaTipSeen : !!g.flags.changeTutDone;
+  // exact-₺20 popup: shown once when the second-ever WC guest is at the self-serve counter spot
+  const hasExactTip = !!src.flags && Object.prototype.hasOwnProperty.call(src.flags, "exactTipSeen");
+  g.flags.exactTipSeen = hasExactTip ? !!g.flags.exactTipSeen : !!g.flags.changeTutDone;
+  // exit-button popup (the red badge): shown once, after the exact-payment popup
+  g.flags.exitTipSeen = !!g.flags.exitTipSeen;
   const hasParkedFlag = !!src.flags && Object.prototype.hasOwnProperty.call(src.flags, "firstBusParked");
   g.flags.firstBusParked = hasParkedFlag
     ? !!g.flags.firstBusParked
@@ -1066,11 +1105,6 @@ function wcUpgradeStatus(id, track, level) {
   if (!def) return fail("Böyle bir seviye yok");
   if (level <= t.wc[track]) return { ok: false, reason: "Sahipsin", def, owned: true };
   if (level !== t.wc[track] + 1) return { ok: false, reason: `Önce: ${wcLevel(track, level - 1).name}`, def };
-  const minServed = def.minServed || 0;
-  if (S.stats.served < minServed) {
-    const remaining = minServed - S.stats.served;
-    return { ok: false, reason: gameLanguage === "en" ? `Serve ${remaining} more guests` : `${remaining} misafir daha hizmet gerek`, def };
-  }
   const cost = tierCost(id, def);
   if (G.company.cash < cost) return { ok: false, reason: `${fmtTL(cost - G.company.cash)} eksik`, def, cost };
   return { ok: true, def, cost };
@@ -1153,6 +1187,30 @@ function purchaseUpgrade(id, track, tier) {
   const now = STALL_ORDER.slice(0, wcDef("count", t).stalls);
   t.sim.cleanliness = now.reduce((a, i) => a + t.sim.stallClean[i], 0) / now.length;
   scheduleMaintenance(t);
+  save();
+  return { ok: true, tx };
+}
+
+// Can terminal `id` top up its counter bottle now? Only once cologne is bought.
+const refillCost = id => tierCost(id, CONFIG.wcTracks.cologne.refill);
+function refillStatus(id) {
+  const t = ownedTerminal(id);
+  if (!t) return fail("Bu terminal senin değil");
+  const def = wcLevel("cologne", t.wc.cologne);
+  if (!def || !def.ml) return fail("Önce kolonyayı satın al");
+  const cost = refillCost(id);
+  if (t.sim.bottle >= def.ml) return { ok: false, reason: "Şişe zaten dolu", def, cost };
+  if (G.company.cash < cost) return { ok: false, reason: `${fmtTL(cost - G.company.cash)} eksik`, def, cost };
+  return { ok: true, def, cost };
+}
+
+// Fill the counter bottle to its full size for a fee. Validated, then charged and applied.
+function refillCologne(id) {
+  const st = refillStatus(id);
+  if (!st.ok) return st;
+  const tx = applyTransaction("supplies", -st.cost, id, "kolonya dolumu");
+  if (!tx) return fail("Yetersiz kasa");
+  G.terminals[id].sim.bottle = st.def.ml;
   save();
   return { ok: true, tx };
 }
@@ -1770,8 +1828,15 @@ function finishEnter(b) {
   if (!G.flags.firstBusParked) {
     // the very first bus: the first guest off walks straight to the WC building,
     // so the player sees right away where guests go
-    const first = b.pax.filter(p => p.disembark && p.forceToilet).sort((u, v) => u.offAt - v.offAt)[0];
+    const [first, second] = b.pax.filter(p => p.disembark && p.forceToilet).sort((u, v) => u.offAt - v.offAt);
     if (first) first.directWc = true;
+    if (first && second) {
+      // the second-ever WC guest follows the first straight to the WC building,
+      // exactly SECOND_WC_GAP_S later, and pays the exact ₺20 (no change due)
+      second.directWc = true;
+      second.exactWc = true;
+      second.offAt = first.offAt + SECOND_WC_GAP_S / SECONDS_PER_HOUR;
+    }
     G.flags.firstBusParked = true; save();
   }
 }
@@ -2374,15 +2439,19 @@ function stepFac(name, timeDt, stalls, svcTime) {
       p.inStall = false; // door stays ajar until they actually reach the bay
       p.useSat = null;   // a fresh visit clears any stale rating from a previous (evaded) one
     }
-    // A toilet visit runs 1–10 in-game minutes; a diner seat keeps the short
+    // A toilet visit runs 1–5 in-game minutes; a diner seat keeps the short
     // fixed service time.
-    f.spots[slot] = { pax: p, t: name === "T" ? (p.tutGuest ? TUT_TOILET_STAY : rand(TOILET_STAY[0], TOILET_STAY[1])) : svcTime };
+    f.spots[slot] = { pax: p, t: name === "T" ? (p.tutGuest ? TUT_TOILET_STAY : p.exactWc ? SECOND_WC_STAY : rand(TOILET_STAY[0], TOILET_STAY[1])) : svcTime };
   }
   // running services — a finished visit frees its own slot (no reflow)
   for (let i = 0; i < stalls; i++) {
     const s = f.spots[i];
     if (!s) continue;
-    if (s.pax && s.pax.tutGuest && !s.pax.inStall) continue; // the tutorial guest's 2.5 s start once they are inside the toilet
+    // The visit clock starts only once the guest is actually inside the stall
+    // (p.inStall, set when they reach their bay). Otherwise the walk in from the
+    // side passage eats into the 1–5 min stay and short visits end before the
+    // guest ever reaches the toilet — they go straight to the counter.
+    if (name === "T" && s.pax && !s.pax.inStall) continue;
     s.t -= timeDt;
     if (s.t <= 0) { completeService(name, s.pax); f.spots[i] = null; s.pax = null; s.t = -1; }
   }
@@ -2408,6 +2477,8 @@ function completeService(name, p) {
   }
   // toilets — the guest leaves the stall and joins the payment line.
   // Satisfaction is finalized at the counter (finalizePayment / stormOut).
+  // The tutorial guest's first cabin exit brings up the cash popup (see maybeShowArrivalInfo).
+  if (p.tutGuest && G.flags.cashTutStep === 0) { G.flags.cashTutStep = 1; cashTipDueAt = performance.now() + 1000; }
   p.bladder = 10;
   // each toilet carries its own dirt — the stall they used sets the rating,
   // and their visit leaves that particular stall dirtier
@@ -2426,7 +2497,7 @@ function completeService(name, p) {
   const bus = findBusOf(p);
   if (bus && bus.state === "stop") {
     // the one roll per visit: a few guests try to run off without paying
-    if (!p.tutGuest && Math.random() < WC_EVADE) fleeCounter(p); // the tutorial guest always pays
+    if (!p.tutGuest && !p.exactWc && Math.random() < WC_EVADE) fleeCounter(p); // the tutorial and second-ever guests always pay
     else enterCounter(p);
   } else {
     p.unpaid = true; // bus already pulled out — no counter, no time for the ritual
@@ -2557,11 +2628,16 @@ const brushTutHold = () => brushTutPending() && S.view === "wc" && (!!toolInHand
 // Change tutorial: the first WC guest stands at the counter with ₺50 — the
 // player hands back ₺10, then ₺20. Returns the bill to tap next (or null).
 function changeTutNext() {
-  if (G.flags.changeTutDone || S.view !== "wc" || brushTutPending()) return null;
+  if (G.flags.changeTutDone || S.view !== "wc" || brushTutPending() || !G.flags.kolonyaTutDone) return null; // the counter comes after the first kolonya purchase
   const f = facilities.C.queue[0];
   if (!f || !f.tutGuest || f.state !== "payC" || !atPaySpot(f)) return null;
   return f.changeGiven === 0 ? 10 : f.changeGiven === 10 ? 20 : null;
 }
+// Kolonya popup at the counter: before the first change is handed back (₺10 step), the
+// tutorial guest's counter bottle is explained once. Holds the change step until dismissed.
+const counterTipPending = () => !G.flags.counterKolonyaTipSeen && changeTutNext() === 10;
+// The second-ever WC guest (exact ₺20, self-serve line) standing at their pay spot: the exact-payment tip
+const exactTipPayer = () => (G.flags.exactTipSeen || S.view !== "wc") ? null : facilities.C.queue2.find(p => p.exactTipGuest && holdsBill(p)) || null;
 const wcTutHold = () => brushTutHold() || changeTutNext() != null;
 // Stepping into the WC while the brush tutorial waits: the first guest, still
 // strolling on the street, joins the line now — so they walk up the side passage
@@ -2637,8 +2713,14 @@ function rinseSuds(b, w) {
 }
 
 // Step up to the front of a parked bus and open the car wash view.
+// The first car wash can't be left until the bus is 100% clean (the exit button and key stay locked).
+const washExitLocked = () => {
+  const bus = S.view === "wash" ? buses.find(z => z.id === S.washBus) : null;
+  return !!bus && !G.flags.firstWashDone && !bus.washDone; // an already-washed bus (older saves) never locks
+};
 function openWash(b) {
   if (!carWashOpen()) return;
+  G.flags.washHintDone = true;
   ensureWash(b);
   S.washBus = b.id;
   setView("wash");
@@ -2698,6 +2780,7 @@ function finishWash(b, persist = true) {
   w.done = true;
   w.f = w.f.map(() => 0); // spotless — no residual suds where the final rinse didn't reach
   b.washDone = true;
+  G.flags.firstWashDone = true; // the first wash is finished: the exit button unlocks
   b.washSat = wd.sat;
   S.stats.washes++;
   S.rep = clamp(S.rep + wd.rep, 0, 100);
@@ -3727,7 +3810,9 @@ function enterCounter(p) {
   // somehow already in a line, the second join would strand a stale entry
   // (finalizePayment releases from the first queue only, then breaks).
   if (facilities.C.queue.includes(p) || facilities.C.queue2.includes(p)) return;
-  p.bill = p.tutGuest ? 50 : pick(BILL_POOL); // the tutorial guest pays ₺50: ₺30 change = 10 + 20
+  p.bill = p.tutGuest ? 50 : p.exactWc ? 20 : pick(BILL_POOL); // the tutorial guest pays ₺50: ₺30 change = 10 + 20; the second-ever guest pays exact ₺20
+  p.exactTipGuest = p.exactWc; // the second-ever guest: the exact-payment tip shows at their spot
+  p.exactWc = false; // one visit only
   p.owed = p.bill - CONFIG.economy.toiletFee;
   p.changeGiven = 0;
   p.changeNotes = [];
@@ -3968,7 +4053,7 @@ function giveChange(d) {
 function offerCologne() {
   if (!hasCologne()) return; // no bottle on the counter yet
   const front = facilities.C.queue[0];
-  if (S.bottle <= 0) { toast("🧴 Kolonya bitti — gece dolar", ""); return; }
+  if (S.bottle <= 0) { toast("🧴 Kolonya bitti — şişeyi doldur", ""); return; }
   if (!front || (front.state !== "payC" && front.state !== "doneC") || front.cologne || !atPaySpot(front)) return;
   front.cologne = true;
   front.colognePrev = front.state;
@@ -4067,7 +4152,6 @@ function advanceSimulation(dt, timeDt = dt) {
   while (G.clock.time >= 24) {
     G.clock.time -= 24; G.clock.day++;
     for (const t of ownedTerminals()) {
-      t.sim.bottle = wcDef("cologne", t).ml;
       // automation's daily running cost — owed whether or not cash covers it
       const op = operatingCost(t);
       if (op) applyTransaction("operating", -op, t.id, "günlük işletme", true);
@@ -4906,6 +4990,8 @@ function setMapOpen(on) {
     mapMsg = null;
   }
   mapOpen = on;
+  if (on && !paused) { paused = true; pausedByMap = true; }          // same as the pause button
+  else if (!on && pausedByMap) { paused = false; pausedByMap = false; }
   mapPanelOpen = on && !!mapSel;
   $("mapPanel").classList.toggle("hidden", !mapPanelOpen);
   $("mapBtn").classList.toggle("on", on);
@@ -5839,8 +5925,8 @@ function drawBottle() {
   ctx.fill();
   ctx.save();
   ctx.clip();
+  const fillH = (bodyH - 4) * f;                                     // liquid height, anchored at the base
   if (f > 0.02) {                                                    // cologne level
-    const fillH = (bodyH - 4) * f;
     ctx.fillStyle = "#ece17f";
     ctx.fillRect(x, bot - fillH, w, fillH);
     ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
@@ -5884,6 +5970,18 @@ function drawBottle() {
   ctx.fillStyle = "#c0392b";
   for (const mx of [x + 3.5, x + w - 3.5]) {
     ctx.beginPath(); ctx.arc(mx, lblY + lblH / 2, 1.2, 0, 7); ctx.fill();
+  }
+
+  if (f > 0.02) {                                                    // the level shows through the opaque label
+    ctx.save();
+    rr(ctx, x, lblY - 4, w, lblH + 8, 7); ctx.clip();
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = "#ece17f";
+    ctx.fillRect(x, bot - fillH, w, fillH);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+    ctx.fillRect(x, bot - fillH, w, 1.2);                            // meniscus line
+    ctx.restore();
   }
 
   ctx.textAlign = "center";
@@ -6971,16 +7069,30 @@ function drawChangeBubble(cx, topY, title, body) {
 function drawBrushTutorial() {
   if (arrivalInfoOpen || modalOpen) return;
   const tutBill = changeTutNext();
+  if (tutBill != null && counterTipPending()) { // kolonya popup first: any tap closes it, then the change step starts
+    const b = deskRect(COUNTER_IN.bottle, "bottle");
+    spotlightDimRects([b]);
+    drawTapCue(b.x + b.w / 2, b.y + b.h * 0.5);
+    drawChangeBubble(b.x + b.w / 2, b.y, "Kolonya", "Misafir öderken ya da para üstünü verirken ona kolonya dökebilirsin");
+    return;
+  }
   if (tutBill != null) { // change tutorial: the hand taps the bill to hand back next
     const r = deskRect(chipHit(COUNTER_IN.chips.find(c => c.d === tutBill)), "drawer");
     // the popup sits over the bill the customer is handing over: drawn at the counter top,
     // rotated 90° so its 16u length runs vertically — its top edge is 8u above the centre
     const payer = facilities.C.queue[0];
     const billX = payer.x + COUNTER_BILL_OFFSET, billCy = counterTopBillY(), billTop = billCy - 8 * COUNTER_BILL_U;
-    // the room darkens with the tapped drawer tray and the customer's bill left bright
-    spotlightDimRects([r, { x: billX - 4 * COUNTER_BILL_U, y: billTop, w: 8 * COUNTER_BILL_U, h: 16 * COUNTER_BILL_U }]);
+    // the room darkens with the tapped drawer tray and the customer's bill left bright;
+    // on the ₺10 step the WC fee sign on the wall is lit too (it is the fee the popup names)
+    const lit = [r, { x: billX - 4 * COUNTER_BILL_U, y: billTop, w: 8 * COUNTER_BILL_U, h: 16 * COUNTER_BILL_U }];
+    if (tutBill === 10) {
+      const kx = stallKx();
+      lit.push({ x: stallSx(327), y: stallSy(119), w: 74 * kx, h: 48 * STALL_K });
+    }
+    spotlightDimRects(lit);
+    if (tutBill === 10) { stallSpace(); drawFeeSign(true); ctx.restore(); }
     drawTapCue(r.x + r.w / 2, r.y + r.h * 0.4);
-    if (tutBill === 10) drawChangeBubble(billX, billTop, "Para üstü", "Verilen paradan tuvalet ücretini düş");
+    if (tutBill === 10) drawChangeBubble(billX, billTop, "Para üstü", "Verilen paradan tuvalet ücretini(20₺) düş");
     else drawChangeBubble(billX, billTop, "Hesapla", "Mümkün olduğunca az banknot kullan, fazla para verme");
     return;
   }
@@ -6998,6 +7110,8 @@ function drawBrushTutorial() {
   if (wcZoom < 0.95) return; // wait for the zoom to settle
   const i = brushTutStall(), bay = stallBay(i), clean = S.stallClean[i];
   const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 380);
+  // only the toilet being cleaned is bright: the rest of the room dims under a soft spotlight
+  spotlightDim(bay.x, bay.y, bay.w, bay.h);
   ctx.save();
   // soft pulsing frame around the toilet
   ctx.strokeStyle = `rgba(255, 211, 107, ${0.55 + 0.4 * pulse})`;
@@ -7028,6 +7142,25 @@ function drawBrushTutorial() {
   ctx.fillText(gameLanguage === "en" ? `${Math.floor(clean)}%` : `%${Math.floor(clean)}`, x + w - 8, by + bh / 2 + 0.5);
   ctx.restore();
   ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+}
+
+// The fee sign hangs in the central aisle between the two rows of toilets (stall space).
+// bright: the change tutorial lights it up while its popup names the ₺20 toilet fee.
+function drawFeeSign(bright = false) {
+  ctx.save();
+  if (bright) { ctx.shadowColor = "rgba(255, 211, 107, 0.95)"; ctx.shadowBlur = 16; }
+  ctx.fillStyle = bright ? "#ffd36b" : "#3b2020";
+  rr(ctx, 327, 119, 74, 48, 3); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = bright ? "#ff3b4a" : "#d92332";
+  rr(ctx, 330, 122, 68, 42, 2); ctx.fill();
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 18px sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("WC", 364, 133.5);
+  ctx.fillText("20₺", 364, 152.5);
+  ctx.restore();
 }
 
 function drawWCScene() {
@@ -7069,17 +7202,7 @@ function drawWCScene() {
   ctx.fillStyle = "#3d465e";
   rr(ctx, 0, 84, 324, 162, 6); ctx.fill();
   rr(ctx, 320 + STALL_AISLE, 84, 324, 162, 6); ctx.fill();
-  // A small fee sign hangs in the central aisle between the two rows of toilets.
-  ctx.fillStyle = "#3b2020";
-  rr(ctx, 327, 119, 74, 48, 3); ctx.fill();
-  ctx.fillStyle = "#d92332";
-  rr(ctx, 330, 122, 68, 42, 2); ctx.fill();
-  ctx.fillStyle = "#fff";
-  ctx.font = "bold 18px sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText("WC", 364, 133.5);
-  ctx.fillText("20₺", 364, 152.5);
+  drawFeeSign();
   for (let i = 0; i < WC_STALLS; i++) {
     const bx = stallLx(i);
     const s = facilities.T.spots[i];
@@ -7729,11 +7852,74 @@ function paxGait(p) {
     a.hx += (Math.abs(dx) / d - a.hx) * Math.min(1, dt * 8);
     a.ph += clamp(d / dt / 9, 7, p.runaway ? 16 : 11) * dt;
   } else a.hold -= dt;
-  if (a.hx > 0.6) a.side = true; else if (a.hx < 0.4) a.side = false; // hysteresis: no flicker on diagonals
+  // profile only for mostly-sideways walks: a diagonal walk toward the camera (south) stays front-on
+  if (a.hx > 0.85) a.side = true; else if (a.hx < 0.7) a.side = false; // hysteresis: no flicker on diagonals
   const target = a.hold > 0 ? 1 : 0;
   a.amp += (target - a.amp) * Math.min(1, dt * 10);
   if (a.amp < 0.02 && !target) a.amp = 0;
   return a;
+}
+
+// Cologne splash on a guest at the counter (dripC / selfDripC, 0.8 s). A lemon
+// jet arcs from the bottle's nozzle onto the guest's head and hands, beads ride
+// the stream, the impact bursts into droplets and a pale mist, then fresh
+// sparkles rise and fade. Drawn in world coords, like the rest of the guest.
+function drawCologneSplash(p, x, y, s) {
+  const f = clamp(1 - p.dripT / 0.8, 0, 1);
+  const b = deskRect(COUNTER_IN.bottle, "bottle");
+  const from = { x: b.x + b.w / 2, y: b.y + b.h * 0.12 };   // the nozzle
+  const to = { x: x + 1.5 * s, y: y - 13 * s };             // head and hands
+  const apex = Math.min(from.y, to.y) - 24 * s;             // the jet peaks above both
+  const along = t => {                                      // quadratic arc, t in 0..1
+    const u = 1 - t, mx = (from.x + to.x) / 2;
+    return { x: u * u * from.x + 2 * u * t * mx + t * t * to.x,
+             y: u * u * from.y + 2 * u * t * apex + t * t * to.y };
+  };
+  const fade = v => clamp(v, 0, 1).toFixed(2);
+  const flight = clamp(f / 0.5, 0, 1);                      // the jet lands in the first half
+  const ip = clamp((f - 0.45) / 0.55, 0, 1);                // impact progress
+  const ease = 1 - (1 - ip) * (1 - ip);
+
+  ctx.save();
+  ctx.lineCap = "round";
+  if (flight > 0 && ip < 1) {                               // the stream
+    ctx.strokeStyle = `rgba(236, 225, 127, ${fade(0.55 * (1 - ip))})`;
+    ctx.lineWidth = 1.2 * s;
+    ctx.beginPath();
+    for (let i = 0; i <= 12; i++) {
+      const q = along(flight * i / 12);
+      if (i) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y);
+    }
+    ctx.stroke();
+  }
+  for (let k = 0; k < 5; k++) {                             // beads riding the arc
+    const t = flight - k * 0.09;
+    if (t <= 0 || t > 1 || ip > 0.3) continue;
+    const q = along(t);
+    ctx.fillStyle = `rgba(242, 230, 138, ${fade(0.9 - 0.3 * t)})`;
+    ctx.beginPath(); ctx.arc(q.x, q.y, 1.5 * s, 0, 7); ctx.fill();
+  }
+  if (ip > 0) {                                             // the impact
+    const mist = ctx.createRadialGradient(to.x, to.y, 2 * s, to.x, to.y, (9 + 9 * ease) * s);
+    mist.addColorStop(0, `rgba(248, 242, 178, ${fade(0.5 * (1 - ip))})`);
+    mist.addColorStop(1, "rgba(248, 242, 178, 0)");
+    ctx.fillStyle = mist;
+    ctx.beginPath(); ctx.arc(to.x, to.y, (9 + 9 * ease) * s, 0, 7); ctx.fill();
+    for (let k = 0; k < 10; k++) {                          // droplets flung outward
+      const ang = k * 2.39996, rad = (3 + 13 * ease) * s;
+      ctx.fillStyle = `rgba(236, 225, 127, ${fade(0.9 * (1 - ip))})`;
+      ctx.beginPath();
+      ctx.arc(to.x + Math.cos(ang) * rad, to.y + Math.sin(ang) * rad * 0.7 + ip * 3 * s, (1.1 + 0.4 * (k % 3)) * s, 0, 7);
+      ctx.fill();
+    }
+    ctx.fillStyle = `rgba(255, 252, 215, ${fade(1 - ip)})`; // fresh sparkles rising and fading
+    for (let k = -1; k <= 1; k++) {
+      const cx = to.x + k * 6 * s, cy = to.y - 4 * s - ip * 9 * s;
+      ctx.fillRect(cx - 2.2 * s, cy - 0.35 * s, 4.4 * s, 0.7 * s);
+      ctx.fillRect(cx - 0.35 * s, cy - 2.2 * s, 0.7 * s, 4.4 * s);
+    }
+  }
+  ctx.restore();
 }
 
 function drawPax(p, k = 1) {
@@ -7803,6 +7989,7 @@ function drawPax(p, k = 1) {
   else if (holdsBill(p)) reach = { x: x + 4.6 * s, y: y - 7.2 * s };
   else if (p.state === "dripC" || p.state === "selfDripC") reach = { x: x + 3.8 * s, y: y - 15 * s };
   const armW = (isW ? 1.6 : 1.9) * s;
+  const upward = g.back && !faceOn && !side; // walking up the screen (away from the viewer)
   const arm = (i, back) => {
     const ax = x + (side ? -0.3 : i * 3.3) * s, ay = shY;
     let hx, hy, ex, ey;
@@ -7821,6 +8008,8 @@ function drawPax(p, k = 1) {
       const bend = (0.35 + 0.5 * Math.max(0, as)) * s;
       ex = (ax + hx) / 2 + i * 0.5 * s * (1 - g.hx) - fwdX * bend;
       ey = (ay + hy) / 2 - fwdY * bend;
+      // walking up the screen: the right arm's elbow bends upward instead of folding back down
+      if (upward && i > 0) ey = (ay + hy) / 2 - Math.abs(fwdY) * bend;
     }
     ctx.strokeStyle = back ? clothDk : cloth;
     ctx.lineWidth = armW;
@@ -7963,14 +8152,7 @@ function drawPax(p, k = 1) {
     ctx.fillStyle = "#ffd36b";
     ctx.beginPath(); ctx.arc(x + 6 * s, y - 8 * s, 2.5 * s, 0, 7); ctx.fill();
   }
-  if (p.state === "dripC" || p.state === "selfDripC") {
-    const f = clamp(1 - p.dripT / 0.8, 0, 1);
-    ctx.fillStyle = "rgba(200, 130, 40, 0.9)";
-    ctx.fillRect(x + 2.9 * s, y - 11 * s + f * 13 * s, 1.6 * s, 2.6 * s); // falling drop
-    ctx.fillStyle = "rgba(255, 230, 180, 0.7)";
-    ctx.fillRect(x + 0.5 * s, y - 9 * s, 1.5 * s, 1.5 * s);
-    ctx.fillRect(x + 5.5 * s, y - 12 * s, 1.5 * s, 1.5 * s); // sparkles
-  }
+  if (p.state === "dripC" || p.state === "selfDripC") drawCologneSplash(p, x, y, s);
   // a red badge over the head of a runaway still inside the WC — the "click
   // to catch" signal (hidden while a scrub runs — nobody is catchable then).
   // Queue-leavers get no badge: they are never catchable.
@@ -8062,9 +8244,16 @@ function updateHUD() {
   const waiting = facilities.T.queue.length;
   $("btnExit").classList.toggle("hidden", S.view !== "wc" && S.view !== "wash");
   $("mapBtn").classList.toggle("hidden", S.view === "wc" || S.view === "wash");
+  $("btnPause").classList.toggle("hidden", mapOpen); // the map view has no pause button (the map itself pauses the game)
   $("exitBadge").classList.toggle("hidden", S.view !== "wc" || waiting === 0);
   setText("exitBadge", waiting);
   $("cashChip").classList.toggle("neg", G.company.cash < 0);
+  // the cash tip holds the other header and side buttons until the till is tapped
+  // the exit tip holds everything but btnExit itself
+  const tipLock = arrivalInfoOpen && (arrivalInfoKind === "cash" || arrivalInfoKind === "exit" || arrivalInfoKind === "wash-till" || arrivalInfoKind === "map-tip");
+  for (const id of ["btnBurger", "btnPause", "btnSpeed", "btnReset", "mapBtn", "btnExit"])
+    $(id).disabled = tipLock && !(arrivalInfoKind === "exit" && id === "btnExit") && !(arrivalInfoKind === "map-tip" && id === "mapBtn");
+  $("btnExit").disabled = $("btnExit").disabled || washExitLocked();
   setText("statCash", "💰 " + fmtTL(G.company.cash));
   setText("statTerm", "📍 " + terminalName(G.activeTerminal));
   setText("btnPause", paused ? "▶" : "⏸");
@@ -8130,8 +8319,7 @@ function wcBenefits(track, def) {
     if (pt && nt.reach > pt.reach) out.push("Daha geniş temizlik alanı");
   } else if (track === "cologne") {
     if (!def.ml) return ["Gişede kolonya yok"];
-    if (!prev || prev.ml !== def.ml) out.push(`Gişede ${def.ml} ml'lik şişe (gece yarısı dolar)`);
-    if (!prev || prev.sat !== def.sat) out.push(`Dökülen her kolonya misafir puanına +${def.sat}`);
+    if (!prev || prev.ml !== def.ml) out.push(`Gişede ${def.ml} ml'lik şişe`);
   } else if (track === "calc") {
     out.push(def.level ? "Gişedeki ekranda verilecek para üstü yazar" : "Para üstünü kafandan hesaplarsın");
   } else if (track === "tea") {
@@ -8144,7 +8332,7 @@ function wcBenefits(track, def) {
 function washBenefits(def) {
   const prev = CONFIG.carWashTiers.find(x => x.tier === def.tier - 1);
   if (!prev) return ["Park etmiş otobüse dokun: uzun saplı fırçayla köpükle, hortumla durula",
-    `Biten her yıkama ${fmtTL(def.fee)} kazandırır`, "Daha fazla memnuniyet", "İtibar şartı yok — sadece kasa"];
+    `Biten her yıkama ${fmtTL(def.fee)} kazandırır`];
   const out = [];
   if (def.fee !== prev.fee) out.push(`Yıkama ücreti ${fmtTL(prev.fee)} → ${fmtTL(def.fee)}`);
   if (def.reach !== prev.reach) out.push("Daha geniş fırça ve hortum");
@@ -8190,6 +8378,55 @@ function wcArt(track, def) {
   return null;
 }
 
+// The shop tutorial: after the till tip, opening the shop asks for the kolonya. Until that
+// purchase, only its buy button works and the panel can't be closed. It releases when the
+// purchase isn't possible (e.g. not enough cash), so the player is never stuck.
+const kolonyaTipActive = () => shopOpen && G.flags.cashTutStep === 2 && !G.flags.kolonyaTutDone
+  && wcUpgradeStatus(term().id, "cologne", 1).ok;
+// The car-wash tutorial: after the exit tip the till opens the panel and only the manual wash buy works.
+// Like the kolonya tip, it releases when the purchase isn't possible (e.g. not enough cash).
+const washTipActive = () => shopOpen && G.flags.exitTipSeen && !G.flags.washTutDone && !carWashOpen()
+  && carWashStatus(term().id, 1).ok;
+
+// The shop tutorials (kolonya first, then manual wash): one bright card with a hand on its buy button,
+// the other cards dimmed and their buttons locked. Called every frame.
+function shopTutorial() {
+  if (kolonyaTipActive()) return { key: "kolonya", sel: 'button[data-track="cologne"]', title: "Kolonya", text: "Misafirlere kolonya sıkmak memnuniyeti artırır." };
+  if (washTipActive()) return { key: "wash", sel: 'button[data-act="wash"][data-tier="1"]', title: "Elle yıkama", text: "Otobüslerin ön camını yıkamak için önce bu ekipmanı al." };
+  return null;
+}
+function updateShopTip() {
+  const tip = $("shopTip"), tut = shopTutorial(), on = !!tut;
+  $("btnShopClose").disabled = on;
+  const body = $("shopBody");
+  const buy = on ? body.querySelector(tut.sel) : null;
+  if (!buy) {
+    if (!tip.classList.contains("hidden")) {
+      tip.classList.add("hidden");
+      $("tapHand").classList.add("hidden");
+      for (const c of body.querySelectorAll(".card")) { c.style.opacity = ""; c.style.pointerEvents = ""; }
+    }
+    return;
+  }
+  if (tip.dataset.tut !== tut.key) { // the tip's copy follows the tutorial
+    tip.dataset.tut = tut.key;
+    tip.innerHTML = `<strong>${escHtml(translateText(tut.title))}</strong><p>${escHtml(translateText(tut.text))}</p>`;
+  }
+  for (const b of body.querySelectorAll("button")) b.disabled = b !== buy; // only the tutorial's buy works
+  // only the tutorial card is bright; the others are dimmed and can't take a press
+  for (const c of body.querySelectorAll(".card")) {
+    const lit = c.contains(buy);
+    c.style.opacity = lit ? "" : "0.25";
+    c.style.pointerEvents = lit ? "" : "none";
+  }
+  if (tip.classList.contains("hidden")) buy.scrollIntoView({ block: "nearest" });
+  tip.classList.remove("hidden");
+  const r = buy.getBoundingClientRect(), tw = tip.offsetWidth, th = tip.offsetHeight;
+  tip.style.left = clamp(r.left + r.width / 2 - tw / 2, 8, innerWidth - tw - 8) + "px";
+  tip.style.top = Math.max(8, r.top - th - 14) + "px"; // above the card; the hand works below the button
+  drawTapHandOn(buy);
+}
+
 function renderShop() {
   const t = term();
   shopArts = [];
@@ -8216,10 +8453,18 @@ function renderShop() {
   let wcCards = "";
   for (const track of Object.keys(CONFIG.wcTracks)) {
     const cur = wcLevel(track, t.wc[track]), next = wcLevel(track, t.wc[track] + 1);
+    if (track === "cologne" && cur.ml) {
+      // one-time purchase: once owned, the bottle's card is the refill button
+      const rs = refillStatus(t.id);
+      const fillPct = Math.round(clamp(t.sim.bottle / cur.ml, 0, 1) * 100);
+      wcCards += tile("owned", wcArt(track, cur) || cur.icon, cur.name, [...wcBenefits(track, cur), `Doluluk: %${fillPct}`], rs.ok ? "" : rs.reason,
+        `<button class="buy" data-act="refill" ${rs.ok ? "" : `disabled title="${escHtml(rs.reason)}"`}>Doldur · ${fmtTL(refillCost(t.id))}</button>`);
+      continue;
+    }
     const lines = !next ? [] : track === "count" ? [`Yükseltince ${next.stalls} kabin — yeni kabinler tertemiz açılır`]
       : wcBenefits(track, next);
     wcCards += upgradeCard(next, { icon: next && (wcArt(track, next) || next.icon), name: next && next.name, lines }, next && wcUpgradeStatus(t.id, track, next.level),
-      next && `data-act="wc" data-track="${track}" data-tier="${next.level}"`, next && tierCost(t.id, next), "Yükselt",
+      next && `data-act="wc" data-track="${track}" data-tier="${next.level}"`, next && tierCost(t.id, next), track === "cologne" ? "Satın al" : "Yükselt",
       { icon: wcArt(track, cur) || cur.icon, name: cur.name, lines: wcBenefits(track, cur), text: ["tool", "cologne", "calc", "tea"].includes(track) ? "Kuruldu" : "Yükseltildi" });
   }
 
@@ -8260,15 +8505,24 @@ function renderShop() {
     }
   }
 
-  const body = S.view === "wc" ? wcCards : S.view === "wash" ? washCards
+  const body = kolonyaTipActive() ? wcCards : S.view === "wc" ? wcCards : S.view === "wash" ? washCards
     : S.view === "out" ? parkingCard + washCards + maint : washCards + (sys.length ? maint : "");
   $("shopBody").innerHTML = body;
   $("shopBody").querySelectorAll("canvas[data-art]").forEach(cv => paintArt(cv, shopArts[+cv.dataset.art]));
 }
 
+// Closes the business panel and saves (also used by the shop tutorial's purchase).
+function hideShop() {
+  shopOpen = false;
+  $("shop").classList.add("hidden");
+  save();
+}
+
 function shopAction(btn) {
   const a = btn.dataset.act;
   let res;
+  const tutBuy = a === "wc" && btn.dataset.track === "cologne" && kolonyaTipActive(); // read before the purchase changes the state
+  const tutWash = a === "wash" && +btn.dataset.tier === 1 && washTipActive();
   if (a === "parking") {
     const spaces = +btn.dataset.spaces;
     res = upgradeParkingLot(G.activeTerminal, spaces);
@@ -8277,6 +8531,9 @@ function shopAction(btn) {
     const def = wcLevel(btn.dataset.track, +btn.dataset.tier);
     res = purchaseUpgrade(G.activeTerminal, btn.dataset.track, +btn.dataset.tier);
     if (res.ok) res.text = `✓ ${def.name} kuruldu (−${fmtTL(-res.tx.amount)})`;
+  } else if (a === "refill") {
+    res = refillCologne(G.activeTerminal);
+    if (res.ok) res.text = `✓ Kolonya dolduruldu (−${fmtTL(-res.tx.amount)})`;
   } else if (a === "wash") {
     const def = CONFIG.carWashTiers.find(x => x.tier === +btn.dataset.tier);
     res = purchaseUpgrade(G.activeTerminal, "carWash", +btn.dataset.tier);
@@ -8288,8 +8545,13 @@ function shopAction(btn) {
     res = repairFailure(G.activeTerminal, btn.dataset.sys);
     if (res.ok) res.text = `✓ ${SYSTEM_NAMES[btn.dataset.sys]} onarıldı`;
   } else return;
+  const finishesKolonyaTip = res.ok && tutBuy;
+  if (finishesKolonyaTip) G.flags.kolonyaTutDone = true;
   toast(res.ok ? res.text : "✗ " + res.reason, res.ok ? "good" : "bad");
   renderShop();
+  const finishesWashTip = res.ok && tutWash;
+  if (finishesWashTip) { G.flags.washTutDone = true; washHintDueAt = performance.now() + 1000; } // the bus hint follows a second later
+  if (finishesKolonyaTip || finishesWashTip) hideShop(); // the tutorial's purchase is done: back to the game
 }
 
 // Save migration / recovery report, shown once on load.
@@ -8324,7 +8586,7 @@ function showIntro(first) {
       <p>🅿️ You start with <strong>2 parking spaces</strong>. Expand the lot to 4, 6, 8, then 10 spaces from the business panel. The first expansion unlocks after serving 20 buses.</p>
       <p>🚻 Enter the restroom: ${action} its building. Each occupied stall closes its door and gets dirtier with every use. Guests choose the cleanest available stall; very dirty stalls are avoided. Clean stalls by dragging your <strong>${translateText(tool.name).toLowerCase()}</strong> over them.</p>
       <p>💳 After using the restroom, guests join the counter queue and hand you a bill. ${touch ? "Tap" : "Click"} the cash drawer's 10₺, 20₺, or 50₺ trays to give the correct change. Fewer bills earn a better rating. Exact 20₺ guests use the separate queue and pay automatically.</p>
-      <p>💨 Offer lemon cologne to the guest at the counter for a satisfaction bonus. It refills at midnight. Tea can be ordered from the intercom at the far end of the counter.</p>
+      <p>💨 Offer lemon cologne to the guest at the counter for a satisfaction bonus. Tea can be ordered from the intercom at the far end of the counter.</p>
       <p>🧽 Every visit dirties a stall. Upgrades in the business panel improve your toilets, cleaning equipment, cologne, calculator, and car wash. The game pauses while the panel is open.</p>
       <p>🚌 Reputation affects bus traffic and passenger counts. Keep guests happy to attract more buses. A vacant parking bay dispatches a replacement bus within 8 game minutes; the lot should refill before 10 minutes.</p>
       <p>⏱ Game time is compressed: at 1×, one game hour takes 6 real minutes. Use the pause and speed controls to manage the pace. Press <strong>E</strong> to leave an interior, or ${action} the exit button.</p>
@@ -8346,7 +8608,7 @@ function showIntro(first) {
     <p>🕐 Zaman <strong>sıkıştırılmıştır</strong> — 1× hızda bir oyun saati gerçekte 6 dakika sürer, yani bir oyun günü yaklaşık 2,4 gerçek saattir. Otobüsler, tuvaletler ve sıralar oyun içi temposunu korur.</p>
     <p>🚻 Tuvalet <strong>${fmtTL(CONFIG.economy.toiletFee)}</strong>; ücret ziyaretten <em>sonra</em> gişede ödenir — ve gişe <strong>sensin</strong>. <strong>İçeri girmek için WC binasına ${act}</strong>: içinde biri varken <strong>her kabinin kapısı kapanır</strong> (bir ziyaret oyun içinde 1–10 dakika sürer) ve <strong>her kabinin kendi temizliği vardır</strong> — kirli kabin ziyaretin puanını düşürür, misafirler hep <strong>en temiz boş kabini</strong> seçer (çok pis olanı kimse kullanmaz).</p>
     <p>💳 İçeride işini bitiren her misafir gişedeki sıraya girer ve sana bir banknot uzatır. Doğru para üstünü vermek için <strong>açık kasa çekmecesindeki gözlere ${act}</strong> (10₺ / 20₺ / 50₺) — ve <strong>misafirler banknotları sayar</strong>: aynı tutarı daha az banknotla vermek daha iyi puan alır (30₺'u 10+20 olarak vermek şıktır, 10+10+10 bir avuç kâğıttır; 80₺ için 10+20+50, 10×8'den iyidir). <strong>Tam ${fmtTL(CONFIG.economy.toiletFee)}</strong> veren misafirlerin sana ihtiyacı yok: <strong>kendi ikinci sıralarında</strong> durur, kendileri öder ve yan geçitten çıkarlar — para üstü yok, kolonya yok, tıklama yok. Eksik ya da hiç verilmeyen para üstü diğer misafirleri mutsuz eder. ${hasCalc() ? "Gişedeki <strong>hesap makinesi</strong> verilecek para üstünü gösterir." : "Henüz <strong>hesap makinen yok</strong> — para üstünü kafandan hesapla (20₺ düş)."}</p>
-    ${hasCologne() ? `<p>💨 Gişede ${bottleMax()} ml'lik bir şişe <strong>limon kolonyası</strong> durur. Öndeki misafir öderken ellerine biraz dökmek için <strong>şişeye ${act}</strong>. Para üstü eline geçer geçmez yan geçitten çıkar (tam 20₺ sırası kendi kendine öder — kolonya ana sıranın öndeki misafiri içindir), o yüzden erken dök. Şişe gece yarısı dolar.</p>` : ""}
+    ${hasCologne() ? `<p>💨 Gişede ${bottleMax()} ml'lik bir şişe <strong>limon kolonyası</strong> durur. Öndeki misafir öderken ellerine biraz dökmek için <strong>şişeye ${act}</strong>. Para üstü eline geçer geçmez yan geçitten çıkar (tam 20₺ sırası kendi kendine öder — kolonya ana sıranın öndeki misafiri içindir), o yüzden erken dök.</p>` : ""}
     <p>🍵 <strong>Çayın</strong> gişede durur ve yaklaşık 30 oyun dakikasında biter. Taze bir bardak istemek için gişenin sağ ucundaki <strong>interkoma ${act}</strong> — bardağı ${fmtTL(CONFIG.economy.teaPrice)}, 2 oyun dakikası içinde gelir.</p>
     <p>🚪 Dışarı çıkmak için üst çubuktaki <strong>🚪</strong> düğmesine ${act}${touch ? "" : " — ya da <strong>E</strong> tuşuna bas"}. Misafirler gişenin iki yanındaki geçitlerden girip çıkar.</p>
     <p>🧻 <strong>Her kabin her kullanımda biraz daha kirlenir</strong> (her kabinin üstündeki çubuğu izle). Kabinlerin iki yanındaki istasyondan <strong>${tool.name.toLocaleLowerCase("tr-TR")}</strong> aletini al ve <strong>${touch ? "parmağını basılı tutup" : "fareyi basılı tutup"} bir kabinin üzerinde sürükle</strong>, temizle — ama <strong>kapısı kapalı</strong> (içinde biri olan) bir kabin temizlenemez.${stallCount() < WC_STALLS ? ` Şimdilik <strong>${stallCount()} ${toiletDef().style === "alaturka" ? "alaturka " : ""}tuvaletin</strong> var; kalan bölmeler tahtayla kapalı. Kabin sayısı, tuvaletler, temizlik ekipmanı, kolonya ve hesap makinesi İşletme panelinden ayrı ayrı yükseltilir.` : ""}</p>
@@ -8361,8 +8623,8 @@ function showIntro(first) {
   showModal();
 }
 
-// The WC has no tutorial popups: the first visit just marks it as seen, which
-// lets the outdoor toolbar tips (map, business, car wash) follow.
+// The WC has no tutorial popups: the first visit just marks it as seen
+// (wcIntroStep is kept for old saves' brush-tutorial migration).
 function markWcVisited() {
   if (G.flags.wcIntroStep >= 4) return;
   G.flags.wcIntroStep = 4;
@@ -8370,7 +8632,50 @@ function markWcVisited() {
 }
 
 function maybeShowArrivalInfo() {
+  if (!arrivalInfoOpen && !modalOpen && !shopOpen && !G.flags.mapReqTipSeen && mapReqDueAt && mapOpen && performance.now() >= mapReqDueAt) {
+    arrivalInfoKind = "map-req"; // the requirements tip, centred on the screen
+    arrivalInfoBusId = null;
+    arrivalInfoOpen = true;
+    return;
+  }
   if (arrivalInfoOpen || modalOpen || paused || shopOpen || mapOpen) return;
+  if (S.view === "wash" && !washDef().combo) { // the manual wash's first use: brush, then hose
+    if (!G.flags.washBrushTipSeen) { arrivalInfoKind = "wash-brush"; arrivalInfoBusId = null; arrivalInfoOpen = true; return; }
+    if (!G.flags.washHoseTipSeen) { arrivalInfoKind = "wash-hose"; arrivalInfoBusId = null; arrivalInfoOpen = true; return; }
+  }
+  if (G.flags.cashTutStep === 1 && performance.now() >= cashTipDueAt) { // the cash tip: it stays until the player taps the till
+    arrivalInfoKind = "cash";
+    arrivalInfoBusId = null;
+    arrivalInfoOpen = true;
+    return;
+  }
+  if (exactTipPayer()) { // the exact-₺20 guest is at the counter: nothing to hand back, so the tip just says so
+    arrivalInfoKind = "exact";
+    arrivalInfoBusId = null;
+    arrivalInfoOpen = true;
+    return;
+  }
+  if (G.flags.exactTipSeen && !G.flags.exitTipSeen && S.view === "wc" && performance.now() >= exitTipDueAt) {
+    // the exit button's badge: only tapping btnExit dismisses it (and leaves the WC)
+    arrivalInfoKind = "exit";
+    arrivalInfoBusId = null;
+    arrivalInfoOpen = true;
+    return;
+  }
+  if (!G.flags.mapTipSeen && mapTipDueAt && S.view === "out" && performance.now() >= mapTipDueAt) {
+    // after a finished car wash: the map button, and the other header buttons wait for it
+    arrivalInfoKind = "map-tip";
+    arrivalInfoBusId = null;
+    arrivalInfoOpen = true;
+    return;
+  }
+  if (G.flags.exitTipSeen && !G.flags.washTutDone && !carWashOpen() && S.view === "out" && performance.now() >= washTipDueAt) {
+    // the car-wash tutorial: the till tip points at the business panel and holds the other buttons
+    arrivalInfoKind = "wash-till";
+    arrivalInfoBusId = null;
+    arrivalInfoOpen = true;
+    return;
+  }
   if (S.view !== "out") return; // no tips indoors
   if (!G.flags.arrivalInfoSeen) {
     if (performance.now() < arrivalInfoDelayUntil) return;
@@ -8382,11 +8687,6 @@ function maybeShowArrivalInfo() {
   } else if (!G.flags.wcInfoSeen && buses.some(b => b.pax.some(p => p.tutGuest || isIndoorPax(p) || p.state === "waitT"))) {
     // only once a guest has reached the WC (at its door or inside) — the tip then explains where they went
     arrivalInfoKind = "wc";
-    arrivalInfoBusId = null;
-    arrivalInfoOpen = true;
-  } else if (G.flags.wcInfoSeen && G.flags.wcIntroStep >= 4 && G.flags.toolbarIntro < 4) {
-    // first time after the WC tutorial: point at the map button, then the business button, then car wash
-    arrivalInfoKind = G.flags.toolbarIntro === 0 ? "intro-map" : G.flags.toolbarIntro === 2 ? "intro-shop" : "intro-wash";
     arrivalInfoBusId = null;
     arrivalInfoOpen = true;
   }
@@ -8404,10 +8704,46 @@ function toolbarTargetRect(id) {
 
 function dismissArrivalInfo() {
   if (!arrivalInfoOpen) return;
-  if (arrivalInfoKind.startsWith("intro-")) {
-    if (arrivalInfoKind === "intro-map") { G.flags.toolbarIntro = 2; arrivalInfoKind = "intro-shop"; }
-    else if (arrivalInfoKind === "intro-shop") { G.flags.toolbarIntro = 3; arrivalInfoKind = "intro-wash"; }
-    else { G.flags.toolbarIntro = 4; arrivalInfoOpen = false; }
+  if (arrivalInfoKind === "map-tip") { // only the map button dismisses it (see the mapBtn click)
+    arrivalInfoOpen = false;
+    G.flags.mapTipSeen = true;
+    mapReqDueAt = performance.now() + 1000;
+    $("tapHand").classList.add("hidden");
+    save();
+    return;
+  }
+  if (arrivalInfoKind === "map-req") { // the Anladım button closes it
+    arrivalInfoOpen = false;
+    G.flags.mapReqTipSeen = true;
+    save();
+    return;
+  }
+  if (arrivalInfoKind === "wash-brush" || arrivalInfoKind === "wash-hose") { // the Anladım button closes it; the next tip follows
+    arrivalInfoOpen = false;
+    if (arrivalInfoKind === "wash-brush") G.flags.washBrushTipSeen = true; else G.flags.washHoseTipSeen = true;
+    save();
+    return;
+  }
+  if (arrivalInfoKind === "cash") { // only the till itself dismisses it (see the cashChip click)
+    arrivalInfoOpen = false;
+    G.flags.cashTutStep = 2;
+    $("tapHand").classList.add("hidden");
+    save();
+    return;
+  }
+  if (arrivalInfoKind === "exact") {
+    arrivalInfoOpen = false;
+    G.flags.exactTipSeen = true;
+    exitTipDueAt = performance.now() + 3000; // the exit-button popup follows three seconds later
+    arrivalInfoBusId = null;
+    save();
+    return;
+  }
+  if (arrivalInfoKind === "exit") { // only the exit button dismisses it (see the btnExit click)
+    arrivalInfoOpen = false;
+    G.flags.exitTipSeen = true;
+    washTipDueAt = performance.now() + 2000; // the car-wash till tip follows two seconds later
+    $("tapHand").classList.add("hidden");
     save();
     return;
   }
@@ -8419,39 +8755,39 @@ function dismissArrivalInfo() {
 }
 
 function arrivalInfoLayout() {
-  if (arrivalInfoKind === "intro-wash") {
-    // a tall column popup, placed on the side of the bus that is clear of other parked buses
-    const w = 240, h = 340, side = 22, hgt = side * Math.sqrt(3) / 2;
-    const parked = buses.filter(b => b.state === "stop");
-    const bus = parked.length ? parked.reduce((a, b) => (b.cx > a.cx ? b : a)) : null;
-    if (!bus) {
-      const x = -offX + 12, y = -offY + 8;
-      return { washTip: true, x, y, w, h, tail: null, button: { x: x + w / 2 - 62, y: y + h - 48, w: 124, h: 32 } };
-    }
-    const left = -offX + 8, right = Wdyn - offX - w - 8;
-    const bodyHit = (x, y) => parked.some(o => x < o.cx + 33 && x + w > o.cx - 33 && y < o.cy + o.len / 2 && y + h > o.cy - o.len / 2);
-    const y = clamp(bus.cy - h / 2, -offY + 8, H + offY - h - 8);
-    const leftX = bus.cx - 36 - hgt - w, rightX = bus.cx + 36 + hgt;
-    const leftFree = leftX >= left && !bodyHit(leftX, y);
-    const rightFree = rightX <= right && !bodyHit(rightX, y);
-    const onLeft = leftFree || (!rightFree && leftX >= left);
-    const x = onLeft ? leftX : clamp(rightX, left, right);
-    const tipX = onLeft ? bus.cx - 36 : bus.cx + 36;
-    const bx = onLeft ? x + w : x;
-    return { washTip: true, x, y, w, h, tail: { x: tipX, y: bus.cy, bx, by: bus.cy, side },
-      button: { x: x + w / 2 - 62, y: y + h - 48, w: 124, h: 32 } };
+  if (arrivalInfoKind === "map-req") { // centred on the view
+    const w = 430, h = 132;
+    const x = -offX + (Wdyn - w) / 2, y = -offY + (Hdyn - h) / 2;
+    return { isCenter: true, x, y, w, h, button: { x: x + w / 2 - 62, y: y + 90, w: 124, h: 32 } };
   }
-  const isIntro = arrivalInfoKind.startsWith("intro-");
-  if (isIntro) {
-    const w = 430, h = 132, left = -offX + 8, right = Wdyn - offX - w - 8;
-    const target = toolbarTargetRect(arrivalInfoKind === "intro-map" ? "mapBtn" : "cashChip");
+  if (arrivalInfoKind === "wash-brush" || arrivalInfoKind === "wash-hose") { // the car wash's first brush / hose tips: right above the tool they explain
+    const station = arrivalInfoKind === "wash-brush" ? WASH.brush : WASH.hose;
+    const w = 430, h = 118;
+    const x = clamp(station.x + station.w / 2 - w / 2, -offX + 8, Wdyn - offX - w - 8);
+    const y = clamp(station.y - h - 14, -offY + 8, H + offY - h - 8);
+    return { isWash: true, station, x, y, w, h, button: { x: x + w / 2 - 62, y: y + 74, w: 124, h: 32 } };
+  }
+  if (arrivalInfoKind === "exact") { // the exact-payment tip: a box above the guest's head, pointing down at them
+    const payer = exactTipPayer() || { x: PAY_SPOT2.x, y: PAY_SPOT2.y };
+    const w = 560, h = 132;
+    const x = clamp(payer.x - w / 2, -offX + 8, Wdyn - offX - w - 8);
+    const y = clamp(payer.y - 70 - 14 - h, -offY + 8, H + offY - h - 8); // same spot as before, just no pointer
+    return { isExact: true, x, y, w, h, button: { x: x + w / 2 - 62, y: y + 90, w: 124, h: 32 } };
+  }
+  const isCash = arrivalInfoKind === "cash"; // the till tip: same box as the header tips, no button — the till is the button
+  const isMapTip = arrivalInfoKind === "map-tip"; // the map tip: the map button is the target, no Anladım
+  const isWashTill = arrivalInfoKind === "wash-till"; // the car-wash till tip: the till is the button, no Anladım
+  const isExit = arrivalInfoKind === "exit"; // the exit tip: no button either — btnExit itself is the button
+  if (isCash || isWashTill || isMapTip || isExit) {
+    const w = 430, h = 104, left = -offX + 8, right = Wdyn - offX - w - 8;
+    const target = toolbarTargetRect(isExit ? "btnExit" : isMapTip ? "mapBtn" : "cashChip");
     let x = target.x - w - 12; // the box sits to the left of the highlighted button, level with it
     // but never up under the header bar's buttons: start below the header's bottom edge
     const header = toolbarTargetRect("headerBar");
     let y = Math.max(target.y + target.h / 2 - h / 2, header.y + header.h + 8);
     x = clamp(x, left, right);
     y = clamp(y, -offY + 8, H + offY - h - 8);
-    return { isIntro, target, x, y, w, h, button: { x: x + w / 2 - 62, y: y + 90, w: 124, h: 32 } };
+    return { isCash, isWashTill, isMapTip, isExit, target, x, y, w, h };
   }
   const isWc = arrivalInfoKind === "wc";
   const bus = isWc ? null : buses.find(b => b.id === arrivalInfoBusId);
@@ -8473,57 +8809,107 @@ function arrivalInfoLayout() {
   return { bus, isWc, x, y, w, h, tail, tipX: clamp(centerX, x + 24, x + w - 24), tipY: y + h + tail, button: { x: x + w / 2 - 62, y: y + 90, w: 124, h: 32 } };
 }
 
-// the bus the car wash tip previews (its own wash state, never a real bus)
-const WASH_PREVIEW_BUS = { hue: 205, wash: null };
-function drawWashTip(x, y, w, h, button, tail) {
+// The header and shop buttons are HTML above the canvas, so their click hand is drawn
+// on a small overlay canvas, its fingertip on the centre of the element.
+function drawTapHandOn(el) {
+  const hand = $("tapHand"), r = el.getBoundingClientRect();
+  const HAND_W = 90, HAND_H = 110, k = Math.min(2, window.devicePixelRatio || 1);
+  if (hand.width !== HAND_W * k) { hand.width = HAND_W * k; hand.height = HAND_H * k; }
+  hand.style.left = (r.left + r.width / 2 - HAND_W / 2) + "px";
+  hand.style.top = (r.top + r.height / 2 - HAND_W / 2) + "px";
+  hand.classList.remove("hidden");
+  const g = hand.getContext("2d");
+  g.setTransform(k, 0, 0, k, 0, 0);
+  g.clearRect(0, 0, HAND_W, HAND_H);
+  const main = ctx;
+  ctx = g; // drawTapCue / drawClickHand draw on the current ctx (swapped the same way for the shop card art)
+  try { drawTapCue(HAND_W / 2, HAND_W / 2); } finally { ctx = main; }
+}
+
+// The exact-payment tip: dims the room, then a box with its tail on the second-ever guest
+// A centred tip: the view dims, the box sits in the middle, one Anladım button closes it.
+function drawCenterTip({ x, y, w, h, button }) {
   ctx.save();
-  ctx.fillStyle = "rgba(16, 22, 35, 0.96)";
-  rr(ctx, x, y, w, h, 14); ctx.fill();
-  ctx.strokeStyle = "#f2c66d"; ctx.lineWidth = 2;
-  rr(ctx, x, y, w, h, 14); ctx.stroke();
-  if (tail) { // an equilateral pointer with the same border: base on the popup's edge, tip on the bus
-    const half = tail.side / 2, bx = tail.bx, by = tail.by;
-    ctx.beginPath();
-    ctx.moveTo(bx, by - half); ctx.lineTo(tail.x, tail.y); ctx.lineTo(bx, by + half); ctx.closePath();
-    ctx.fillStyle = "#101623"; ctx.fill();
-    ctx.beginPath();
-    ctx.moveTo(bx, by - half); ctx.lineTo(tail.x, tail.y); ctx.lineTo(bx, by + half);
-    ctx.stroke();
-    // the popup's own border is open where the pointer joins it
-    ctx.fillStyle = "#101623";
-    ctx.fillRect(bx - 2, by - half + 1, 4, tail.side - 2);
-  }
-  // one column: title, the car wash view, the instructions, the button
-  const ix = x + 12, iy = y + 40, iw = w - 24, ih = 150;
-  const k = iw / Wdyn;
-  ctx.save();
-  ctx.beginPath(); ctx.rect(ix, iy, iw, ih); ctx.clip();
-  ctx.translate(ix + offX * k, iy + offY * k + (ih - Hdyn * k) / 2); // scene centred in the picture
-  ctx.scale(k, k);
-  drawWashView(WASH_PREVIEW_BUS);
-  ctx.restore();
-  ctx.strokeStyle = "rgba(242, 198, 109, 0.6)"; ctx.lineWidth = 1;
-  rr(ctx, ix, iy, iw, ih, 8); ctx.stroke();
+  ctx.fillStyle = "rgba(5, 8, 16, 0.76)";
+  ctx.fillRect(-offX, -offY, Wdyn, Hdyn + offY);
+  rr(ctx, x, y, w, h, 14);
+  ctx.fillStyle = "rgba(16, 22, 35, 0.98)"; ctx.fill();
+  ctx.strokeStyle = "#f2c66d"; ctx.lineWidth = 2; ctx.stroke();
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillStyle = "#ffd36b"; ctx.font = "bold 20px system-ui";
-  ctx.fillText("Oto yıkama", x + w / 2, y + 20);
-  ctx.fillStyle = "#f4f6fb"; ctx.font = "14px system-ui";
-  ctx.fillText("Park etmiş otobüse dokun:", x + w / 2, y + 212);
-  ctx.fillText("uzun saplı fırçayla köpükle,", x + w / 2, y + 232);
-  ctx.fillText("hortumla durula", x + w / 2, y + 252);
+  ctx.fillStyle = "#ffd36b"; ctx.font = "bold 21px system-ui";
+  ctx.fillText(translateText("Yeni terminal"), x + w / 2, y + 25);
+  ctx.fillStyle = "#f4f6fb"; ctx.font = "15px system-ui";
+  ctx.fillText(translateText("Kilidi açmak ve satın almak için şartlara bak."), x + w / 2, y + 53);
+  ctx.fillText(translateText("Sonra terminalinde çalışmaya başla."), x + w / 2, y + 72);
   ctx.fillStyle = "#d92332"; rr(ctx, button.x, button.y, button.w, button.h, 8); ctx.fill();
   ctx.fillStyle = "#fff"; ctx.font = "bold 15px system-ui";
   ctx.fillText("Anladım", button.x + button.w / 2, button.y + button.h / 2);
   ctx.restore();
 }
 
+// The car wash's first-use tips: the rest of the view goes dark, the tool's station stays bright.
+function drawWashStationTip({ station, x, y, w, h, button }) {
+  const isBrush = arrivalInfoKind === "wash-brush";
+  ctx.save();
+  spotlightDimRects([{ x: station.x, y: station.y, w: station.w, h: station.h }], 8);
+  rr(ctx, x, y, w, h, 14);
+  ctx.fillStyle = "rgba(16, 22, 35, 0.98)"; ctx.fill();
+  ctx.strokeStyle = "#f2c66d"; ctx.lineWidth = 2; ctx.stroke();
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillStyle = "#ffd36b"; ctx.font = "bold 21px system-ui";
+  ctx.fillText(translateText(isBrush ? "Fırça" : "Hortum"), x + w / 2, y + 25);
+  ctx.fillStyle = "#f4f6fb"; ctx.font = "15px system-ui";
+  ctx.fillText(translateText(isBrush ? "Önce fırçayı kullanarak ön camı köpükle." : "Hortumu kullanarak köpüğü durula."), x + w / 2, y + 55);
+  ctx.fillStyle = "#d92332"; rr(ctx, button.x, button.y, button.w, button.h, 8); ctx.fill();
+  ctx.fillStyle = "#fff"; ctx.font = "bold 15px system-ui";
+  ctx.fillText("Anladım", button.x + button.w / 2, button.y + button.h / 2);
+  ctx.restore();
+}
+
+function drawExactTip({ x, y, w, h, button }) {
+  ctx.save();
+  // the room dims, but the exact ₺20 bill on the counter stays bright
+  const billX = counterExactBillX(), billTop = counterTopBillY() - 8 * COUNTER_BILL_U;
+  spotlightDimRects([{ x: billX - 4 * COUNTER_BILL_U, y: billTop, w: 8 * COUNTER_BILL_U, h: 16 * COUNTER_BILL_U }]);
+  rr(ctx, x, y, w, h, 14);
+  ctx.fillStyle = "rgba(16, 22, 35, 0.98)"; ctx.fill();
+  ctx.strokeStyle = "#f2c66d"; ctx.lineWidth = 2; ctx.stroke();
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillStyle = "#ffd36b"; ctx.font = "bold 21px system-ui";
+  ctx.fillText(translateText("Tam ödeme"), x + w / 2, y + 25);
+  ctx.fillStyle = "#f4f6fb"; ctx.font = "15px system-ui";
+  ctx.fillText(translateText("Bazı misafirler tam tutarı öder, para üstü gerekmez."), x + w / 2, y + 53);
+  ctx.fillText(translateText("Onlara dokunmana gerek yok. İsterse kolonya kullanır."), x + w / 2, y + 72);
+  ctx.fillStyle = "#d92332"; rr(ctx, button.x, button.y, button.w, button.h, 8); ctx.fill();
+  ctx.fillStyle = "#fff"; ctx.font = "bold 15px system-ui";
+  ctx.fillText("Anladım", button.x + button.w / 2, button.y + button.h / 2);
+  ctx.restore();
+}
+
+// One second after the manual wash is bought, a hand taps the first parked bus that hasn't been washed.
+// The clock stops while the hint is up; only the bus stays bright. Tapping the bus starts the wash.
+function washHintBus() {
+  if (!G.flags.washTutDone || G.flags.washHintDone || S.view !== "out" || arrivalInfoOpen || shopOpen) return null;
+  if (performance.now() < washHintDueAt) return null;
+  return buses.find(z => z.state === "stop" && !z.washDone) || null;
+}
+function drawWashHint() {
+  const b = washHintBus();
+  if (!b) return;
+  spotlightDimRects([{ x: b.cx - 36, y: b.cy - b.len / 2, w: 72, h: b.len }], 8); // the rest of the scene goes dark
+  drawChangeBubble(b.cx, b.cy - b.len / 2 - 6, "Oto yıkama", "Oto yıkamak için otobüse dokun");
+  drawTapCue(b.cx, b.cy);
+}
+
 function drawArrivalInfo() {
   if (!arrivalInfoOpen) return;
   const layout = arrivalInfoLayout();
-  if (layout.washTip) { drawWashTip(layout.x, layout.y, layout.w, layout.h, layout.button, layout.tail); return; }
-  const { isIntro, target, bus, isWc, x, y, w, h, tail, tipX, tipY, button } = arrivalInfoLayout();
+  if (layout.isExact) { drawExactTip(layout); return; }
+  if (layout.isWash) { drawWashStationTip(layout); return; }
+  if (layout.isCenter) { drawCenterTip(layout); return; }
+  const { isCash, isWashTill, isMapTip, isExit, target, bus, isWc, x, y, w, h, tail, tipX, tipY, button } = arrivalInfoLayout();
   ctx.save();
-  if (isIntro) {
+  if (isCash || isWashTill || isMapTip || isExit) {
     // Even-odd fill leaves the current tutorial target bright beneath the dim overlay.
     ctx.beginPath();
     ctx.rect(-offX, -offY, Wdyn, Hdyn + offY);
@@ -8533,9 +8919,13 @@ function drawArrivalInfo() {
     ctx.strokeStyle = "#ffd36b"; ctx.lineWidth = 2;
     rr(ctx, target.x, target.y, target.w, target.h, 8); ctx.stroke();
 
-    const copy = arrivalInfoKind === "intro-map"
-      ? ["Bölge haritası", "Terminallerini ve yolu buradan takip et.", "Yeni terminal de buradan satın alınır."]
-      : ["İşletme", "Her terminalin yükseltmeleri burada.", "Tuvalet ve oto yıkama için ayrı ayrı yükselt."];
+    const copy = isCash
+      ? ["Şirket kasası", "Misafirin ücreti buraya, kasaya girer.", "Kasaya dokun: işletme paneli açılır."].map(translateText)
+      : isMapTip
+      ? ["Bölge haritası", "Terminallerini ve yolu buradan takip et.", "Haritayı açmak için buna dokun."].map(translateText)
+      : isWashTill
+      ? ["Oto yıkama", "Elle yıkama ekipmanını satın al.", "Kasaya dokun: işletme paneli açılır."].map(translateText)
+      : ["Dışarı çık", "Rozet: tuvalette bekleyen misafir sayısı.", "Dışarı çıkmak için buna dokun."].map(translateText);
     ctx.fillStyle = "rgba(16, 22, 35, 0.98)";
     rr(ctx, x, y, w, h, 14); ctx.fill();
     ctx.strokeStyle = "#f2c66d"; ctx.lineWidth = 2;
@@ -8546,11 +8936,7 @@ function drawArrivalInfo() {
     ctx.fillStyle = "#f4f6fb"; ctx.font = "15px system-ui";
     ctx.fillText(copy[1], x + w / 2, y + 53);
     ctx.fillText(copy[2], x + w / 2, y + 72);
-    ctx.fillStyle = "#d92332"; rr(ctx, button.x, button.y, button.w, button.h, 8); ctx.fill();
-    ctx.fillStyle = "#fff"; ctx.font = "bold 15px system-ui";
-    ctx.fillText("Anladım", button.x + button.w / 2, button.y + button.h / 2);
-    ctx.restore();
-    return;
+    ctx.restore(); drawTapHandOn($(isExit ? "btnExit" : isMapTip ? "mapBtn" : "cashChip")); return;
   }
   // Outdoor tutorial bubbles continue below.
   ctx.fillStyle = "rgba(5, 8, 16, 0.76)";
@@ -8731,7 +9117,7 @@ function frame(now) {
   wcZoom = clamp(wcZoom + (toolInHand ? 1 : -1) * raw * 3, 0, 1);  // ~0.3 s camera zoom onto the toilets while a tool is in hand
   // panels, one-time tips and the WC tutorials (brush: from the brush hand appearing until the left toilet is spotless;
   // change: while the hand points at a bill) hold the clock
-  if (!paused && !modalOpen && !shopOpen && !arrivalInfoOpen && !wcTutHold()) {
+  if (!paused && !modalOpen && !shopOpen && !arrivalInfoOpen && !wcTutHold() && !washHintBus()) {
     const dt = raw * speed;
     advanceSimulation(dt, timeDt);
     stepScrub(Math.min(0.25, elapsed)); // real seconds — the scrub ignores the speed tier
@@ -8739,6 +9125,8 @@ function frame(now) {
   maybeShowArrivalInfo();
   drawScene();
   drawArrivalInfo();
+  drawWashHint();
+  updateShopTip();
   updateHUD();
   requestAnimationFrame(frame);
 }
@@ -8779,9 +9167,13 @@ function init() {
     location.reload();
   };
 
-  $("btnExit").onclick = () => setView("out");
+  $("btnExit").onclick = () => {
+    if (arrivalInfoOpen && arrivalInfoKind === "exit") dismissArrivalInfo();
+    if (S.view === "wash" && !G.flags.mapTipSeen) mapTipDueAt = performance.now() + 1000; // the map tip follows a second later
+    setView("out");
+  };
   $("btnPause").onclick = () => {
-    paused = !paused;
+    paused = !paused; pausedByMap = false;
     updateHUD();
   };
   $("btnSpeed").onclick = () => {
@@ -8797,11 +9189,7 @@ function init() {
     $("shop").classList.remove("hidden");
     $("btnShopClose").focus();
   };
-  const closeShop = () => {
-    shopOpen = false;
-    $("shop").classList.add("hidden");
-    save();
-  };
+  const closeShop = hideShop;
   // testing aid: booked like any other money, so the ledger and totals stay consistent
   $("btnTestCash").onclick = () => {
     applyTransaction("testCash", 100000, null, "test");
@@ -8809,7 +9197,7 @@ function init() {
     if (shopOpen) renderShop();
     save();
   };
-  $("mapBtn").onclick = () => setMapOpen(!mapOpen);
+  $("mapBtn").onclick = () => { if (arrivalInfoOpen && arrivalInfoKind === "map-tip") dismissArrivalInfo(); setMapOpen(!mapOpen); };
   $("btnMapClose").onclick = () => setMapPanelOpen(false);
   document.addEventListener("pointerdown", e => {
     // canvas presses are routed by routePress (it toggles the panel itself)
@@ -8819,10 +9207,11 @@ function init() {
     const btn = e.target.closest("button[data-sel], button[data-act]");
     if (btn && !btn.disabled) mapAction(btn);
   });
-  $("cashChip").onclick = openShop;
+  // the till: the cash tip is dismissed by tapping it, and that opens the business panel as usual
+  $("cashChip").onclick = () => { if (arrivalInfoOpen && arrivalInfoKind === "cash") dismissArrivalInfo(); if (arrivalInfoOpen && arrivalInfoKind === "wash-till") { arrivalInfoOpen = false; $("tapHand").classList.add("hidden"); } openShop(); };
   $("btnShopClose").onclick = closeShop;
   $("shop").addEventListener("click", e => {
-    if (e.target === $("shop")) { closeShop(); return; } // the backdrop
+    if (e.target === $("shop")) { if (!kolonyaTipActive()) closeShop(); return; } // the backdrop
     const btn = e.target.closest("button[data-act]");
     if (btn && !btn.disabled) shopAction(btn);
   });
@@ -8851,7 +9240,7 @@ function init() {
   const releasePointer = () => { pointerDown = false; activePointer = null; };
 
   canvas.addEventListener("pointerdown", (e) => {
-    if (paused || modalOpen) return;
+    if ((paused && !mapOpen) || modalOpen) return; // the paused map still takes taps
     if (activePointer !== null) return; // one pointer at a time — no two-finger gestures
     if (e.pointerType === "mouse" && e.button !== 0) return;
     if (e.pointerType !== "mouse") e.preventDefault(); // suppress the synthetic click/mouse events
@@ -8877,8 +9266,14 @@ function init() {
     const { x, y } = toGame(e);
     pointer.x = x; pointer.y = y;
     if (arrivalInfoOpen) {
-      if (e.pointerType === "mouse") canvas.style.cursor = arrivalInfoKind === "wc" && x >= WC_BUILDING.x && x <= WC_BUILDING.x + WC_BUILDING.w
-        && y >= WC_BUILDING.y && y <= WC_BUILDING.y + WC_BUILDING.h ? "pointer" : "default";
+      if (e.pointerType === "mouse") {
+        const { button } = arrivalInfoLayout();
+        // every tip with an Anladım button (the WC and till tips have none) gets the hand over it
+        const hasTipButton = arrivalInfoKind !== "wc" && arrivalInfoKind !== "cash" && arrivalInfoKind !== "exit" && arrivalInfoKind !== "wash-till" && arrivalInfoKind !== "map-tip";
+        const overTipButton = hasTipButton && x >= button.x && x <= button.x + button.w && y >= button.y && y <= button.y + button.h;
+        canvas.style.cursor = overTipButton || (arrivalInfoKind === "wc" && x >= WC_BUILDING.x && x <= WC_BUILDING.x + WC_BUILDING.w
+          && y >= WC_BUILDING.y && y <= WC_BUILDING.y + WC_BUILDING.h) ? "pointer" : "default";
+      }
       return;
     }
     if (activePointer === e.pointerId) {
@@ -8912,7 +9307,7 @@ function init() {
   canvas.addEventListener("pointerup", (e) => {
     const wasActive = activePointer === e.pointerId;
     releasePointer();
-    if (!wasActive || paused || modalOpen) return;
+    if (!wasActive || (paused && !mapOpen) || modalOpen) return; // the paused map still takes taps
     const { x, y } = toGame(e);
     // a press that moved this far was a drag (a hose spray, a scrub) — not a
     // tap. The threshold is in CSS px: a finger jitters more than a mouse, so
@@ -8944,7 +9339,7 @@ function init() {
     const padMin = isMouse ? 0 : clamp(10 / scale, 4, 16);
     if (arrivalInfoOpen) {
       const { button } = arrivalInfoLayout();
-      const onButton = arrivalInfoKind !== "wc" && x >= button.x - padMin && x <= button.x + button.w + padMin &&
+      const onButton = arrivalInfoKind !== "wc" && arrivalInfoKind !== "cash" && arrivalInfoKind !== "exit" && arrivalInfoKind !== "wash-till" && arrivalInfoKind !== "map-tip" && x >= button.x - padMin && x <= button.x + button.w + padMin &&
         y >= button.y - padMin && y <= button.y + button.h + padMin;
       if (onButton) dismissArrivalInfo();
       // the WC tip points at the restroom: clicking that building accepts it and walks in
@@ -8988,6 +9383,10 @@ function init() {
     // change tutorial: only the bill the hand points at responds
     const tutBill = changeTutNext();
     if (tutBill != null) {
+      if (counterTipPending()) { // the kolonya popup waits for the bottle tap: it splashes the guest, then the change step starts
+        if (hit(deskRect(COUNTER_IN.bottle, "bottle"))) { offerCologne(); G.flags.counterKolonyaTipSeen = true; save(); }
+        return;
+      }
       if (hit(deskRect(chipHit(COUNTER_IN.chips.find(c => c.d === tutBill)), "drawer"))) {
         giveChange(tutBill);
         if (tutBill === 20) G.flags.changeTutDone = true;
@@ -9055,7 +9454,7 @@ function init() {
     if (e.key === "t" || e.key === "T") { roadDebug = !roadDebug; return; } // traffic debug overlay
     if (arrivalInfoOpen) return; // the tip closes only from its on-screen button
     // the panel owns the keyboard while open (Tab / Enter / Space work its buttons)
-    if (shopOpen) { if (e.key === "Escape" || e.key === "u" || e.key === "U") closeShop(); return; }
+    if (shopOpen) { if ((e.key === "Escape" || e.key === "u" || e.key === "U") && !kolonyaTipActive()) closeShop(); return; }
     if ((e.key === "u" || e.key === "U") && !modalOpen && !mapOpen) { openShop(); return; }
     if ((e.key === "m" || e.key === "M") && !modalOpen) { setMapOpen(!mapOpen); return; }
     if (mapOpen) {
@@ -9079,7 +9478,7 @@ function init() {
       }
       // any interior view (counter room, car wash) steps back outside; from
       // outside the key keeps its original counter-room shortcut
-      if (!mapOpen) setView(S.view === "out" ? "wc" : "out");
+      if (!mapOpen && !washExitLocked()) setView(S.view === "out" ? "wc" : "out");
     }
   });
   window.addEventListener("beforeunload", save);
