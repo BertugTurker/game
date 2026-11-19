@@ -45,7 +45,7 @@ const SECONDS_PER_HOUR = 360;         // real seconds per in-game hour (at 1x) �
 const LANE_Y = 520;                   // main road lane (feet line)
 const LOT_NOSE = 182;                 // lot stalls: where a parked bus's nose points (building side)
 const PARKING_SLOT_COUNT = 10;
-const BAY_SLOTS = Array.from({ length: PARKING_SLOT_COUNT }, (_, i) => ({ cx: 170 + i * 84 })); // 10 parallel bus bays across the lot, 84px apart (a bus is 66px wide)
+const BAY_SLOTS = Array.from({ length: PARKING_SLOT_COUNT }, (_, i) => ({ cx: 170 + i * 92 })); // 10 parallel bus bays across the lot, 92px apart (a bus is 66px wide)
 const GRASS = { top: 88, bot: 170 };  // grass strip — the diner and WC stand on it
 const BUILD_DX = -225; // shifts the diner (drawn centred on x 705) to the centre of the view; the WC keeps its place beside it
 const BUILD_LIFT = 28; // the diner and WC stand this far back from the lot: the strip in front of them is a walkway for guests
@@ -384,10 +384,11 @@ const ENGLISH = [
   ["Anladım", "Got it"], ["Park etmiş otobüse dokun:", "Tap a parked bus:"], ["uzun saplı fırçayla köpükle,", "soap it with the long brush,"], ["hortumla durula", "then rinse with the hose"], ["Terminallerini ve yolu buradan takip et.", "Follow your terminals and the route from here."], ["Yeni terminal de buradan satın alınır.", "New terminals are also bought from here."], ["Her terminalin yükseltmeleri burada.", "Upgrades for each terminal are here."], ["Tuvalet ve oto yıkama için ayrı ayrı yükselt.", "Upgrade toilets and car wash separately."], ["Devam", "Continue"], ["İşe dön", "Back to work"], ["Dükkânı aç!", "Open the shop!"],
   ["🎉 ", "🎉 "], [" artık senin", " is now yours"], ["arızalandı — onarılana kadar elle çalış", "has broken down — operate it manually until repaired"],
   ["⚠️ Kayıt sorunu", "⚠️ Save problem"], ["💾 Kaydın aktarıldı", "💾 Save migrated"], ["Kayıt okunamadı", "Save could not be read"],
+  ["🧽 Ön camı temizle, sonra dışarı çıkabilirsin", "🧽 Finish cleaning the windshield, then you can go out"], ["🚪 Artık dışarı çıkabilirsin!", "🚪 You can go out now!"],
   ["✨ Ön cam pırıl pırıl!", "✨ The windshield is sparkling clean!"], ["😖 Tuvalet pis, misafir gitti", "😖 The restroom is dirty; the guest left"],
   ["🏃 Misafir ödemeden kaçıyor!", "🏃 A guest is leaving without paying!"], ["😠 Misafir ödemeden gitti", "😠 A guest left without paying"],
   ["⏱ Süre doldu, otobüs kalkıyor", "⏱ Time is up; the bus is leaving"], ["🤏 Bozuk para fark edildi", "🤏 Incorrect change noticed"],
-  ["🧴 Kolonya bitti — şişeyi doldur", "🧴 Cologne is empty — refill the bottle"], ["🍵 Taze çay geldi!", "🍵 Fresh tea is ready!"], ["🍵 Çayın zaten yolda", "🍵 Your tea is already on its way"], ["🍵 Çay geliyor!", "🍵 Tea is on its way!"],
+  ["🧴 Kolonya bitti — şişeyi doldur", "🧴 Cologne is empty — refill the bottle"], ["🧴 Kolonya şu an kullanımda", "🧴 Cologne is in use right now"],["🍵 Taze çay geldi!", "🍵 Fresh tea is ready!"], ["🍵 Çayın zaten yolda", "🍵 Your tea is already on its way"], ["🍵 Çay geliyor!", "🍵 Tea is on its way!"],
   ["WC açılması için ilk otobüsün gelmesi gerekiyor", "The first bus must arrive before the restroom opens"],
   ["şirket kasası", "company cash"], ["Terminale dön", "Return to terminal"], ["Bu terminale geç", "Switch to this terminal"], ["Satın al ·", "Buy ·"],
   ["KABİN SAYISI", "STALL COUNT"], ["2 kabin", "2 stalls"], ["4 kabin", "4 stalls"], ["6 kabin", "6 stalls"], ["8 kabin", "8 stalls"], ["10 kabin", "10 stalls"],
@@ -544,6 +545,7 @@ let arrivalInfoDelayUntil = 0;
 let exitTipDueAt = 0; // the exit-button tip shows 2 s after the exact-payment tip is dismissed
 let cashTipDueAt = 0; // the company-till tip shows 1 s after the tutorial guest leaves the stall
 let washTipDueAt = 0; // the car-wash till tip shows 2 s after the exit tip is dismissed
+let washExitHint = false; // the first car wash is open: a small popup by btnExit says when you can go out (reset on leaving the wash)
 let washHintDueAt = 0; // the bus car-wash hint shows 1 s after the manual wash is bought
 let pausedByMap = false; // the map pauses the whole game; closing it resumes only what it paused
 let mapReqDueAt = 0; // the centred requirements tip shows 1 s after the regional map tip is dismissed
@@ -2666,7 +2668,7 @@ function setView(v) {
   S.view = v;
   if (from !== "wc" && v === "wc") { markWcVisited(); wcEnteredAt = performance.now(); tutGuestEnterWc(); }
   viewFade = 1;
-  if (from === "wash") S.washBus = null; // we step back out; the bus keeps its washed state
+  if (from === "wash") { S.washBus = null; washExitHint = false; } // we step back out; the bus keeps its washed state
   if (v !== "wc") { toolInHand = null; wcZoom = 0; } // leaving the counter room — the hose goes back on its faucet, the camera resets
   save();
 }
@@ -2706,7 +2708,7 @@ function rinseSuds(b, w) {
     w.pend[i] = 0;
     any = true;
     const foam = w.f[i];
-    w.f[i] *= 0.15;
+    w.f[i] = 0; // a rinse washes the suds away completely — no leftover bubbles on clean glass
     w.g[i] = Math.max(0, w.g[i] - (wd.rinse[0] + wd.rinse[1] * foam));
   }
   if (any && w.g.every(v => v < 0.1)) finishWash(b);
@@ -2721,6 +2723,7 @@ const washExitLocked = () => {
 function openWash(b) {
   if (!carWashOpen()) return;
   G.flags.washHintDone = true;
+  washExitHint = !G.flags.firstWashDone; // only the first car wash gets the exit popup
   ensureWash(b);
   S.washBus = b.id;
   setView("wash");
@@ -2763,7 +2766,7 @@ function washApply(x, y) {
         }
       } else {
         const foam = w.f[i];                  // rinse: the suds do the real work
-        w.f[i] *= 0.15;
+        w.f[i] = 0;                           // and are washed away completely — no leftover bubbles
         w.g[i] = Math.max(0, w.g[i] - (wd.rinse[0] + wd.rinse[1] * foam));
       }
     }
@@ -3897,7 +3900,10 @@ function stepCQueue(f, q, auto, timeDt) {
   // the front of the line steps up to the pay spot
   const front = q[0];
   if (!front) return;
-  if (front.state === qState) {
+  // The exact-₺20 line waits for the guest ahead to finish their cologne splash
+  // (they've paid, but are still dripping at the spot) before the next one steps up.
+  const blockedBySplash = auto && exactSplashing();
+  if (front.state === qState && !blockedBySplash) {
     front.state = pState;
     front.payT = 0;
     front.patience = 12;
@@ -3963,10 +3969,11 @@ function finalizePayment(p) {
     if (i >= 0) { leaveCounterLine(q, i); break; }
   }
   collectPayment(p);
-  if (p.auto && hasCologne() && S.bottle > 0 && Math.random() < 0.6) {
+  // the exact-₺20 guest splashes only if the bottle is free (not mid-pour for anyone else)
+  if (p.auto && hasCologne() && S.bottle > 0 && !colognePouring() && Math.random() < 0.6) {
     p.cologne = true;
     p.state = "selfDripC";
-    p.dripT = 0.8;
+    p.dripT = COLOGNE_DRIP;
     S.bottle = Math.max(0, S.bottle - rand(8, 14));
     S.stats.cologne++;
     return; // self-splash after payment, then head out
@@ -4054,11 +4061,12 @@ function offerCologne() {
   if (!hasCologne()) return; // no bottle on the counter yet
   const front = facilities.C.queue[0];
   if (S.bottle <= 0) { toast("🧴 Kolonya bitti — şişeyi doldur", ""); return; }
+  if (colognePouring()) { toast("🧴 Kolonya şu an kullanımda", ""); return; } // one pour at a time: the bottle is in someone's hands
   if (!front || (front.state !== "payC" && front.state !== "doneC") || front.cologne || !atPaySpot(front)) return;
   front.cologne = true;
   front.colognePrev = front.state;
   front.state = "dripC";
-  front.dripT = 0.8;
+  front.dripT = COLOGNE_DRIP;
   S.bottle = Math.max(0, S.bottle - rand(8, 14));
   S.stats.cologne++;
 }
@@ -4400,7 +4408,7 @@ function updatePax(p, bus, dt, timeDt = dt) {
       p.disembark = false; // each guest leaves only once per stop
       p.__boarded = false; // off the bus for this cycle
       if (p.directWc) { p.directWc = false; p.refuseT = false; headToFacility("T", p, bus); } // first-ever bus: straight to the WC
-      else wander(p); // spread out to a random spot instead of queuing at the door
+      else evaluate(p, bus); // decide at once: full guests head for the WC, the rest wander off — nobody stands idle beside the bus
     } else if (bus.stoppedOnce && reached(p.boardAt) && !p.__boarded) {
       // One-shot per boarding cycle. Guests who stayed aboard keep their
       // heads in the windows (the flag stays true); only a guest who never
@@ -4673,7 +4681,7 @@ function resize() {
   // tall windows extra height (more sky/grass). The core stays centered, so
   // the scene fills the stage instead of letterboxing.
   const a = box.width / box.height;
-  // Never narrower than LOT_MIN_W: bay 10 ends near x≈968 and the lot must still show past it on
+  // Never narrower than LOT_MIN_W: bay 10 ends near x≈1034 and the lot must still show past it on
   // windows narrower than 2:1 (they used to clip at 960). Wider windows keep the exact H×aspect width.
   Wdyn = Math.max(H * a, LOT_MIN_W);
   Hdyn = Wdyn / a;
@@ -5103,6 +5111,7 @@ function drawOutdoor() {
     if (p.state !== "bus" && !isIndoorPax(p)) lotActors.push({ y: p.y, draw: () => drawPax(p) });
   lotActors.sort((a, b) => a.y - b.y);
   for (const actor of lotActors) actor.draw();
+  drawRoadBottomSign();
 
   // night overlay + lights
   if (nf > 0.05) {
@@ -5364,7 +5373,7 @@ function drawLot() {
 }
 
 // Highway pylon sign: tall black pole planted at the curb, white lightbox on top.
-const PYLON = { x: 110, base: LOT.bot - 2, top: 26, pw: 22, bw: 136, bh: 70 };
+const PYLON = { x: 96, base: LOT.bot - 2, top: 26, pw: 22, bw: 136, bh: 70 };
 
 function drawPylonFace() {
   const P = PYLON, cx = P.x, bx = cx - P.bw / 2, by = P.top;
@@ -5851,7 +5860,7 @@ function drawCounterIn() {
   withDesk("coins", drawCounterCoins); // loose change is always on the counter, independent of tea service
   // calculator, cologne
   if (hasCalc()) withDesk("calc", drawCalculator);
-  if (hasCologne()) withDesk("bottle", drawBottle);
+  if (hasCologne() && !colognePouring()) withDesk("bottle", drawBottle); // while poured, drawColognePour carries it
   if (hasTea()) {
     withDesk("tea", drawTea);
     withDesk("intercom", drawIntercom);
@@ -5904,22 +5913,54 @@ function drawCalculator() {
   }
 }
 
-function drawBottle() {
-  const b = COUNTER_IN.bottle;
+// r: the rect to draw into (desk space, or world space for the lifted bottle).
+// lifted: the bottle is in the air during a pour, so it casts no counter shadow.
+// the small white screw cap, centred on the origin in design units (34 x 11)
+function drawCologneCap() {
+  const cw = 34, ch = 11;
+  const cg = ctx.createLinearGradient(-cw / 2, 0, cw / 2, 0);
+  cg.addColorStop(0, "#c9ced6");
+  cg.addColorStop(0.25, "#ffffff");
+  cg.addColorStop(0.7, "#e6e9ee");
+  cg.addColorStop(1, "#aab0ba");
+  ctx.fillStyle = cg;
+  rr(ctx, -cw / 2, -ch / 2, cw, ch, 2); ctx.fill();
+  ctx.strokeStyle = "rgba(90, 100, 115, 0.5)"; ctx.lineWidth = 0.6;
+  rr(ctx, -cw / 2, -ch / 2, cw, ch, 2); ctx.stroke();
+  ctx.strokeStyle = "rgba(90, 100, 115, 0.35)";
+  for (let ry = -ch / 2 + 3; ry < ch / 2 - 1; ry += 2.2) {
+    ctx.beginPath(); ctx.moveTo(-cw / 2 + 1, ry); ctx.lineTo(cw / 2 - 1, ry); ctx.stroke();
+  }
+  ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+  ctx.fillRect(-cw / 2 + 3, -ch / 2 + 1, cw - 6, 1.5);
+}
+
+function drawBottle(b = COUNTER_IN.bottle, lifted = false, capOn = true) {
   const f = S.bottle / bottleMax();
   // a Pereja-style lemon cologne: ribbed pale-yellow plastic body, white
   // screw cap, cream label with brown bands and the PE·RE·JA hexagons
   // drawn at a fixed 54×108 design size, scaled down into the hit rect
   const x = 0, w = 54, cx = w / 2;
-  const capH = 15, top = capH, bot = 108, bodyH = bot - top;
+  const capH = 15, neckTop = 8, top = capH, bot = 108, bodyH = bot - top; // lid on: the original drawing; lid off: an open neck from 8
   const lblY = top + 26, lblH = 36;
   ctx.save();
   ctx.translate(b.x, b.y);
   ctx.scale(b.w / w, b.h / bot);
 
-  ctx.fillStyle = "rgba(0, 0, 0, 0.28)";                            // shadow on the counter
-  ctx.beginPath(); ctx.ellipse(cx + 3, bot, w / 2 + 3, 5, 0, 0, 7); ctx.fill();
+  if (!lifted) {
+    ctx.fillStyle = "rgba(0, 0, 0, 0.28)";                          // shadow on the counter
+    ctx.beginPath(); ctx.ellipse(cx + 3, bot, w / 2 + 3, 5, 0, 0, 7); ctx.fill();
+  }
 
+  if (!capOn) { // lid off: the open, threaded neck shows at the top
+    const nx = cx - 13, nw = 26;
+    rr(ctx, nx, neckTop, nw, top - neckTop + 2, 2);
+    ctx.fillStyle = "#f7f3d2"; ctx.fill();
+    ctx.strokeStyle = "rgba(150, 140, 60, 0.4)"; ctx.lineWidth = 0.8;
+    for (let ty = neckTop + 3; ty < top - 2; ty += 3.5) {
+      ctx.beginPath(); ctx.moveTo(nx, ty); ctx.lineTo(nx + nw, ty + 1); ctx.stroke();
+    }
+  }
   rr(ctx, x, top, w, bodyH, 9);                                     // body (empty plastic)
   ctx.fillStyle = "#f7f3d2";
   ctx.fill();
@@ -6019,19 +6060,20 @@ function drawBottle() {
   ctx.lineWidth = 1;
   rr(ctx, x, top, w, bodyH, 9); ctx.stroke();
 
-  // white screw cap
-  const capX = x + 9, capW = w - 18;
-  const cg = ctx.createLinearGradient(capX, 0, capX + capW, 0);
-  cg.addColorStop(0, "#c9ced6");
-  cg.addColorStop(0.25, "#ffffff");
-  cg.addColorStop(0.7, "#e6e9ee");
-  cg.addColorStop(1, "#aab0ba");
-  ctx.fillStyle = cg;
-  rr(ctx, capX, 0, capW, capH + 2, 4); ctx.fill();
-  ctx.strokeStyle = "rgba(90, 100, 115, 0.5)";
-  ctx.stroke();
-  ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
-  ctx.fillRect(capX + 3, 2, capW - 6, 1.5);
+  if (capOn) { // lid on: the original white screw cap
+    const capX = x + 9, capW = w - 18;
+    const cg = ctx.createLinearGradient(capX, 0, capX + capW, 0);
+    cg.addColorStop(0, "#c9ced6");
+    cg.addColorStop(0.25, "#ffffff");
+    cg.addColorStop(0.7, "#e6e9ee");
+    cg.addColorStop(1, "#aab0ba");
+    ctx.fillStyle = cg;
+    rr(ctx, capX, 0, capW, capH + 2, 4); ctx.fill();
+    ctx.strokeStyle = "rgba(90, 100, 115, 0.5)";
+    ctx.stroke();
+    ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+    ctx.fillRect(capX + 3, 2, capW - 6, 1.5);
+  }
 
   ctx.restore();
   ctx.textAlign = "left";
@@ -6186,7 +6228,7 @@ function drawCounterInPrompts() {
   ctx.textAlign = "center";
   const front = facilities.C.queue[0];
   if (atPaySpot(front)) {
-    if (hasCologne() && !front.cologne && S.bottle > 0 && (front.state === "payC" || front.state === "doneC")) {
+    if (hasCologne() && !front.cologne && S.bottle > 0 && !colognePouring() && (front.state === "payC" || front.state === "doneC")) {
       const b = deskRect(COUNTER_IN.bottle, "bottle");
       ctx.fillStyle = `rgba(255, 211, 107, ${pulse})`;
       ctx.font = "bold 10px system-ui, sans-serif";
@@ -7307,6 +7349,8 @@ function drawWCScene() {
   // stands at the pay spot is seen behind its ledge, not on top of it
   drawCounterIn();
   drawCounterInPrompts();
+  // the cologne pour is carried over the counter, so the bottle and its drops stay in view
+  for (const b of buses) for (const p of b.pax) if (isPouring(p)) drawColognePour(p);
   // draw bills on top of the counter
   for (const b of buses) for (const p of b.pax) {
     if (atCounter(p) && !receiptFlightEnds.has(p)) {
@@ -7514,6 +7558,11 @@ function drawRoads() {
   ctx.beginPath(); ctx.moveTo(-offX, ROAD.bot - 3); ctx.lineTo(Wdyn, ROAD.bot - 3); ctx.stroke();
   const km = termDef(G.activeTerminal).km;                         // road km from here to each end
   drawRoadSign(-offX + 8, ROAD.top - 30, DEST_A, km.a, false);
+}
+
+// The bottom-right destination sign is drawn after cars and buses so it stays on top of them.
+function drawRoadBottomSign() {
+  const km = termDef(G.activeTerminal).km;
   drawRoadSign(Wdyn - offX - 8, ROAD.bot - 25, DEST_B, km.b, true);
 }
 
@@ -7536,6 +7585,20 @@ function drawBus(b) {
 }
 
 const blinkOn = () => Math.floor(performance.now() / 380) % 2 === 0;
+
+// Wheel roll for a vehicle, in radians. Each draw adds the distance the body has
+// actually moved on screen since the last draw (rolling without slipping: the
+// angle is distance / wheel radius), so the wheels turn exactly as fast as the
+// vehicle travels, and stop when it slows to a halt. m is the mirror sign of the
+// drawing (-1 when the sprite is flipped for the other direction of travel).
+const wheelRoll = new WeakMap();
+function rollAngle(v, x, y, r, m) {
+  const p = wheelRoll.get(v);
+  const dx = p ? x - p.x : 0, dy = p ? y - p.y : 0;
+  const roll = (p ? p.roll : 0) + m * Math.sign(dx || 1) * Math.hypot(dx, dy) / r;
+  wheelRoll.set(v, { x, y, roll });
+  return roll;
+}
 
 // Side view — what the bus looks like while driving on the road: a flat-style
 // touring coach (+x = nose) in the bus's own colour (b.hue). Three roof pods, a
@@ -7684,7 +7747,8 @@ function drawBusSide(b, alpha) {
   ctx.fillStyle = "#14171c";
   rr(ctx, h + 4, -24, 5, 10, 1.5); ctx.fill();
 
-  // wheel arches and wheels
+  // wheel arches and wheels — the hubs turn with the bus's travel (see rollAngle)
+  const roll = rollAngle(b, b.cx, b.cy, 12, busDir(b));
   for (const wx of [rearW, frontW]) {
     ctx.fillStyle = mix("#2a2d33", "#0b0d10", nf);
     ctx.beginPath(); ctx.arc(wx, 32, 14.5, Math.PI, 0); ctx.lineTo(wx + 14.5, 31); ctx.lineTo(wx - 14.5, 31); ctx.fill();
@@ -7692,11 +7756,15 @@ function drawBusSide(b, alpha) {
     ctx.beginPath(); ctx.arc(wx, 34, 12, 0, 7); ctx.fill();
     ctx.fillStyle = mix("#b9bcc1", "#45484e", nf);
     ctx.beginPath(); ctx.arc(wx, 34, 7, 0, 7); ctx.fill();
+    ctx.save();
+    ctx.translate(wx, 34); ctx.rotate(roll);
     ctx.fillStyle = mix("#80848b", "#2e3136", nf);
     for (let k = 0; k < 8; k++) { // stud ring
       const a = k * Math.PI / 4;
-      ctx.beginPath(); ctx.arc(wx + Math.cos(a) * 4.4, 34 + Math.sin(a) * 4.4, 1, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(Math.cos(a) * 4.4, Math.sin(a) * 4.4, 1, 0, 7); ctx.fill();
     }
+    ctx.restore();
+    ctx.fillStyle = mix("#80848b", "#2e3136", nf);
     ctx.beginPath(); ctx.arc(wx, 34, 1.8, 0, 7); ctx.fill();
   }
   ctx.restore();
@@ -7822,6 +7890,8 @@ function drawCar(c) {
   ctx.fillRect(x, y - 18, 3, 4);
   ctx.fillStyle = nf > 0.4 ? "#ff4a3a" : "#b8322a";
   ctx.fillRect(x + 49, y - 18, 3, 4);
+  // wheels turn with the car's travel (see rollAngle); the car sprite is flipped for rightward traffic
+  const roll = rollAngle(c, x, y, 5.5, c.v > 0 ? -1 : 1);
   for (const wx of [x + 12, x + 40]) {
     ctx.fillStyle = "#141821";
     ctx.beginPath(); ctx.arc(wx, y - 4, 5.5, 0, 7); ctx.fill();
@@ -7860,63 +7930,110 @@ function paxGait(p) {
   return a;
 }
 
-// Cologne splash on a guest at the counter (dripC / selfDripC, 0.8 s). A lemon
-// jet arcs from the bottle's nozzle onto the guest's head and hands, beads ride
-// the stream, the impact bursts into droplets and a pale mist, then fresh
-// sparkles rise and fade. Drawn in world coords, like the rest of the guest.
-function drawCologneSplash(p, x, y, s) {
-  const f = clamp(1 - p.dripT / 0.8, 0, 1);
-  const b = deskRect(COUNTER_IN.bottle, "bottle");
-  const from = { x: b.x + b.w / 2, y: b.y + b.h * 0.12 };   // the nozzle
-  const to = { x: x + 1.5 * s, y: y - 13 * s };             // head and hands
-  const apex = Math.min(from.y, to.y) - 24 * s;             // the jet peaks above both
-  const along = t => {                                      // quadratic arc, t in 0..1
-    const u = 1 - t, mx = (from.x + to.x) / 2;
-    return { x: u * u * from.x + 2 * u * t * mx + t * t * to.x,
-             y: u * u * from.y + 2 * u * t * apex + t * t * to.y };
+// Cologne pour at the counter (dripC / selfDripC, COLOGNE_DRIP seconds). The
+// bottle rises above the guest, tips 140° to the right and shakes over the
+// guest's two cupped hands, and drops fall from its nozzle into them. Drawn in
+// world coords, like the rest of the guest; the bottle is carried by here while
+// it is out of its place on the counter (see colognePouring).
+const COLOGNE_DRIP = 3.4;                                     // seconds of the whole pour
+const CAP_OFF = 0.4, POUR_LIFT = 0.85, POUR_TILT = 1.25, POUR_END = 2.55; // cap off | lift | tip (then shake) until POUR_END
+const BOTTLE_BACK = 3.0, CAP_BACK = 2.9;                       // bottle back on the counter | cap flies back onto the neck
+const POUR_ANGLE = 140 * Math.PI / 180;
+const POUR_UP = { x: Math.sin(POUR_ANGLE), y: -Math.cos(POUR_ANGLE) }; // the neck's direction once tipped: down and to the right
+const POUR_GAP = 0.07, POUR_FALL = 0.3, POUR_SPLASH = 0.25;   // drop interval, fall time, impact time
+const isPouring = p => p.state === "dripC" || p.state === "selfDripC";
+const colognePouring = () => buses.some(b => b.pax.some(isPouring));
+// An exact-₺20 guest who paid and is splashing themselves: the exact line holds
+// everyone behind them until that splash is done (see stepCQueue).
+const exactSplashing = () => buses.some(b => b.pax.some(p => p.state === "selfDripC"));
+// the cupped hands, stretched out to the guest's left (screen left, toward the bottle):
+// i > 0 is the hand on the viewer's right, i < 0 the one on the viewer's left
+const pourHand = (i, x, y, s) => ({ x: x + (i > 0 ? -2.8 : -5.6) * s, y: y - 9.5 * s });
+// the horizontal shake: left, right, left, right
+const shakeX = (e, s) => Math.sin(e * 26) * 0.5 * s; // same speed (26), a third of the sway
+const pourHash = (k, j) => { const v = Math.sin(k * 12.9898 + j * 78.233) * 43758.5453; return v - Math.floor(v); };
+// the pour's fixed points for a guest at (x, y): N the nozzle over the hands, H
+// the midpoint between them, and the bottle's centre at rest, upright above the
+// head and tipped (its neck on N)
+function pourGeom(r, x, y, s) {
+  const H = { x: x - 4.2 * s, y: y - 9.5 * s };             // between the hands, to the guest's left
+  const N = { x: H.x, y: y - 15 * s };
+  const half = r.h / 2;
+  const rest = { x: r.x + r.w / 2, y: r.y + r.h / 2 };
+  const tilt = { x: N.x - half * POUR_UP.x, y: N.y - half * POUR_UP.y };
+  return {
+    H, N, half, rest,
+    lift: { x: (rest.x + tilt.x) / 2, y: (rest.y + tilt.y) / 2 }, // a modest raise, not above the head
+    tilt,
   };
-  const fade = v => clamp(v, 0, 1).toFixed(2);
-  const flight = clamp(f / 0.5, 0, 1);                      // the jet lands in the first half
-  const ip = clamp((f - 0.45) / 0.55, 0, 1);                // impact progress
-  const ease = 1 - (1 - ip) * (1 - ip);
+}
+// the bottle's centre and tilt at pour time e (0..COLOGNE_DRIP)
+function pourPose(g, e, s) {
+  const mix = (a, b, u) => a + (b - a) * u;
+  const seg = (a, b) => { const u = clamp((e - a) / (b - a), 0, 1); return u * u * (3 - 2 * u); };
+  if (e < POUR_LIFT) { const u = seg(CAP_OFF, POUR_LIFT); return { x: mix(g.rest.x, g.lift.x, u), y: mix(g.rest.y, g.lift.y, u), rot: 0 }; }
+  if (e < POUR_TILT) { const u = seg(POUR_LIFT, POUR_TILT); return { x: mix(g.lift.x, g.tilt.x, u), y: mix(g.lift.y, g.tilt.y, u), rot: u * POUR_ANGLE }; }
+  if (e < POUR_END) { // tipped: shaken mostly left and right, barely tilting
+    return { x: g.tilt.x + shakeX(e, s), y: g.tilt.y, rot: POUR_ANGLE + Math.sin(e * 26) * 0.015 };
+  }
+  const u = seg(POUR_END, BOTTLE_BACK);
+  return { x: mix(g.tilt.x, g.rest.x, u), y: mix(g.tilt.y, g.rest.y, u), rot: POUR_ANGLE * (1 - u) };
+}
+function drawColognePour(p) {
+  const s = wcPaxK(p.y, p.x) * (PAX_TYPES[p.type] || PAX_TYPES.m).scale;
+  const r = deskRect(COUNTER_IN.bottle, "bottle");
+  const g = pourGeom(r, p.x, p.y, s);
+  const e = clamp(COLOGNE_DRIP - p.dripT, 0, COLOGNE_DRIP);
+  const pose = pourPose(g, e, s);
+  ctx.save();                                                // the bottle, carried in the air (no cap yet)
+  ctx.translate(pose.x, pose.y); ctx.rotate(pose.rot);
+  drawBottle({ x: -r.w / 2, y: -r.h / 2, w: r.w, h: r.h }, true, false);
+  ctx.restore();
 
+  // the cap: unscrewed and set down on the counter, then screwed back on at the end
+  const ky = r.h / 108, kx = r.w / 54;
+  const onNeck = { x: r.x + r.w / 2, y: r.y + 5.5 * ky };
+  const onCounter = { x: r.x + r.w * 1.7, y: r.y + r.h - 5.5 * ky };
+  const capSeg = (a, b) => { const u = clamp((e - a) / (b - a), 0, 1); return u * u * (3 - 2 * u); };
+  let cap;
+  if (e < CAP_OFF) {                                          // lifted off the neck and set down
+    const u = capSeg(0, CAP_OFF);
+    cap = { x: onNeck.x + (onCounter.x - onNeck.x) * u, y: onNeck.y + (onCounter.y - onNeck.y) * u - Math.sin(Math.PI * u) * 14 * ky };
+  } else if (e < CAP_BACK) {
+    cap = onCounter;
+  } else {                                                    // picked up and screwed back on
+    const u = capSeg(CAP_BACK, COLOGNE_DRIP);
+    cap = { x: onCounter.x + (onNeck.x - onCounter.x) * u, y: onCounter.y + (onNeck.y - onCounter.y) * u - Math.sin(Math.PI * u) * 14 * ky };
+  }
+  ctx.save();
+  ctx.translate(cap.x, cap.y); ctx.scale(kx, ky);
+  drawCologneCap();
+  ctx.restore();
+
+  const fade = v => clamp(v, 0, 1).toFixed(2);
   ctx.save();
   ctx.lineCap = "round";
-  if (flight > 0 && ip < 1) {                               // the stream
-    ctx.strokeStyle = `rgba(236, 225, 127, ${fade(0.55 * (1 - ip))})`;
-    ctx.lineWidth = 1.2 * s;
-    ctx.beginPath();
-    for (let i = 0; i <= 12; i++) {
-      const q = along(flight * i / 12);
-      if (i) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y);
-    }
-    ctx.stroke();
-  }
-  for (let k = 0; k < 5; k++) {                             // beads riding the arc
-    const t = flight - k * 0.09;
-    if (t <= 0 || t > 1 || ip > 0.3) continue;
-    const q = along(t);
-    ctx.fillStyle = `rgba(242, 230, 138, ${fade(0.9 - 0.3 * t)})`;
-    ctx.beginPath(); ctx.arc(q.x, q.y, 1.5 * s, 0, 7); ctx.fill();
-  }
-  if (ip > 0) {                                             // the impact
-    const mist = ctx.createRadialGradient(to.x, to.y, 2 * s, to.x, to.y, (9 + 9 * ease) * s);
-    mist.addColorStop(0, `rgba(248, 242, 178, ${fade(0.5 * (1 - ip))})`);
-    mist.addColorStop(1, "rgba(248, 242, 178, 0)");
-    ctx.fillStyle = mist;
-    ctx.beginPath(); ctx.arc(to.x, to.y, (9 + 9 * ease) * s, 0, 7); ctx.fill();
-    for (let k = 0; k < 10; k++) {                          // droplets flung outward
-      const ang = k * 2.39996, rad = (3 + 13 * ease) * s;
-      ctx.fillStyle = `rgba(236, 225, 127, ${fade(0.9 * (1 - ip))})`;
-      ctx.beginPath();
-      ctx.arc(to.x + Math.cos(ang) * rad, to.y + Math.sin(ang) * rad * 0.7 + ip * 3 * s, (1.1 + 0.4 * (k % 3)) * s, 0, 7);
-      ctx.fill();
-    }
-    ctx.fillStyle = `rgba(255, 252, 215, ${fade(1 - ip)})`; // fresh sparkles rising and fading
-    for (let k = -1; k <= 1; k++) {
-      const cx = to.x + k * 6 * s, cy = to.y - 4 * s - ip * 9 * s;
-      ctx.fillRect(cx - 2.2 * s, cy - 0.35 * s, 4.4 * s, 0.7 * s);
-      ctx.fillRect(cx - 0.35 * s, cy - 2.2 * s, 0.7 * s, 4.4 * s);
+  for (let k = 0; ; k++) {                                   // one drop every POUR_GAP, from the nozzle into the hands
+    const t0 = POUR_TILT + 0.12 + k * POUR_GAP;
+    const a = e - t0;
+    if (a < 0 || t0 > POUR_END - 0.15) break;
+    if (a > POUR_FALL + POUR_SPLASH) continue;
+    const H = { x: g.H.x + (pourHash(k, 1) - 0.5) * 3.2 * s, y: g.H.y + (pourHash(k, 2) - 0.5) * 1.2 * s };
+    if (a < POUR_FALL) {                                     // falling: accelerating straight down
+      const u = a / POUR_FALL;
+      const sx = g.N.x + shakeX(t0, s);                    // the drop leaves the nozzle where it was shaken to
+      const dx = sx + (H.x - sx) * u, dy = g.N.y + (H.y - g.N.y) * u * u;
+      ctx.fillStyle = `rgba(236, 225, 127, ${fade(0.95 - 0.3 * u)})`;
+      ctx.beginPath(); ctx.ellipse(dx, dy, 0.5 * s, 0.85 * s, 0, 0, 7); ctx.fill();
+    } else {                                                 // landing in the palms: a few beads and a pale mist
+      const q = (a - POUR_FALL) / POUR_SPLASH;
+      ctx.fillStyle = `rgba(248, 242, 178, ${fade(0.35 * (1 - q))})`;
+      ctx.beginPath(); ctx.ellipse(H.x, H.y, (2 + 4 * q) * s, (0.8 + 1.2 * q) * s, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = `rgba(236, 225, 127, ${fade(0.9 * (1 - q))})`;
+      for (let j = 0; j < 4; j++) {
+        const ang = -Math.PI / 2 + (j - 1.5) * 0.8, rad = (1.5 + 4 * q) * s;
+        ctx.beginPath(); ctx.arc(H.x + Math.cos(ang) * rad, H.y + Math.sin(ang) * rad * 0.6, 0.5 * s, 0, 7); ctx.fill();
+      }
     }
   }
   ctx.restore();
@@ -7987,14 +8104,15 @@ function drawPax(p, k = 1) {
   let reach = null;
   if (p.state === "serveR") reach = { x: x + 5.2 * s, y: y - 8 * s };
   else if (holdsBill(p)) reach = { x: x + 4.6 * s, y: y - 7.2 * s };
-  else if (p.state === "dripC" || p.state === "selfDripC") reach = { x: x + 3.8 * s, y: y - 15 * s };
   const armW = (isW ? 1.6 : 1.9) * s;
   const upward = g.back && !faceOn && !side; // walking up the screen (away from the viewer)
   const arm = (i, back) => {
     const ax = x + (side ? -0.3 : i * 3.3) * s, ay = shY;
     let hx, hy, ex, ey;
-    if (i > 0 && reach) {
-      hx = reach.x; hy = reach.y;
+    const pourTo = isPouring(p) ? pourHand(i, x, y, s) : null; // both hands cupped in front
+    if (pourTo || (i > 0 && reach)) {
+      const tgt = pourTo || reach;
+      hx = tgt.x; hy = tgt.y;
       // a posed arm's elbow drops below the shoulder→hand line, never kinks up
       const vx = hx - ax, vy = hy - ay, vl = Math.hypot(vx, vy) || 1;
       let px = -vy / vl, py = vx / vl;
@@ -8016,6 +8134,11 @@ function drawPax(p, k = 1) {
     ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ex, ey); ctx.lineTo(hx, hy); ctx.stroke();
     ctx.fillStyle = skin;
     ctx.beginPath(); ctx.arc(hx, hy, armW * 0.55, 0, 7); ctx.fill();
+    if (pourTo) { // a cupped palm, open to the sky, its rim curving up
+      ctx.beginPath(); ctx.ellipse(hx, hy, 1.7 * s, 1.1 * s, 0, 0, 7); ctx.fill();
+      ctx.strokeStyle = "rgba(90, 50, 30, 0.35)"; ctx.lineWidth = 0.5 * s;
+      ctx.beginPath(); ctx.ellipse(hx, hy - 0.2 * s, 1.2 * s, 0.6 * s, 0, 0, Math.PI); ctx.stroke();
+    }
   };
   // the arm on the far side of the walking direction sits behind the torso
   arm(-dir, true);
@@ -8152,7 +8275,6 @@ function drawPax(p, k = 1) {
     ctx.fillStyle = "#ffd36b";
     ctx.beginPath(); ctx.arc(x + 6 * s, y - 8 * s, 2.5 * s, 0, 7); ctx.fill();
   }
-  if (p.state === "dripC" || p.state === "selfDripC") drawCologneSplash(p, x, y, s);
   // a red badge over the head of a runaway still inside the WC — the "click
   // to catch" signal (hidden while a scrub runs — nobody is catchable then).
   // Queue-leavers get no badge: they are never catchable.
@@ -8232,6 +8354,20 @@ function setCashChip(text, value) {
   }));
 }
 
+// First car wash: a small popup beside btnExit. It asks for the windshield while
+// the wash is locked, then says you can go out once the bus is spotless.
+function updateExitHint() {
+  const hint = $("exitHint");
+  const show = washExitHint && S.view === "wash";
+  hint.classList.toggle("hidden", !show);
+  if (!show) return;
+  const text = translateText(washExitLocked() ? "🧽 Ön camı temizle, sonra dışarı çıkabilirsin" : "🚪 Artık dışarı çıkabilirsin!");
+  if (hint.textContent !== text) hint.textContent = text;
+  const r = $("btnExit").getBoundingClientRect(), w = hint.offsetWidth, h = hint.offsetHeight;
+  hint.style.left = Math.max(8, r.left - w - 10) + "px";
+  hint.style.top = Math.max(8, r.top + r.height / 2 - h / 2) + "px";
+}
+
 function updateHUD() {
   setText("statServed", "👥 " + S.stats.served);
   const hh = Math.floor(G.clock.time), mm = Math.floor((G.clock.time % 1) * 60);
@@ -8254,6 +8390,7 @@ function updateHUD() {
   for (const id of ["btnBurger", "btnPause", "btnSpeed", "btnReset", "mapBtn", "btnExit"])
     $(id).disabled = tipLock && !(arrivalInfoKind === "exit" && id === "btnExit") && !(arrivalInfoKind === "map-tip" && id === "mapBtn");
   $("btnExit").disabled = $("btnExit").disabled || washExitLocked();
+  updateExitHint();
   setText("statCash", "💰 " + fmtTL(G.company.cash));
   setText("statTerm", "📍 " + terminalName(G.activeTerminal));
   setText("btnPause", paused ? "▶" : "⏸");
